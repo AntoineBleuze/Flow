@@ -29,7 +29,9 @@ class TrafficService: ObservableObject {
     
     func fetchTrafficInfo() {
         let apiKey = IDFMService.shared.apiKey
+        print("🔑 API Key présente: \(!apiKey.isEmpty)")
         guard !apiKey.isEmpty else { 
+            print("❌ Pas de clé API!")
             isRefreshing = false
             return 
         }
@@ -42,11 +44,14 @@ class TrafficService: ObservableObject {
         let sinceString = dateFormatter.string(from: since)
         
         let urlString = "https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia/line_reports/line_reports?count=100&since=\(sinceString)"
+        print("🌐 URL API: \(urlString)")
         guard let url = URL(string: urlString) else { 
+            print("❌ URL invalide!")
             isRefreshing = false
             return 
         }
         
+        print("📡 Démarrage de la requête API...")
         fetchPage(url: url, accumulatedDisruptions: [])
     }
     
@@ -62,15 +67,31 @@ class TrafficService: ObservableObject {
             .sink(receiveCompletion: { [weak self] completion in
                 if case .failure(let error) = completion {
                     print("❌ Error fetching traffic info: \(error)")
+                    if let decodingError = error as? DecodingError {
+                        switch decodingError {
+                        case .keyNotFound(let key, let context):
+                            print("❌ Key '\(key.stringValue)' not found: \(context.debugDescription)")
+                        case .dataCorrupted(let context):
+                            print("❌ Data corrupted: \(context.debugDescription)")
+                        case .typeMismatch(let type, let context):
+                            print("❌ Type mismatch for type \(type): \(context.debugDescription)")
+                        case .valueNotFound(let type, let context):
+                            print("❌ Value not found for type \(type): \(context.debugDescription)")
+                        @unknown default:
+                            print("❌ Unknown decoding error")
+                        }
+                    }
                     self?.isRefreshing = false
                 }
             }, receiveValue: { [weak self] response in
+                print("📦 Reçu \(response.disruptions.count) perturbations dans cette page")
                 var allDisruptions = accumulatedDisruptions
                 allDisruptions.append(contentsOf: response.disruptions)
                 
                 // Check for next page
                 if let nextLink = response.links?.first(where: { $0.rel == "next" }),
                    let nextUrl = URL(string: nextLink.href) {
+                    print("➡️ Page suivante trouvée, chargement...")
                     self?.fetchPage(url: nextUrl, accumulatedDisruptions: allDisruptions)
                 } else {
                     // No more pages, update lines
@@ -84,32 +105,65 @@ class TrafficService: ObservableObject {
     }
     
     private func updateLines(with disruptions: [Disruption]) {
+        print("\n🔄 === DÉBUT DE LA MISE À JOUR DES LIGNES ===")
+        print("📊 Total de perturbations reçues: \(disruptions.count)")
+        
         // Remettre tout le monde à normal d'abord
         var updatedLines = self.getAllLines()
         let now = Date()
         
-        for disruption in disruptions {
+        print("⏰ Date actuelle: \(now)")
+        
+        var processedCount = 0
+        var activeCount = 0
+        var futureCount = 0
+        var matchedCount = 0
+        
+        for (index, disruption) in disruptions.enumerated() {
+            processedCount += 1
+            print("\n📌 Perturbation #\(index + 1) - ID: \(disruption.id)")
+            print("   Status: \(disruption.status)")
+            print("   Cause: \(disruption.cause ?? "N/A")")
+            
             // Vérifier si la perturbation est vraiment active maintenant en vérifiant les application_periods
-            guard let impactedObjects = disruption.impactedObjects else { continue }
+            guard let impactedObjects = disruption.impactedObjects else { 
+                print("   ⚠️ Pas d'objets impactés, skip")
+                continue 
+            }
+            
+            print("   🎯 \(impactedObjects.count) objet(s) impacté(s)")
             
             // Vérifier si la perturbation est dans une période d'application active
             let isCurrentlyActive = self.isDisruptionActive(disruption, at: now)
+            if isCurrentlyActive {
+                activeCount += 1
+                print("   ✅ PERTURBATION ACTIVE MAINTENANT")
+            } else {
+                futureCount += 1
+                print("   ⏭️ Perturbation future")
+            }
             
             for object in impactedObjects {
                 guard let lineCode = object.ptObject?.line?.code,
                       let commercialModeId = object.ptObject?.line?.commercialMode?.id
-                else { continue }
+                else { 
+                    print("      ⚠️ Pas de code ligne ou mode commercial")
+                    continue 
+                }
+                
+                print("      🚇 Recherche ligne: \(lineCode) (mode: \(commercialModeId))")
                 
                 // Trouver la ligne correspondante dans notre liste avec un matching strict sur le mode
-                if let index = updatedLines.firstIndex(where: { line in
+                if let lineIndex = updatedLines.firstIndex(where: { line in
                     let match = self.matchLine(line: line, code: lineCode, modeId: commercialModeId)
-                    if match {
-                        print("✅ Match found for \(line.lineId) with disruption: \(disruption.cause ?? "No cause")")
-                    }
                     return match
                 }) {
+                    matchedCount += 1
+                    print("      ✅ Match trouvé: Ligne \(updatedLines[lineIndex].lineId) (\(updatedLines[lineIndex].type.rawValue))")
+                    
                     // Mapping de la sévérité
                     let severityEffect = disruption.severity?.effect ?? "UNKNOWN"
+                    print("      📈 Sévérité: \(severityEffect)")
                     
                     var newStatus: LineStatus = .normal
                     if severityEffect == "NO_SERVICE" || severityEffect == "REDUCED_SERVICE" || severityEffect == "SIGNIFICANT_DELAYS" {
@@ -120,16 +174,23 @@ class TrafficService: ObservableObject {
                         newStatus = .warning
                     }
                     
+                    print("      🏷️ Nouveau statut calculé: \(newStatus)")
+                    
                     // Si la ligne est déjà en critique, on ne la repasse pas en warning
-                    if updatedLines[index].status == .critical && newStatus == .warning {
+                    if updatedLines[lineIndex].status == .critical && newStatus == .warning {
                         newStatus = .critical
                     }
                     
                     // Mise à jour du statut global seulement si c'est vraiment actif maintenant
                     if isCurrentlyActive {
-                        if updatedLines[index].status == .normal {
-                             updatedLines[index].status = newStatus
+                        if updatedLines[lineIndex].status == .normal {
+                             updatedLines[lineIndex].status = newStatus
+                             print("      ✏️ Statut mis à jour: .normal -> \(newStatus)")
+                        } else {
+                            print("      ℹ️ Statut déjà: \(updatedLines[lineIndex].status)")
                         }
+                    } else {
+                        print("      ⏭️ Pas actif maintenant, statut non modifié")
                     }
                     
                     // Création de l'info trafic
@@ -149,38 +210,58 @@ class TrafficService: ObservableObject {
                         endTime: nil
                     )
                     
-                    updatedLines[index].trafficInfos.append(info)
+                    updatedLines[lineIndex].trafficInfos.append(info)
+                    print("      ➕ Info trafic ajoutée (\(period))")
+                } else {
+                    print("      ❌ Aucun match trouvé pour \(lineCode) (\(commercialModeId))")
                 }
             }
         }
         
         self.lines = updatedLines
-        print("📊 Updated lines: \(updatedLines.filter { $0.status != .normal }.count) lines with incidents")
+        let linesWithIncidents = updatedLines.filter { $0.status != .normal }.count
+        
+        print("\n📊 === RÉSUMÉ ===")
+        print("   Perturbations traitées: \(processedCount)")
+        print("   Perturbations actives: \(activeCount)")
+        print("   Perturbations futures: \(futureCount)")
+        print("   Matches trouvés: \(matchedCount)")
+        print("   Lignes avec incidents: \(linesWithIncidents)")
+        print("=== FIN DE LA MISE À JOUR ===\n")
     }
     
     /// Vérifie si une perturbation est active à un moment donné
     private func isDisruptionActive(_ disruption: Disruption, at date: Date) -> Bool {
         // Si pas de périodes d'application, on se fie au status
         guard let applicationPeriods = disruption.applicationPeriods, !applicationPeriods.isEmpty else {
-            return disruption.status == "active"
+            let result = disruption.status == "active"
+            print("      📅 Pas de périodes d'application, basé sur status: \(result)")
+            return result
         }
+        
+        print("      📅 Vérification de \(applicationPeriods.count) période(s) d'application")
         
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyyMMdd'T'HHmmss"
         dateFormatter.timeZone = TimeZone(identifier: "Europe/Paris")
         
         // Vérifier si la date actuelle est dans une des périodes d'application
-        for period in applicationPeriods {
+        for (index, period) in applicationPeriods.enumerated() {
             guard let beginDate = dateFormatter.date(from: period.begin),
                   let endDate = dateFormatter.date(from: period.end) else {
+                print("         ❌ Période #\(index + 1): Impossible de parser les dates")
                 continue
             }
             
-            if date >= beginDate && date <= endDate {
+            let isInPeriod = date >= beginDate && date <= endDate
+            print("         📆 Période #\(index + 1): \(period.begin) -> \(period.end) = \(isInPeriod ? "✅ ACTIF" : "❌ Pas actif")")
+            
+            if isInPeriod {
                 return true
             }
         }
         
+        print("      ❌ Aucune période active trouvée")
         return false
     }
     
