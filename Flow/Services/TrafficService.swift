@@ -4,6 +4,8 @@ import Combine
 
 class TrafficService: ObservableObject {
     @Published var lines: [TransportLine] = []
+    @Published var isRefreshing: Bool = false
+    @Published var lastUpdateTime: Date?
     private var cancellables = Set<AnyCancellable>()
     
     init() {
@@ -13,12 +15,37 @@ class TrafficService: ObservableObject {
         self.fetchTrafficInfo()
     }
     
+    /// Rafraîchir manuellement les informations de trafic
+    func refresh() {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        
+        // Réinitialiser toutes les lignes à normal
+        self.lines = self.getAllLines()
+        
+        // Recharger les données
+        self.fetchTrafficInfo()
+    }
+    
     func fetchTrafficInfo() {
         let apiKey = IDFMService.shared.apiKey
-        guard !apiKey.isEmpty else { return }
+        guard !apiKey.isEmpty else { 
+            isRefreshing = false
+            return 
+        }
         
-        let urlString = "https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia/line_reports/line_reports?count=100"
-        guard let url = URL(string: urlString) else { return }
+        // Filtrer les perturbations depuis 24h et jusqu'à 7 jours dans le futur
+        let since = Calendar.current.date(byAdding: .hour, value: -24, to: Date())!
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyyMMdd'T'HHmmss"
+        dateFormatter.timeZone = TimeZone(identifier: "Europe/Paris")
+        let sinceString = dateFormatter.string(from: since)
+        
+        let urlString = "https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia/line_reports/line_reports?count=100&since=\(sinceString)"
+        guard let url = URL(string: urlString) else { 
+            isRefreshing = false
+            return 
+        }
         
         fetchPage(url: url, accumulatedDisruptions: [])
     }
@@ -32,9 +59,10 @@ class TrafficService: ObservableObject {
             .map { $0.data }
             .decode(type: LineReportResponse.self, decoder: JSONDecoder())
             .receive(on: DispatchQueue.main)
-            .sink(receiveCompletion: { completion in
+            .sink(receiveCompletion: { [weak self] completion in
                 if case .failure(let error) = completion {
                     print("❌ Error fetching traffic info: \(error)")
+                    self?.isRefreshing = false
                 }
             }, receiveValue: { [weak self] response in
                 var allDisruptions = accumulatedDisruptions
@@ -48,6 +76,8 @@ class TrafficService: ObservableObject {
                     // No more pages, update lines
                     print("✅ Finished fetching traffic info. Total disruptions: \(allDisruptions.count)")
                     self?.updateLines(with: allDisruptions)
+                    self?.isRefreshing = false
+                    self?.lastUpdateTime = Date()
                 }
             })
             .store(in: &cancellables)
@@ -56,11 +86,14 @@ class TrafficService: ObservableObject {
     private func updateLines(with disruptions: [Disruption]) {
         // Remettre tout le monde à normal d'abord
         var updatedLines = self.getAllLines()
+        let now = Date()
         
         for disruption in disruptions {
-            // On prend les perturbations actives ou futures
-            guard disruption.status == "active" || disruption.status == "future",
-                  let impactedObjects = disruption.impactedObjects else { continue }
+            // Vérifier si la perturbation est vraiment active maintenant en vérifiant les application_periods
+            guard let impactedObjects = disruption.impactedObjects else { continue }
+            
+            // Vérifier si la perturbation est dans une période d'application active
+            let isCurrentlyActive = self.isDisruptionActive(disruption, at: now)
             
             for object in impactedObjects {
                 guard let lineCode = object.ptObject?.line?.code,
@@ -92,8 +125,8 @@ class TrafficService: ObservableObject {
                         newStatus = .critical
                     }
                     
-                    // Mise à jour du statut global seulement si c'est actif
-                    if disruption.status == "active" {
+                    // Mise à jour du statut global seulement si c'est vraiment actif maintenant
+                    if isCurrentlyActive {
                         if updatedLines[index].status == .normal {
                              updatedLines[index].status = newStatus
                         }
@@ -103,7 +136,8 @@ class TrafficService: ObservableObject {
                     let rawMessage = disruption.messages?.first?.text ?? "Incident signalé"
                     let cleanMessage = self.cleanHTML(rawMessage)
                     
-                    let period: TrafficPeriod = disruption.status == "future" ? .future : .active
+                    // Déterminer la période basée sur les application_periods
+                    let period: TrafficPeriod = isCurrentlyActive ? .active : .future
                     
                     let info = TrafficInfo(
                         id: disruption.id,
@@ -121,6 +155,33 @@ class TrafficService: ObservableObject {
         }
         
         self.lines = updatedLines
+        print("📊 Updated lines: \(updatedLines.filter { $0.status != .normal }.count) lines with incidents")
+    }
+    
+    /// Vérifie si une perturbation est active à un moment donné
+    private func isDisruptionActive(_ disruption: Disruption, at date: Date) -> Bool {
+        // Si pas de périodes d'application, on se fie au status
+        guard let applicationPeriods = disruption.applicationPeriods, !applicationPeriods.isEmpty else {
+            return disruption.status == "active"
+        }
+        
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyyMMdd'T'HHmmss"
+        dateFormatter.timeZone = TimeZone(identifier: "Europe/Paris")
+        
+        // Vérifier si la date actuelle est dans une des périodes d'application
+        for period in applicationPeriods {
+            guard let beginDate = dateFormatter.date(from: period.begin),
+                  let endDate = dateFormatter.date(from: period.end) else {
+                continue
+            }
+            
+            if date >= beginDate && date <= endDate {
+                return true
+            }
+        }
+        
+        return false
     }
     
     private func matchLine(line: TransportLine, code: String, modeId: String) -> Bool {

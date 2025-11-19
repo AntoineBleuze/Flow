@@ -64,6 +64,41 @@ struct TrafficViewContent: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                // Header avec bouton de rafraîchissement et heure de dernière mise à jour
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let lastUpdate = service.lastUpdateTime {
+                            let formatter = DateFormatter()
+                            let _ = (formatter.dateFormat = "HH:mm")
+                            Text("Dernière mise à jour: \(formatter.string(from: lastUpdate))")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("Chargement...")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    Spacer()
+                    
+                    Button(action: {
+                        service.refresh()
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.clockwise")
+                                .rotationEffect(.degrees(service.isRefreshing ? 360 : 0))
+                                .animation(service.isRefreshing ? Animation.linear(duration: 1).repeatForever(autoreverses: false) : .default, value: service.isRefreshing)
+                            Text("Rafraîchir")
+                                .font(.subheadline)
+                        }
+                        .foregroundColor(.blue)
+                    }
+                    .disabled(service.isRefreshing)
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+                
                 ForEach(TransportType.allCases) { type in
                     let lines = service.lines.filter { $0.type == type }
                     if !lines.isEmpty {

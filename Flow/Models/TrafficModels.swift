@@ -42,6 +42,7 @@ struct Disruption: Decodable, Identifiable {
     let severity: Severity?
     let messages: [Message]?
     let impactedObjects: [ImpactedObject]?
+    let applicationPeriods: [ApplicationPeriod]?
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -51,6 +52,17 @@ struct Disruption: Decodable, Identifiable {
         case severity
         case messages
         case impactedObjects = "impacted_objects"
+        case applicationPeriods = "application_periods"
+    }
+}
+
+struct ApplicationPeriod: Decodable {
+    let begin: String // Format: "20251120T080000"
+    let end: String   // Format: "20251120T170000"
+    
+    enum CodingKeys: String, CodingKey {
+        case begin
+        case end
     }
 }
 
