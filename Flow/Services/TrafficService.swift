@@ -36,15 +36,17 @@ class TrafficService: ObservableObject {
             return 
         }
         
-        // Filtrer les perturbations depuis 24h et jusqu'à 7 jours dans le futur
+        // Filtrer les perturbations depuis 24h
         let since = Calendar.current.date(byAdding: .hour, value: -24, to: Date())!
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyyMMdd'T'HHmmss"
         dateFormatter.timeZone = TimeZone(identifier: "Europe/Paris")
         let sinceString = dateFormatter.string(from: since)
         
-        let urlString = "https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia/line_reports/line_reports?count=100&since=\(sinceString)"
-        print("🌐 URL API: \(urlString)")
+        // ⚠️ CHANGEMENT D'ENDPOINT: Utilisation de /disruptions au lieu de /line_reports
+        // Cet endpoint couvre TOUS les modes de transport (métro, RER, trains, tramways, bus)
+        let urlString = "https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia/disruptions?count=100&since=\(sinceString)&depth=2"
+        print("🌐 URL API (nouvel endpoint /disruptions): \(urlString)")
         guard let url = URL(string: urlString) else { 
             print("❌ URL invalide!")
             isRefreshing = false
