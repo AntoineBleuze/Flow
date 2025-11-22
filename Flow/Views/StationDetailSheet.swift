@@ -8,6 +8,7 @@ extension Notification.Name {
 struct StationDetailSheet: View {
     let station: Station
     @State private var departures: [Departure] = []
+    @ObservedObject var favoritesService = FavoritesService.shared
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var cancellable: AnyCancellable?
@@ -73,8 +74,27 @@ struct StationDetailSheet: View {
                     }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Fermer") {
-                        dismiss()
+                    HStack {
+                        // Bouton Live Activity
+                        Button(action: {
+                            startLiveActivity()
+                        }) {
+                            Image(systemName: "waveform.path.ecg")
+                                .foregroundColor(.green)
+                        }
+                        
+                        // Bouton Favoris
+                        Button(action: {
+                            FavoritesService.shared.toggleFavorite(stationId: station.id)
+                            // Force UI refresh if needed (via @ObservedObject or Notification)
+                        }) {
+                            Image(systemName: FavoritesService.shared.isFavorite(stationId: station.id) ? "heart.fill" : "heart")
+                                .foregroundColor(.red)
+                        }
+                        
+                        Button("Fermer") {
+                            dismiss()
+                        }
                     }
                 }
             }
@@ -199,7 +219,8 @@ struct StationDetailSheet: View {
             
             for dep in departures {
                 let info = dep.displayInformations
-                let lineKey = info.label // Group by label (e.g. "1", "A")
+                // Unwrap label safely
+                guard let lineKey = info.label, !lineKey.isEmpty else { continue }
                 
                 // Calcul du temps
                 let timeStr = timeRemaining(dep.stopDateTime.departureDateTime)
@@ -208,17 +229,18 @@ struct StationDetailSheet: View {
                 if groups[lineKey] == nil {
                     groups[lineKey] = LineGroup(
                         id: lineKey,
-                        label: info.label,
+                        label: lineKey,
                         color: info.color ?? "000000",
                         text_color: info.textColor,
                         network: info.network,
-                        mode: info.commercialMode,
+                        mode: info.commercial_mode,
                         directions: []
                     )
                 }
                 
                 // Gestion des directions
-                let dirName = info.direction
+                let dirName = info.direction ?? "Inconnue"
+                
                 if var group = groups[lineKey],
                    let dirIndex = group.directions.firstIndex(where: { $0.direction == dirName }) {
                     // Limite à 2 horaires pour ne pas surcharger
@@ -303,9 +325,32 @@ struct StationDetailSheet: View {
         
 
         
-        private func getAvailableModes(from departures: [Departure]) -> [String] {
-            let modes = Set(departures.compactMap { $0.displayInformations.commercialMode })
-            // On peut normaliser les noms si besoin (ex: "Metro" -> "Métro")
-            return Array(modes).sorted()
+    private func startLiveActivity() {
+        print("🚀 Attempting to start Live Activity for \(station.name)")
+        // Trouver le premier groupe de départ pertinent (ou tout afficher)
+        let groups = groupDepartures(departures)
+        
+        guard let firstGroup = groups.first, let firstDir = firstGroup.directions.first else {
+            print("⚠️ No departures found to start Live Activity")
+            errorMessage = "Aucun horaire disponible pour lancer l'activité."
+            return
         }
+        
+        let nextDepartures = firstDir.times.prefix(2).map { String($0) }
+        print("📦 Data for Live Activity: \(firstGroup.label) -> \(firstDir.direction) : \(nextDepartures)")
+            
+        LiveActivityManager.shared.startLiveActivity(
+            stationName: station.name,
+            lineName: firstGroup.label,
+            direction: firstDir.direction,
+            nextDepartures: Array(nextDepartures),
+            stopIds: station.platforms.map { $0.id }
+        )
+    }
+
+    private func getAvailableModes(from departures: [Departure]) -> [String] {
+        let modes = Set(departures.compactMap { $0.displayInformations.commercial_mode })
+        // On peut normaliser les noms si besoin (ex: "Metro" -> "Métro")
+        return Array(modes).sorted()
+    }
 }

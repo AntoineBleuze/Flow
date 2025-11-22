@@ -21,20 +21,24 @@ struct Departure: Decodable, Identifiable {
 }
 
 struct DisplayInformations: Decodable {
-    let direction: String
-    let label: String // Ex: "12", "A"
+    let direction: String?
+    let label: String? // Ex: "12", "A"
+    let code: String? // Ex: "12"
     let color: String? // Ex: "0055C8"
-    let commercialMode: String? // Ex: "Metro", "RER"
+    let commercial_mode: String? // Ex: "Metro", "RER"
     let network: String?
     let textColor: String? // Ex: "FFFFFF"
+    let name: String?
     
     enum CodingKeys: String, CodingKey {
         case direction
         case label
+        case code
         case color
-        case commercialMode = "commercial_mode"
+        case commercial_mode
         case network
         case textColor = "text_color"
+        case name
     }
 }
 

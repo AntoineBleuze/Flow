@@ -1,0 +1,37 @@
+import Foundation
+import Combine
+
+class FavoritesService: ObservableObject {
+    static let shared = FavoritesService()
+    
+    @Published var favoriteStationIds: Set<String> = []
+    
+    private let favoritesKey = "favorite_stations"
+    
+    private init() {
+        loadFavorites()
+    }
+    
+    func loadFavorites() {
+        if let saved = UserDefaults.standard.array(forKey: favoritesKey) as? [String] {
+            favoriteStationIds = Set(saved)
+        }
+    }
+    
+    func toggleFavorite(stationId: String) {
+        if favoriteStationIds.contains(stationId) {
+            favoriteStationIds.remove(stationId)
+        } else {
+            favoriteStationIds.insert(stationId)
+        }
+        saveFavorites()
+    }
+    
+    func isFavorite(stationId: String) -> Bool {
+        return favoriteStationIds.contains(stationId)
+    }
+    
+    private func saveFavorites() {
+        UserDefaults.standard.set(Array(favoriteStationIds), forKey: favoritesKey)
+    }
+}

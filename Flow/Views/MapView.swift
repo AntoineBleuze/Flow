@@ -10,22 +10,66 @@ struct AppMapView: View {
     
     // 2. Initialisation sécurisée de la position
     @State private var position: MapCameraPosition = .region(AppMapView.defaultRegion)
-    @State private var zoomLevel: Double = 0.08 // Initialisé avec le span par défaut
     
     @ObservedObject var data = MapDataService.shared
     
     @State private var selectedStation: Station?
+    @State private var showSearch = false
+    @State private var itineraryDestination: Station?
+    
+    // Pour suivre la caméra et charger les stations
+    @State private var visibleRegion: MKCoordinateRegion?
+    @State private var followUserLocation = false
     
     var body: some View {
         ZStack {
-            MapViewControllerBridge(data: data, selectedStation: $selectedStation)
-                .ignoresSafeArea()
+            MapViewControllerBridge(
+                data: data,
+                selectedStation: $selectedStation,
+                followUserLocation: $followUserLocation
+            )
+            .ignoresSafeArea()
             
-            // Optional: Add custom controls on top if needed
+            // Controls Overlay
+            VStack {
+                HStack {
+                    Spacer()
+                    VStack(spacing: 12) {
+                        // Bouton de géolocalisation custom
+                        Button(action: {
+                            followUserLocation = true
+                        }) {
+                            Image(systemName: "location.fill")
+                                .font(.title2)
+                                .padding(12)
+                                .background(Color(UIColor.systemBackground))
+                                .clipShape(Circle())
+                                .shadow(radius: 4)
+                        }
+                        
+                        // Autres contrôles si besoin (Zoom, etc.)
+                    }
+                    .padding(.trailing, 16)
+                    .padding(.top, 60) // Marge pour éviter la status bar/navigation bar
+                }
+                Spacer()
+            }
         }
         .sheet(item: $selectedStation) { station in
             StationDetailSheet(station: station)
                 .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showSearch) {
+            SearchView(currentLocation: LocationManager.shared.userLocation, initialDestination: itineraryDestination)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .triggerItinerary)) { notification in
+            if let station = notification.object as? Station {
+                self.itineraryDestination = station
+                self.showSearch = true
+            }
+        }
+        .onAppear {
+            LocationManager.shared.requestLocation()
         }
     }
 }

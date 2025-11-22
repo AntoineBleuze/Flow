@@ -2,14 +2,26 @@ import Foundation
 
 // MARK: - API Response
 struct LineReportResponse: Decodable {
-    let disruptions: [Disruption]
+    let disruptions: [Disruption]?
+    let lineReports: [LineReport]?
     let pagination: Pagination?
     let links: [Link]?
     
     enum CodingKeys: String, CodingKey {
         case disruptions
+        case lineReports = "line_reports"
         case pagination
         case links
+    }
+}
+
+struct LineReport: Decodable {
+    let line: Line?
+    let ptObjects: [PtObject]?
+    
+    enum CodingKeys: String, CodingKey {
+        case line
+        case ptObjects = "pt_objects"
     }
 }
 
@@ -41,8 +53,11 @@ struct Disruption: Decodable, Identifiable {
     let category: String?
     let severity: Severity?
     let messages: [Message]?
-    let impactedObjects: [ImpactedObject]?
+    let impactedObjects: [Impacted]?
     let applicationPeriods: [ApplicationPeriod]?
+    let contributor: String?
+    let updatedAt: String?
+    let uri: String?
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -53,6 +68,9 @@ struct Disruption: Decodable, Identifiable {
         case messages
         case impactedObjects = "impacted_objects"
         case applicationPeriods = "application_periods"
+        case contributor
+        case updatedAt = "updated_at"
+        case uri
     }
 }
 
@@ -93,18 +111,79 @@ struct Message: Decodable {
 struct Channel: Decodable {
     let name: String?
     let contentTypes: [String]?
+    let id: String?
+    let types: [String]?
     
     enum CodingKeys: String, CodingKey {
         case name
-        case contentTypes = "content_types"
+        case contentTypes = "content_type"
+        case id
+        case types
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        id = try container.decodeIfPresent(String.self, forKey: .id)
+        types = try container.decodeIfPresent([String].self, forKey: .types)
+        
+        // Handle content_type as either String or [String]
+        if let contentTypeArray = try? container.decode([String].self, forKey: .contentTypes) {
+            contentTypes = contentTypeArray
+        } else if let contentTypeString = try? container.decode(String.self, forKey: .contentTypes) {
+            contentTypes = [contentTypeString]
+        } else {
+            contentTypes = nil
+        }
     }
 }
 
-struct ImpactedObject: Decodable {
+struct Impacted: Decodable {
     let ptObject: PtObject?
+    let impactedStops: [ImpactedStop]?
+    let impactedSection: ImpactedSection?
     
     enum CodingKeys: String, CodingKey {
         case ptObject = "pt_object"
+        case impactedStops = "impacted_stops"
+        case impactedSection = "impacted_section"
+    }
+}
+
+struct ImpactedStop: Decodable {
+    let stopPoint: TrafficStopPoint?
+    let stopTimeEffect: String?
+    let isDetour: Bool?
+    let amendedArrivalTime: String?
+    let amendedDepartureTime: String?
+    let baseArrivalTime: String?
+    let baseDepartureTime: String?
+    let cause: String?
+    let arrivalStatus: String?
+    let departureStatus: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case stopPoint = "stop_point"
+        case stopTimeEffect = "stop_time_effect"
+        case isDetour = "is_detour"
+        case amendedArrivalTime = "amended_arrival_time"
+        case amendedDepartureTime = "amended_departure_time"
+        case baseArrivalTime = "base_arrival_time"
+        case baseDepartureTime = "base_departure_time"
+        case cause
+        case arrivalStatus = "arrival_status"
+        case departureStatus = "departure_status"
+    }
+}
+
+struct ImpactedSection: Decodable {
+    let from: PtObject?
+    let to: PtObject?
+    
+    enum CodingKeys: String, CodingKey {
+        case from
+        case to
     }
 }
 
@@ -112,12 +191,55 @@ struct PtObject: Decodable {
     let id: String
     let name: String
     let line: Line?
+    let stopPoint: TrafficStopPoint?
+    let stopArea: TrafficStopArea?
+    let network: Network?
+    let commercialMode: CommercialMode?
+    let embeddedType: String?
     
     enum CodingKeys: String, CodingKey {
         case id
         case name
         case line
+        case stopPoint = "stop_point"
+        case stopArea = "stop_area"
+        case network
+        case commercialMode = "commercial_mode"
+        case embeddedType = "embedded_type"
     }
+}
+
+struct TrafficStopPoint: Decodable {
+    let id: String
+    let name: String
+    let label: String?
+    let coord: Coord?
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case label
+        case coord
+    }
+}
+
+struct TrafficStopArea: Decodable {
+    let id: String
+    let name: String
+    let label: String?
+    let coord: Coord?
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case label
+        case coord
+    }
+}
+
+struct Coord: Decodable {
+    let lat: String
+    let lon: String
 }
 
 struct Line: Decodable {

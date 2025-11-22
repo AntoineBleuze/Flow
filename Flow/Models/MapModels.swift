@@ -13,7 +13,7 @@ struct LineTrace: Identifiable {
     let id: String
     let name: String
     let color: Color
-    let coordinates: [[CLLocationCoordinate2D]] // Tableau de segments (MultiLineString)
+    let polylines: [MKPolyline] // Utilisation directe de MKPolyline
     let type: TransportType
 }
 
@@ -35,7 +35,7 @@ struct StopPoint: Identifiable {
 }
 
 // Modèle pour une Station (Regroupement d'arrêts)
-struct Station: Identifiable {
+struct Station: Identifiable, Equatable {
     let id: String // ID de la zone d'arrêt (IDFM:Cxxxxx)
     let name: String
     let coordinate: CLLocationCoordinate2D
@@ -43,6 +43,10 @@ struct Station: Identifiable {
     let isHub: Bool
     let mainType: TransportType // Type principal pour l'affichage (ex: Métro gagne sur Bus)
     let lines: [StationLine] // Lignes desservant la station
+    
+    static func == (lhs: Station, rhs: Station) -> Bool {
+        return lhs.id == rhs.id
+    }
 }
 
 // Service de données pour la carte
@@ -50,8 +54,12 @@ class MapDataService: ObservableObject {
     static let shared = MapDataService()
     
     @Published var lines: [LineTrace] = []
-    @Published var stations: [Station] = [] // Stations regroupées
+    @Published var visibleStations: [Station] = [] // Stations visibles sur la carte
     @Published var majorHubs: [Station] = [] // Pôles majeurs regroupés
+    @Published var hasCenteredOnUser: Bool = false
+    
+    // Stockage interne de toutes les stations pour le filtrage
+    private var allStations: [Station] = []
     
     // Cache des couleurs de lignes (Nom -> Couleur)
     var lineColorCache: [String: Color] = [:]
@@ -78,64 +86,106 @@ class MapDataService: ObservableObject {
     ]
     
     private func loadTraces() {
-        guard let url = Bundle.main.url(forResource: "traces-des-lignes-de-transport-en-commun-idfm-2", withExtension: "csv") else {
-            print("⚠️ Fichier Tracés CSV introuvable.")
+        struct Feature: Codable {
+            let geometry: Geometry
+            let properties: Properties
+        }
+        
+        struct Geometry: Codable {
+            let coordinates: [[Double]] // LineString: array de points [lon, lat]
+            let type: String
+        }
+        
+        struct Properties: Codable {
+            let res_com: String // Nom de la ligne (ex: "METRO 1", "RER A", "TRAM 3a")
+            let colourweb_hexa: String? // Couleur hex
+            let mode: String? // Type de transport
+        }
+        
+        struct FeatureCollection: Codable {
+            let features: [Feature]
+        }
+        
+        // Charger le fichier réseau unifié
+        guard let url = Bundle.main.url(forResource: "traces-du-reseau-ferre-idf", withExtension: "geojson") else {
+            print("⚠️ Fichier traces-du-reseau-ferre-idf.geojson non trouvé")
             return
         }
         
         do {
-            let data = try String(contentsOf: url, encoding: .utf8)
-            let rows = data.components(separatedBy: .newlines)
-            print("📊 Nombre de lignes dans le CSV tracés : \(rows.count)")
+            let data = try Data(contentsOf: url)
+            let collection = try JSONDecoder().decode(FeatureCollection.self, from: data)
             
-            var newLines: [LineTrace] = []
+            print("📊 Parsing traces-du-reseau-ferre-idf.geojson: \(collection.features.count) features")
             
-            // On suppose qu'il y a un en-tête si la première ligne contient "route_id" ou similaire.
-            // Sinon on traite tout.
-            let hasHeader = rows.first?.contains("route_id") ?? false
-            let startIndex = hasHeader ? 1 : 0
+            // Dictionnaire pour regrouper par nom de ligne ET type
+            // Clé: "TYPE_NOM" (ex: "METRO_7", "TRAM_7") pour éviter les conflits de couleur
+            var lineGroups: [String: (color: String, type: String, lineName: String, polylines: [MKPolyline])] = [:]
             
-            for (index, row) in rows.enumerated() where index >= startIndex {
-                if row.isEmpty { continue }
+            for feature in collection.features {
+                let fullName = feature.properties.res_com
                 
-                let columns = self.parseCSVLine(row)
-                if columns.count > 6 {
-                    let typeString = columns[3]
-                    
-                    if typeString == "Bus" { continue }
-                    
-                    // Essayer de récupérer le nom court depuis la colonne 11 (long_name_first) si dispo, sinon col 1
-                    var name = columns[1]
-                    if columns.count > 11 {
-                        let altName = columns[11]
-                        if !altName.isEmpty && altName.count < 5 { // Heuristique pour éviter les noms longs
-                            name = altName
-                        }
-                    }
-                    
-                    var hexColor = columns[4]
-                    
-                    // Si pas de couleur ou couleur invalide, voir si on l'a en dur
-                    if (hexColor.isEmpty || hexColor.count < 6), let hardColor = hardcodedColors[name] {
+                // Extraire le nom court de la ligne (ex: "METRO 1" -> "1", "RER A" -> "A")
+                let components = fullName.components(separatedBy: " ")
+                guard components.count >= 2 else { continue }
+                
+                let lineType = components[0] // "METRO", "RER", "TRAM", "TRAIN"
+                let lineName = components[1...].joined(separator: " ") // "1", "A", "3a", etc.
+                
+                // Filtrer les lignes non IDF
+                if lineType == "TER" || fullName.contains("CDGVAL") || fullName.contains("ORLYVAL") || fullName.contains("FUNICULAIRE") {
+                    continue
+                }
+                
+                // Récupérer la couleur (PRIORITÉ au GeoJSON)
+                var hexColor = feature.properties.colourweb_hexa ?? ""
+                
+                // Nettoyer la couleur (enlever # si présent)
+                hexColor = hexColor.replacingOccurrences(of: "#", with: "")
+                
+                // Si pas de couleur dans le GeoJSON, utiliser le hardcodé (mais seulement pour métros/RER)
+                if (hexColor.isEmpty || hexColor.count < 6) && lineType != "TRAM" {
+                    if let hardColor = hardcodedColors[lineName] {
                         hexColor = hardColor
                     }
-                    
-                    let geoJson = columns[6]
-                    
-                    let color = hexColor.isEmpty ? Color.blue : Color(hex: hexColor)
-                    let type = self.mapTransportType(typeString, lineName: name)
-                    
-                    let coordinates = self.parseGeoJSON(geoJson)
-                    
-                    if !coordinates.isEmpty {
-                        let line = LineTrace(id: UUID().uuidString, name: name, color: color, coordinates: coordinates, type: type)
-                        newLines.append(line)
-                        
-                        // Debug spécifique
-                        if ["1", "A", "B", "E"].contains(name) {
-                            print("🎨 Loaded Trace: \(name) (\(typeString)) -> \(hexColor)")
-                        }
-                    }
+                }
+                
+                // Convertir le LineString en MKPolyline
+                let coords = feature.geometry.coordinates.compactMap { point -> CLLocationCoordinate2D? in
+                    guard point.count >= 2 else { return nil }
+                    return CLLocationCoordinate2D(latitude: point[1], longitude: point[0])
+                }
+                
+                guard !coords.isEmpty else { continue }
+                let polyline = MKPolyline(coordinates: coords, count: coords.count)
+                
+                // Clé unique par type ET nom pour éviter les conflits (TRAM 7 vs METRO 7)
+                let groupKey = "\(lineType)_\(lineName)"
+                
+                // Regrouper par clé unique
+                if var existing = lineGroups[groupKey] {
+                    existing.polylines.append(polyline)
+                    lineGroups[groupKey] = existing
+                } else {
+                    lineGroups[groupKey] = (color: hexColor, type: lineType, lineName: lineName, polylines: [polyline])
+                }
+            }
+            
+            // Créer les LineTrace à partir des groupes
+            var newLines: [LineTrace] = []
+            
+            for (_, group) in lineGroups {
+                guard !group.polylines.isEmpty else { continue }
+                
+                let color = group.color.isEmpty ? Color.blue : Color(hex: group.color)
+                let type = self.mapTransportType(group.type, lineName: group.lineName)
+                
+                let line = LineTrace(id: UUID().uuidString, name: group.lineName, color: color, polylines: group.polylines, type: type)
+                newLines.append(line)
+                
+                // Debug spécifique
+                if ["1", "A", "B", "E", "N", "3a", "7"].contains(group.lineName) {
+                    print("🎨 Loaded \(group.type) \(group.lineName): #\(group.color) avec \(group.polylines.count) segments")
                 }
             }
             
@@ -146,18 +196,18 @@ class MapDataService: ObservableObject {
                     self.lineColorCache[line.name] = line.color
                 }
                 
-                // Injecter les couleurs hardcodées manquantes dans le cache (pour les lignes sans tracé)
+                // Injecter les couleurs hardcodées manquantes
                 for (name, hex) in self.hardcodedColors {
                     if self.lineColorCache[name] == nil {
                         self.lineColorCache[name] = Color(hex: hex)
                     }
                 }
                 
-                print("✅ \(newLines.count) tracés chargés. Cache couleurs mis à jour.")
+                print("✅ \(newLines.count) lignes chargées avec tracés réels détaillés (courbes du réseau ferré)")
             }
             
         } catch {
-            print("❌ Erreur chargement tracés: \(error)")
+            print("❌ Erreur parsing réseau ferré: \(error)")
         }
     }
     
@@ -321,7 +371,8 @@ class MapDataService: ObservableObject {
         let finalStations = self.mergeHubs(initialStations)
         
         DispatchQueue.main.async {
-            self.stations = finalStations
+            self.allStations = finalStations
+            self.visibleStations = finalStations // Initialement tout
             self.majorHubs = finalStations.filter { $0.isHub }
             print("✅ \(finalStations.count) stations finales (après fusion des pôles).")
         }
@@ -426,18 +477,11 @@ class MapDataService: ObservableObject {
     }
     
     // Parseur GeoJSON (MultiLineString ou LineString)
-    private func parseGeoJSON(_ json: String) -> [[CLLocationCoordinate2D]] {
-        // Correction manuelle du JSON malformé (clés sans quotes)
-        // Ex: {coordinates: ...} -> {"coordinates": ...}
-        let fixedJson = json
-            .replacingOccurrences(of: "{coordinates:", with: "{\"coordinates\":")
-            .replacingOccurrences(of: ", type:", with: ", \"type\":")
-            .replacingOccurrences(of: "\"\"", with: "\"") // Nettoyage double quotes résiduelles
+    private func parseGeoJSON(_ json: String) -> [MKPolyline] {
+        // Le JSON semble valide d'après les tests, mais on garde un nettoyage minimal au cas où
+        let cleanJson = json.replacingOccurrences(of: "\"\"", with: "\"")
         
-        // Log pour confirmer que le fix est actif
-        print("DEBUG GeoJSON Fixed: \(fixedJson.prefix(20))...")
-        
-        guard let data = fixedJson.data(using: .utf8) else { return [] }
+        guard let data = cleanJson.data(using: .utf8) else { return [] }
         
         // Structure pour décoder soit MultiLineString soit LineString
         struct GeometryMulti: Decodable {
@@ -450,27 +494,34 @@ class MapDataService: ObservableObject {
         do {
             // Essai MultiLineString
             let geom = try JSONDecoder().decode(GeometryMulti.self, from: data)
-            return geom.coordinates.map { segment in
-                segment.compactMap { point in
+            return geom.coordinates.compactMap { segment in
+                let coords = segment.compactMap { point -> CLLocationCoordinate2D? in
                     if point.count >= 2 {
                         return CLLocationCoordinate2D(latitude: point[1], longitude: point[0])
                     }
                     return nil
                 }
+                if !coords.isEmpty {
+                    return MKPolyline(coordinates: coords, count: coords.count)
+                }
+                return nil
             }
         } catch {
             // Essai LineString
             do {
                 let geom = try JSONDecoder().decode(GeometryLine.self, from: data)
-                let segment = geom.coordinates.compactMap { point -> CLLocationCoordinate2D? in
+                let coords = geom.coordinates.compactMap { point -> CLLocationCoordinate2D? in
                     if point.count >= 2 {
                         return CLLocationCoordinate2D(latitude: point[1], longitude: point[0])
                     }
                     return nil
                 }
-                return [segment] // On retourne un tableau contenant un seul segment
+                if !coords.isEmpty {
+                    return [MKPolyline(coordinates: coords, count: coords.count)]
+                }
+                return []
             } catch {
-                // print("❌ Erreur parsing GeoJSON: \(error)")
+                print("❌ Erreur parsing GeoJSON: \(error)")
                 return []
             }
         }
@@ -513,13 +564,43 @@ class MapDataService: ObservableObject {
         
         return .metro // Fallback
     }
-    // Méthode asynchrone pour récupérer les stations dans une région (Bounding Box)
+
+    // Méthode asynchrone pour récupérer les stations dans une région (pour le bridge)
     func fetchStations(in region: MKCoordinateRegion) async -> [Station] {
-        // Pour l'instant, on filtre la liste en mémoire car tout est préchargé.
-        // Une optimisation future serait de faire une requête CoreData spatiale si la mémoire sature.
-        
         let center = region.center
         let span = region.span
+
+        // Seuil de zoom pour afficher tous les arrêts vs seulement les pôles
+        let zoomThreshold = 0.05
+        let showAll = span.latitudeDelta < zoomThreshold
+
+        let minLat = center.latitude - span.latitudeDelta / 2
+        let maxLat = center.latitude + span.latitudeDelta / 2
+        let minLon = center.longitude - span.longitudeDelta / 2
+        let maxLon = center.longitude + span.longitudeDelta / 2
+
+        // On ne cherche que dans les pôles majeurs pour optimiser si dézoomé
+        let source = showAll ? self.allStations : self.majorHubs
+
+        let filtered = source.filter { station in
+            let lat = station.coordinate.latitude
+            let lon = station.coordinate.longitude
+            return lat >= minLat && lat <= maxLat && lon >= minLon && lon <= maxLon
+        }
+
+        return filtered
+    }
+    
+    // Méthode asynchrone pour mettre à jour les stations visibles
+    func updateVisibleStations(in region: MKCoordinateRegion) {
+        let center = region.center
+        let span = region.span
+        
+        // Seuil de zoom pour afficher tous les arrêts vs seulement les pôles
+        // Plus le delta est grand, plus on est dézoomé.
+        // 0.08 est le défaut (Paris). Si on dézoome un peu (0.1), on passe en mode "Pôles uniquement".
+        let zoomThreshold = 0.05
+        let showAll = span.latitudeDelta < zoomThreshold
         
         let minLat = center.latitude - span.latitudeDelta / 2
         let maxLat = center.latitude + span.latitudeDelta / 2
@@ -527,25 +608,30 @@ class MapDataService: ObservableObject {
         let maxLon = center.longitude + span.longitudeDelta / 2
         
         // On utilise une Task détachée pour ne pas bloquer le thread appelant
-        return await Task.detached(priority: .userInitiated) {
-            // Accès thread-safe à la copie des données (si possible)
-            // Ici on accède à self.stations qui est sur le MainActor via await si on était dans un acteur
-            // Mais MapDataService est une classe normale conformant à ObservableObject.
-            // Pour éviter les data races, on devrait idéalement avoir un acteur ou un lock.
-            // Comme self.stations est modifié uniquement au chargement, le risque est faible après le démarrage.
-            // Cependant, pour être propre, on va supposer que self.stations est stable.
+        Task.detached(priority: .userInitiated) {
+            // Capture thread-safe de la liste complète (copie)
+            // Si on est dézoomé, on ne cherche que dans les pôles majeurs pour optimiser
+            let source = showAll ? self.allStations : self.majorHubs
             
-            return self.stations.filter { station in
+            let filtered = source.filter { station in
                 let lat = station.coordinate.latitude
                 let lon = station.coordinate.longitude
                 return lat >= minLat && lat <= maxLat && lon >= minLon && lon <= maxLon
             }
-        }.value
+            
+            await MainActor.run {
+                self.visibleStations = filtered
+            }
+        }
     }
     
     // Helper pour récupérer toutes les stations (pour le bridge si besoin)
     func getAllStations() async -> [Station] {
-        return stations
+        return allStations
+    }
+    
+    func getAllStationsSync() -> [Station] {
+        return allStations
     }
 }
 

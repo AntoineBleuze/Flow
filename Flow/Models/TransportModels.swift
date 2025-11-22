@@ -43,32 +43,44 @@ enum TransportType: String, CaseIterable, Identifiable {
     }
 }
 
-enum LineStatus {
-    case normal
-    case critical // Trafic interrompu
-    case warning // Travaux ou ralentissements
+enum LineStatus: Int, Comparable {
+    case interrupted = 0 // Rouge: Interruptions exceptionnelles
+    case disrupted = 1   // Orange: Perturbations (légers retards)
+    case works = 2       // Jaune: Travaux
+    case information = 3 // Bleu: Informations diverses
+    case normal = 4      // Blanc: Trafic normal
+    
+    static func < (lhs: LineStatus, rhs: LineStatus) -> Bool {
+        return lhs.rawValue < rhs.rawValue
+    }
     
     var icon: String {
         switch self {
+        case .interrupted: return "xmark.octagon.fill"
+        case .disrupted: return "exclamationmark.triangle.fill"
+        case .works: return "hammer.fill"
+        case .information: return "info.circle.fill"
         case .normal: return "checkmark.circle.fill"
-        case .critical: return "xmark.octagon.fill"
-        case .warning: return "exclamationmark.triangle.fill"
         }
     }
     
     var color: Color {
         switch self {
-        case .normal: return .green
-        case .critical: return .red
-        case .warning: return .orange
+        case .interrupted: return .red
+        case .disrupted: return .orange
+        case .works: return .yellow
+        case .information: return .blue
+        case .normal: return .primary // "Blanc" en dark mode, Noir en light mode. Si l'utilisateur veut vraiment blanc forcé, on mettra .white mais attention au contraste.
         }
     }
     
     var description: String {
         switch self {
+        case .interrupted: return "Trafic interrompu"
+        case .disrupted: return "Trafic perturbé"
+        case .works: return "Travaux"
+        case .information: return "Information"
         case .normal: return "Trafic normal"
-        case .critical: return "Trafic interrompu"
-        case .warning: return "Perturbations"
         }
     }
 }

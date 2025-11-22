@@ -41,7 +41,7 @@ struct TrafficDetailView: View {
                                         .font(.subheadline).bold()
                                 }
                                 
-                                Text(info.message)
+                                Text(.init(info.message))
                                     .font(.body)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
@@ -76,7 +76,7 @@ struct TrafficDetailView: View {
                                         .font(.subheadline).bold()
                                 }
                                 
-                                Text(info.message)
+                                Text(.init(info.message))
                                     .font(.body)
                                     .fixedSize(horizontal: false, vertical: true)
                             }

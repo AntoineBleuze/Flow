@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="22225" systemVersion="23A344" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="TransportLineEntity" representedClassName="TransportLineEntity" syncable="YES">
+        <attribute name="routeColor" optional="NO" attributeType="String"/>
+        <attribute name="routeId" optional="NO" attributeType="String"/>
+        <attribute name="routeLongName" optional="NO" attributeType="String"/>
+        <attribute name="routeShortName" optional="NO" attributeType="String"/>
+        <attribute name="routeType" optional="NO" attributeType="String"/>
+        <relationship name="coordinates" optional="YES" toMany="YES" deletionRule="Cascade" ordered="YES" destinationEntity="CoordinatePointEntity" inverseName="transportLine" inverseEntity="CoordinatePointEntity"/>
+        <uniquenessConstraints>
+            <uniquenessConstraint>
+                <constraint value="routeId"/>
+            </uniquenessConstraint>
+        </uniquenessConstraints>
+    </entity>
+    <entity name="CoordinatePointEntity" representedClassName="CoordinatePointEntity" syncable="YES">
+        <attribute name="latitude" optional="NO" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="longitude" optional="NO" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="segmentIndex" optional="NO" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <relationship name="transportLine" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="TransportLineEntity" inverseName="coordinates" inverseEntity="TransportLineEntity"/>
+    </entity>
+</model>
