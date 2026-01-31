@@ -1,7 +1,7 @@
 import Foundation
 
 /// Modèle représentant une ligne de transport telle que lue depuis le fichier CSV.
-struct CSVTransportLine {
+public struct CSVTransportLine {
     let routeId: String
     let routeShortName: String
     let routeLongName: String
@@ -12,45 +12,47 @@ struct CSVTransportLine {
 }
 
 /// Un parseur pour les fichiers CSV contenant des lignes de transport.
-enum CSVParser {
-    
+public enum CSVParser {
+
     /// Parse le contenu d'un fichier CSV pour en extraire les lignes de transport.
     /// - Parameter csvContent: Le contenu du fichier CSV sous forme de chaîne de caractères.
     /// - Returns: Un tableau de `CSVTransportLine`.
-    static func parseTransportLinesCSV(csvContent: String) -> [CSVTransportLine] {
+    public static func parseTransportLinesCSV(csvContent: String) -> [CSVTransportLine] {
         var transportLines: [CSVTransportLine] = []
-        
+
         let rows = csvContent.components(separatedBy: .newlines)
-        
+
         // On suppose que la première ligne est l'en-tête.
         guard !rows.isEmpty else { return [] }
         let header = rows.first!
-        
+
         // Crée une correspondance entre les noms de colonnes et leurs indices
         // pour rendre le parsing plus robuste.
         let columnMapping = mapHeaders(header: header)
-        
+
         // Vérifie que les colonnes nécessaires sont présentes.
-        let requiredColumns = ["route_id", "route_short_name", "route_long_name", "route_type", "route_color", "shape"]
+        let requiredColumns = [
+            "route_id", "route_short_name", "route_long_name", "route_type", "route_color", "shape",
+        ]
         for column in requiredColumns {
             if columnMapping[column] == nil {
                 print("❌ En-tête CSV invalide. Colonne manquante: \(column)")
                 return []
             }
         }
-        
+
         for row in rows.dropFirst() {
             if row.isEmpty { continue }
-            
+
             // NOTE: Ceci est un parseur CSV très simple. Une solution plus robuste
             // gérerait les virgules à l'intérieur des champs entre guillemets.
             let columns = row.components(separatedBy: ",")
-            
+
             guard columns.count == columnMapping.count else {
                 print("⚠️ Ligne CSV ignorée (nombre de colonnes incorrect): \(row)")
                 continue
             }
-            
+
             let routeId = columns[columnMapping["route_id"]!].trimmed()
             let routeShortName = columns[columnMapping["route_short_name"]!].trimmed()
             let routeLongName = columns[columnMapping["route_long_name"]!].trimmed()
@@ -68,10 +70,10 @@ enum CSVParser {
             )
             transportLines.append(line)
         }
-        
+
         return transportLines
     }
-    
+
     /// Crée un dictionnaire qui mappe les noms d'en-tête de colonne à leurs indices.
     private static func mapHeaders(header: String) -> [String: Int] {
         let columnNames = header.components(separatedBy: ",")
@@ -83,14 +85,15 @@ enum CSVParser {
     }
 }
 
-private extension String {
+extension String {
     /// Supprime les espaces et les guillemets au début et à la fin de la chaîne.
-    func trimmed() -> String {
+    fileprivate func trimmed() -> String {
         return self.trimmingCharacters(in: .whitespacesAndQuotes)
     }
 }
 
-private extension CharacterSet {
+extension CharacterSet {
     /// Un ensemble de caractères contenant les espaces et les guillemets.
-    static let whitespacesAndQuotes = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "\""))
+    fileprivate static let whitespacesAndQuotes = CharacterSet.whitespaces.union(
+        CharacterSet(charactersIn: "\""))
 }

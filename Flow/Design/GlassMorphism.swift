@@ -53,12 +53,39 @@ struct FloatingDockStyle: ViewModifier {
     }
 }
 
+
+// MARK: - New Glass API
+
+enum Glass {
+    case regular
+}
+
+struct DefaultGlassEffectShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        RoundedRectangle(cornerRadius: 20).path(in: rect)
+    }
+}
+
 extension View {
-    func liquidGlass() -> some View {
-        self.modifier(LiquidGlassStyle())
+    func glassEffect(_ glass: Glass = .regular) -> some View {
+        self.glassEffect(glass, in: DefaultGlassEffectShape())
     }
     
-    func floatingDock() -> some View {
-        self.modifier(FloatingDockStyle())
+    func glassEffect<S: Shape>(_ glass: Glass = .regular, in shape: S) -> some View {
+        self
+            .background(.clear)
+            .clipShape(shape)
+            .shadow(color: Color.black.opacity(0.2), radius: 10, x: 0, y: 5)
+            .overlay(
+                shape
+                    .stroke(
+                        LinearGradient(
+                            colors: [.white.opacity(0.4), .white.opacity(0.1)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.5
+                    )
+            )
     }
 }

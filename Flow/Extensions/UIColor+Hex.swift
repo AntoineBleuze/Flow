@@ -1,0 +1,46 @@
+#if canImport(UIKit)
+    import UIKit
+    public typealias PlatformColor = UIColor
+#elseif canImport(AppKit)
+    import AppKit
+    public typealias PlatformColor = NSColor
+#endif
+
+extension PlatformColor {
+    convenience init?(hex: String) {
+        let hexString = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hexString).scanHexInt64(&int)
+        let a: UInt64
+        let r: UInt64
+        let g: UInt64
+        let b: UInt64
+        switch hexString.count {
+        case 3:  // RGB (12-bit)
+            (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
+        case 6:  // RGB (24-bit)
+            (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
+        case 8:  // ARGB (32-bit)
+            (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
+        default:
+            (a, r, g, b) = (255, 0, 0, 0)
+        }
+        self.init(
+            red: CGFloat(r) / 255,
+            green: CGFloat(g) / 255,
+            blue: CGFloat(b) / 255,
+            alpha: CGFloat(a) / 255
+        )
+    }
+}
+
+#if canImport(AppKit)
+    extension NSColor {
+        // Compatibilité pour le code qui attend 'UIColor' sur macOS si on veut tricher,
+        // mais mieux vaut utiliser PlatformColor ou cross-platform typealias.
+        // Ici on a défini PlatformColor.
+    }
+// Alias global pour simplifier le portage rapide si nécessaire,
+// mais attention aux conflits si UIKit est importé ailleurs.
+// typealias UIColor = NSColor
+#endif

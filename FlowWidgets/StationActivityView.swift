@@ -7,6 +7,8 @@ struct StationActivityView: View {
     let lineName: String
     let direction: String
     let nextDepartures: [String]
+    let lineColor: String
+    let textColor: String
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -14,30 +16,24 @@ struct StationActivityView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(stationName)
                         .font(.headline)
-                        .foregroundColor(.white) // Force white for visibility on dark background
+                        .foregroundColor(.white)
                     
-                    HStack(spacing: 6) {
-                        Text(lineName)
-                            .font(.subheadline)
-                            .bold()
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.blue)
-                            .foregroundColor(.white)
-                            .clipShape(Capsule())
-                        
-                        Text("vers \(direction)")
-                            .font(.subheadline)
-                            .foregroundColor(.gray)
-                            .lineLimit(1)
-                    }
+                    Text("vers \(direction)")
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
+                        .lineLimit(2)
                 }
                 
                 Spacer()
                 
-                Image(systemName: "tram.fill")
-                    .font(.title2)
-                    .foregroundColor(.blue)
+                ZStack {
+                    Circle()
+                        .fill(Color(hex: lineColor))
+                        .frame(width: 50, height: 50)
+                    Text(lineName)
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundColor(Color(hex: textColor))
+                }
             }
             
             Divider()
@@ -61,17 +57,19 @@ struct StationActivityView: View {
             }
         }
         .padding()
-        .background(Color.black) // Use black background for Live Activity style
-        .cornerRadius(15) // Add corner radius
+        .activityBackgroundTint(Color.black)
+        .activitySystemActionForegroundColor(Color.white)
     }
 }
 
 #Preview("Notification", traits: .sizeThatFitsLayout) {
     StationActivityView(
         stationName: "Châtelet",
-        lineName: "RER A",
+        lineName: "A",
         direction: "Boissy-St-Léger",
-        nextDepartures: ["12:05", "12:10"]
+        nextDepartures: ["12 min", "17 min"],
+        lineColor: "E2231A",
+        textColor: "FFFFFF"
     )
     .padding()
     .background(Color(UIColor.systemGroupedBackground))

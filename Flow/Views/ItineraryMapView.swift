@@ -37,37 +37,38 @@ struct ItineraryMapViewRepresentable: UIViewRepresentable {
         
         var allCoordinates: [CLLocationCoordinate2D] = []
         
-        // Extract route segments and add polylines
+        // Draw route segments from GeoJSON data
         for section in sections where section.type == "public_transport" {
-            guard let fromPlace = section.from,
-                  let toPlace = section.to,
+            guard let geojson = section.geojson,
+                  let coordinates = geojson.coordinates,
                   let display = section.display_informations else { continue }
             
-            // Get line code (ex: "7", "A", "3a")
-            let lineCode = display.code ?? display.label ?? ""
-            
-            // Get color
+            // Get color for this line
             let hexColor = display.color ?? "CCCCCC"
             let color = UIColor(hex: hexColor) ?? .blue
             
-            // Find matching line polylines from MapDataService
-            if let lineTrace = MapDataService.shared.lines.first(where: { $0.name == lineCode }) {
-                // Add all polylines from this line (simplified approach)
-                for polyline in lineTrace.polylines {
-                    let coloredPolyline = ColoredPolyline(points: polyline.points(), count: polyline.pointCount)
-                    coloredPolyline.color = color.withAlphaComponent(0.7) // Semi-transparent
-                    mapView.addOverlay(coloredPolyline)
-                    
-                    // Collect coordinates for bounds
-                    let coordinates = UnsafeBufferPointer(start: polyline.points(), count: polyline.pointCount)
-                    for point in coordinates {
-                        allCoordinates.append(point.coordinate)
-                    }
+            // Convert GeoJSON coordinates to CLLocationCoordinate2D
+            // GeoJSON format is [longitude, latitude]
+            var routeCoordinates: [CLLocationCoordinate2D] = []
+            for coord in coordinates {
+                if coord.count >= 2 {
+                    let lon = coord[0]
+                    let lat = coord[1]
+                    let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+                    routeCoordinates.append(coordinate)
+                    allCoordinates.append(coordinate)
                 }
             }
             
-            // Add station markers
-            if let fromCoord = fromPlace.coordinate {
+            // Create polyline for this section
+            if !routeCoordinates.isEmpty {
+                let polyline = ColoredPolyline(coordinates: routeCoordinates, count: routeCoordinates.count)
+                polyline.color = color
+                mapView.addOverlay(polyline)
+            }
+            
+            // Add start marker
+            if let fromPlace = section.from, let fromCoord = fromPlace.coordinate {
                 let fromStation = StationMarkerAnnotation(
                     coordinate: fromCoord,
                     title: fromPlace.name ?? "Départ",
@@ -77,7 +78,8 @@ struct ItineraryMapViewRepresentable: UIViewRepresentable {
                 allCoordinates.append(fromCoord)
             }
             
-            if let toCoord = toPlace.coordinate {
+            // Add end marker
+            if let toPlace = section.to, let toCoord = toPlace.coordinate {
                 let toStation = StationMarkerAnnotation(
                     coordinate: toCoord,
                     title: toPlace.name ?? "Arrivée",

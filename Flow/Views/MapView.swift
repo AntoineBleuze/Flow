@@ -1,5 +1,5 @@
-import SwiftUI
 import MapKit
+import SwiftUI
 
 struct AppMapView: View {
     // 1. Définition de la région par défaut (Paris)
@@ -7,78 +7,96 @@ struct AppMapView: View {
         center: CLLocationCoordinate2D(latitude: 48.8566, longitude: 2.3522),
         span: MKCoordinateSpan(latitudeDelta: 0.08, longitudeDelta: 0.08)
     )
-    
+
     // 2. Initialisation sécurisée de la position
     @State private var position: MapCameraPosition = .region(AppMapView.defaultRegion)
-    
+
     @ObservedObject var data = MapDataService.shared
-    
-    @State private var selectedStation: Station?
-    @State private var showSearch = false
-    @State private var itineraryDestination: Station?
-    
-    // Pour suivre la caméra et charger les stations
+    @ObservedObject var navigationManager = NavigationManager.shared
+
+    @State private var selectedStation: MapStation?
+
     @State private var visibleRegion: MKCoordinateRegion?
     @State private var followUserLocation = false
-    
+    @State private var showNavigationSteps = false  // For NavigationStepsPanel expansion
+
+    var showControls: Bool = true
+
     var body: some View {
         ZStack {
             MapViewControllerBridge(
                 data: data,
                 selectedStation: $selectedStation,
-                followUserLocation: $followUserLocation
+                followUserLocation: $followUserLocation,
+                journey: navigationManager.currentJourney,
+                useMainMap: showControls,
+                showAnnotations: showControls
             )
             .ignoresSafeArea()
-            
-            // Controls Overlay
-            VStack {
-                HStack {
+
+            // Top Controls (Vide pour l'instant ou supprime le VStack du haut si vide)
+
+            Spacer()
+
+            if showControls {
+                VStack(spacing: 0) {
                     Spacer()
-                    VStack(spacing: 12) {
-                        // Bouton de géolocalisation custom
+
+                    // Navigation Steps Panel (replaces old button)
+                    if navigationManager.isNavigating {
+                        NavigationStepsPanel(showFullSteps: $showNavigationSteps)
+                            .padding(.horizontal)
+                            .padding(.bottom, 8)
+                    }
+
+                    // Recenter Button (Bottom Right)
+                    HStack {
+                        Spacer()
+
                         Button(action: {
                             followUserLocation = true
                         }) {
-                            Image(systemName: "location.fill")
+                            Image(systemName: followUserLocation ? "location.fill" : "location")
                                 .font(.title2)
-                                .padding(12)
-                                .background(Color(UIColor.systemBackground))
-                                .clipShape(Circle())
-                                .shadow(radius: 4)
+                                .foregroundColor(followUserLocation ? .blue : .primary)
+                                .padding(14)
+                                .background(.clear)
+                                .glassEffect(.regular.interactive(), in: .circle)
                         }
-                        
-                        // Autres contrôles si besoin (Zoom, etc.)
+                        .padding(.trailing, 16)
                     }
-                    .padding(.trailing, 16)
-                    .padding(.top, 60) // Marge pour éviter la status bar/navigation bar
+                    .padding(.bottom, 20)  // Juste au-dessus de la tab bar
                 }
-                Spacer()
             }
         }
         .sheet(item: $selectedStation) { station in
             StationDetailSheet(station: station)
                 .presentationDetents([.medium, .large])
         }
-        .sheet(isPresented: $showSearch) {
-            SearchView(currentLocation: LocationManager.shared.userLocation, initialDestination: itineraryDestination)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .triggerItinerary)) { notification in
-            if let station = notification.object as? Station {
-                self.itineraryDestination = station
-                self.showSearch = true
-            }
-        }
         .onAppear {
             LocationManager.shared.requestLocation()
         }
+        .onChange(of: data.externalSelection) { _, newStation in
+            if let station = newStation {
+                // Centrer la carte
+                withAnimation {
+                    position = .region(
+                        MKCoordinateRegion(
+                            center: station.coordinate,
+                            span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
+                        ))
+                }
+                // Ouvrir le détail
+                selectedStation = station
+            }
+        }
     }
 }
-
 
 #if DEBUG
-struct AppMapView_Previews: PreviewProvider {
-    static var previews: some View {
-        AppMapView()
+    struct AppMapView_Previews: PreviewProvider {
+        static var previews: some View {
+            AppMapView()
+        }
     }
-}
 #endif

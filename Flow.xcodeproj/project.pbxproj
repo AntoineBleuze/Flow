@@ -6,19 +6,89 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		6E1327DD2ED25FAE00A28845 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6E1327DC2ED25FAD00A28845 /* WidgetKit.framework */; };
+		6E1327DF2ED25FAE00A28845 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6E1327DE2ED25FAE00A28845 /* SwiftUI.framework */; };
+		6E1327F02ED25FB100A28845 /* FlowWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 6E1327DA2ED25FAD00A28845 /* FlowWidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		6E1327EE2ED25FB100A28845 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 6E5DC3A12ECD311E005188FE /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 6E1327D92ED25FAD00A28845;
+			remoteInfo = FlowWidgetsExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		6E1327F52ED25FB100A28845 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				6E1327F02ED25FB100A28845 /* FlowWidgetsExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		6E1327DA2ED25FAD00A28845 /* FlowWidgetsExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = FlowWidgetsExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		6E1327DC2ED25FAD00A28845 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		6E1327DE2ED25FAE00A28845 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		6E5DC3A92ECD311E005188FE /* Flow.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Flow.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		6E1327F12ED25FB100A28845 /* Exceptions for "FlowWidgets" folder in "FlowWidgetsExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 6E1327D92ED25FAD00A28845 /* FlowWidgetsExtension */;
+		};
+		6E71765C2ED5D7AC003FAB2D /* Exceptions for "Flow" folder in "Flow" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 6E5DC3A82ECD311E005188FE /* Flow */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		6E1327E02ED25FAE00A28845 /* FlowWidgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				6E1327F12ED25FB100A28845 /* Exceptions for "FlowWidgets" folder in "FlowWidgetsExtension" target */,
+			);
+			path = FlowWidgets;
+			sourceTree = "<group>";
+		};
 		6E5DC3AB2ECD311E005188FE /* Flow */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				6E71765C2ED5D7AC003FAB2D /* Exceptions for "Flow" folder in "Flow" target */,
+			);
 			path = Flow;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		6E1327D72ED25FAD00A28845 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6E1327DF2ED25FAE00A28845 /* SwiftUI.framework in Frameworks */,
+				6E1327DD2ED25FAE00A28845 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		6E5DC3A62ECD311E005188FE /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -29,10 +99,21 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		6E1327DB2ED25FAD00A28845 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				6E1327DC2ED25FAD00A28845 /* WidgetKit.framework */,
+				6E1327DE2ED25FAE00A28845 /* SwiftUI.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		6E5DC3A02ECD311E005188FE = {
 			isa = PBXGroup;
 			children = (
 				6E5DC3AB2ECD311E005188FE /* Flow */,
+				6E1327E02ED25FAE00A28845 /* FlowWidgets */,
+				6E1327DB2ED25FAD00A28845 /* Frameworks */,
 				6E5DC3AA2ECD311E005188FE /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,6 +122,7 @@
 			isa = PBXGroup;
 			children = (
 				6E5DC3A92ECD311E005188FE /* Flow.app */,
+				6E1327DA2ED25FAD00A28845 /* FlowWidgetsExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -48,6 +130,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		6E1327D92ED25FAD00A28845 /* FlowWidgetsExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6E1327F22ED25FB100A28845 /* Build configuration list for PBXNativeTarget "FlowWidgetsExtension" */;
+			buildPhases = (
+				6E1327D62ED25FAD00A28845 /* Sources */,
+				6E1327D72ED25FAD00A28845 /* Frameworks */,
+				6E1327D82ED25FAD00A28845 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				6E1327E02ED25FAE00A28845 /* FlowWidgets */,
+			);
+			name = FlowWidgetsExtension;
+			packageProductDependencies = (
+			);
+			productName = FlowWidgetsExtension;
+			productReference = 6E1327DA2ED25FAD00A28845 /* FlowWidgetsExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		6E5DC3A82ECD311E005188FE /* Flow */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 6E5DC3B42ECD3122005188FE /* Build configuration list for PBXNativeTarget "Flow" */;
@@ -55,10 +159,12 @@
 				6E5DC3A52ECD311E005188FE /* Sources */,
 				6E5DC3A62ECD311E005188FE /* Frameworks */,
 				6E5DC3A72ECD311E005188FE /* Resources */,
+				6E1327F52ED25FB100A28845 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				6E1327EF2ED25FB100A28845 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				6E5DC3AB2ECD311E005188FE /* Flow */,
@@ -78,8 +184,11 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 2610;
-				LastUpgradeCheck = 2610;
+				LastUpgradeCheck = 2620;
 				TargetAttributes = {
+					6E1327D92ED25FAD00A28845 = {
+						CreatedOnToolsVersion = 26.1.1;
+					};
 					6E5DC3A82ECD311E005188FE = {
 						CreatedOnToolsVersion = 26.1;
 					};
@@ -100,11 +209,19 @@
 			projectRoot = "";
 			targets = (
 				6E5DC3A82ECD311E005188FE /* Flow */,
+				6E1327D92ED25FAD00A28845 /* FlowWidgetsExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		6E1327D82ED25FAD00A28845 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		6E5DC3A72ECD311E005188FE /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -115,6 +232,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		6E1327D62ED25FAD00A28845 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		6E5DC3A52ECD311E005188FE /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -124,7 +248,75 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		6E1327EF2ED25FB100A28845 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 6E1327D92ED25FAD00A28845 /* FlowWidgetsExtension */;
+			targetProxy = 6E1327EE2ED25FB100A28845 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		6E1327F32ED25FB100A28845 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9949N9WX3F;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = FlowWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = FlowWidgets;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = AntoineBleuze.Flow.FlowWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		6E1327F42ED25FB100A28845 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9949N9WX3F;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = FlowWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = FlowWidgets;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = AntoineBleuze.Flow.FlowWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		6E5DC3B22ECD3122005188FE /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -178,12 +370,14 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -227,20 +421,24 @@
 				DEVELOPMENT_TEAM = 9949N9WX3F;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
 				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
 				GCC_WARN_UNDECLARED_SELECTOR = YES;
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				VALIDATE_PRODUCT = YES;
 			};
@@ -256,13 +454,15 @@
 				DEVELOPMENT_TEAM = 9949N9WX3F;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Flow/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Nous avons besoin de votre position pour vous montrer les itinéraires.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -290,13 +490,15 @@
 				DEVELOPMENT_TEAM = 9949N9WX3F;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Flow/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Nous avons besoin de votre position pour vous montrer les itinéraires.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -317,6 +519,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		6E1327F22ED25FB100A28845 /* Build configuration list for PBXNativeTarget "FlowWidgetsExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6E1327F32ED25FB100A28845 /* Debug */,
+				6E1327F42ED25FB100A28845 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		6E5DC3A42ECD311E005188FE /* Build configuration list for PBXProject "Flow" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
