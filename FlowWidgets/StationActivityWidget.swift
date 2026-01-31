@@ -109,3 +109,18 @@ struct StationActivityWidget: Widget {
         }
     }
 }
+
+#Preview("Dynamic Island — Expanded", as: .dynamicIsland(.expanded), using: StationActivityAttributes(stationName: "Châtelet"), widget: {
+    StationActivityWidget()
+}, contentStates: {
+    
+        StationActivityAttributes.ContentState(
+            nextDepartures: ["2 min", "7 min", "12 min"],
+            lineName: "1",
+            direction: "La Défense",
+            lineColor: "FFCD00",
+            textColor: "000000"
+        )
+    
+})
+
