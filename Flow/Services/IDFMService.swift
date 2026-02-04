@@ -1,8 +1,8 @@
 import Combine
 import Foundation
 
-class IDFMService {
-    static let shared = IDFMService()
+public class IDFMService {
+    public static let shared = IDFMService()
 
     // Clé API à définir par l'utilisateur
     // Pour tester, l'utilisateur devra mettre sa clé ici ou via une méthode de config
@@ -10,7 +10,7 @@ class IDFMService {
 
     private let baseURL = "https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia"
 
-    func fetchDepartures(for stationId: String) -> AnyPublisher<[Departure], Error> {
+    public func fetchDepartures(for stationId: String) -> AnyPublisher<[Departure], Error> {
         guard !apiKey.isEmpty else {
             print("⚠️ API Key manquante pour IDFMService")
             return Fail(error: URLError(.userAuthenticationRequired)).eraseToAnyPublisher()

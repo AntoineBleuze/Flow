@@ -5,22 +5,30 @@ import Foundation
 import MapKit
 import SwiftUI
 
+#if canImport(UIKit)
+    import UIKit
+    public typealias MapPlatformColor = UIColor
+#elseif canImport(AppKit)
+    import AppKit
+    public typealias MapPlatformColor = NSColor
+#endif
+
 // Classe personnalisée pour les polylines avec couleur et nom
-public class CustomPolyline: MKPolyline {
-    var color: UIColor?
-    var lineName: String?
+public class ColoredPolyline: MKPolyline {
+    var color: MapPlatformColor = .blue
+    var lineName: String = ""
 }
 
 // Note: TransportType est déjà défini dans TransportModels.swift
 // On utilise celui-là.
 
 // Modèle pour un tracé de ligne
-struct LineTrace: Identifiable {
-    let id: String
-    let name: String
-    let color: Color
-    let polylines: [MKPolyline]  // Utilisation directe de MKPolyline
-    let type: TransportType
+public struct LineTrace: Identifiable {
+    public let id: String
+    public let name: String
+    public let color: Color
+    public let polylines: [MKPolyline]  // Utilisation directe de MKPolyline
+    public let type: TransportType
 }
 
 // Cache-friendly version of LineTrace (Codable)
@@ -60,59 +68,62 @@ struct CacheableLineTrace: Codable {
 }
 
 // Modèle pour une ligne passant par une station
-struct StationLine: Hashable, Identifiable {
-    var id: String { name + type.rawValue }
-    let name: String
-    let type: TransportType
+public struct StationLine: Hashable, Identifiable {
+    public var id: String { name + type.rawValue }
+    public let name: String
+    public let type: TransportType
 }
 
 // Modèle pour un arrêt (Quai individuel)
-struct StopPoint: Identifiable {
-    let id: String  // UUID (Généré pour l'arrêt physique)
-    let stopAreaId: String  // ID de la zone d'arrêt (pour API)
-    let name: String
-    let coordinate: CLLocationCoordinate2D
-    let type: TransportType
-    let lineName: String  // Nom de la ligne (ex: "1", "A")
+public struct StopPoint: Identifiable {
+    public let id: String  // UUID (Généré pour l'arrêt physique)
+    public let stopAreaId: String  // ID de la zone d'arrêt (pour API)
+    public let name: String
+    public let coordinate: CLLocationCoordinate2D
+    public let type: TransportType
+    public let lineName: String  // Nom de la ligne (ex: "1", "A")
 }
 
 // Modèle pour une Station (Regroupement d'arrêts)
-struct MapStation: Identifiable, Equatable {
-    let id: String  // ID de la zone d'arrêt (IDFM:Cxxxxx)
-    let name: String
-    let coordinate: CLLocationCoordinate2D
-    let platforms: [StopPoint]  // Liste des quais
-    let isHub: Bool
-    let mainType: TransportType  // Type principal pour l'affichage (ex: Métro gagne sur Bus)
-    let lines: [StationLine]  // Lignes desservant la station
+public struct MapStation: Identifiable, Equatable {
+    public let id: String  // ID de la zone d'arrêt (IDFM:Cxxxxx)
+    public let name: String
+    public let coordinate: CLLocationCoordinate2D
+    public let platforms: [StopPoint]  // Liste des quais
+    public let isHub: Bool
+    public let mainType: TransportType  // Type principal pour l'affichage (ex: Métro gagne sur Bus)
+    public let lines: [StationLine]  // Lignes desservant la station
 
-    static func == (lhs: MapStation, rhs: MapStation) -> Bool {
+    public static func == (lhs: MapStation, rhs: MapStation) -> Bool {
         return lhs.id == rhs.id
     }
 }
 
 // Service de données pour la carte
 @MainActor
-class MapDataService: ObservableObject {
-    static let shared = MapDataService()
+public class MapDataService: ObservableObject {
+    public static let shared = MapDataService()
 
-    @Published var lines: [LineTrace] = []
-    @Published var visibleStations: [MapStation] = []  // Stations visibles sur la carte
-    @Published var majorHubs: [MapStation] = []  // Pôles majeurs regroupés
-    @Published var hasCenteredOnUser: Bool = false
-    @Published var externalSelection: MapStation?  // Pour déclencher une sélection depuis l'extérieur (Recherche)
+    @Published public var lines: [LineTrace] = []
+    @Published public var visibleStations: [MapStation] = []  // Stations visibles sur la carte
+    @Published public var majorHubs: [MapStation] = []  // Pôles majeurs regroupés
+    @Published public var hasCenteredOnUser: Bool = false
+    @Published public var externalSelection: MapStation?  // Pour déclencher une sélection depuis l'extérieur (Recherche)
 
-    func selectStation(_ station: MapStation) {
+    public func selectStation(_ station: MapStation) {
         DispatchQueue.main.async {
             self.externalSelection = station
         }
     }
 
     // Stockage de toutes les stations pour le filtrage
-    @Published var allStations: [MapStation] = []
+    @Published public var allStations: [MapStation] = []
 
     // Cache des couleurs de lignes (Nom -> Couleur)
     var lineColorCache: [String: Color] = [:]
+
+    // Cache des overlays complets (Calculés une seule fois pour éviter le freeze au chargement)
+    @Published var cachedOverlays: [ColoredPolyline] = []
 
     private init() {
         loadData()
@@ -170,6 +181,8 @@ class MapDataService: ObservableObject {
 
     private func loadTraces() {
         // Try cache first
+        // Bypass cache check for now to ensure data refresh
+        /*
         if let cached = loadTracesFromCache() {
             DispatchQueue.main.async {
                 self.lines = cached
@@ -185,6 +198,7 @@ class MapDataService: ObservableObject {
             }
             return
         }
+        */
 
         // Cache miss - parse from GeoJSON
         struct Feature: Codable {
@@ -243,6 +257,16 @@ class MapDataService: ObservableObject {
                 // Filtrer les lignes non IDF
                 if fullName.contains("CDGVAL") || fullName.contains("ORLYVAL") {
                     continue
+                }
+
+                // Filtrer pour ne garder QUE Métro, RER, Tram et Transilien (H, J, K, L, N, P, R, U, V)
+                // Tout ce qui est "TRAIN" ou "TER" générique non-Transilien dégage.
+                let allowedTransiliens = ["H", "J", "K", "L", "N", "P", "R", "U", "V"]
+
+                if lineType == "TRAIN" || lineType == "TER" {
+                    if !allowedTransiliens.contains(lineName) {
+                        continue
+                    }
                 }
 
                 // Récupérer la couleur (PRIORITÉ au GeoJSON)
@@ -324,6 +348,11 @@ class MapDataService: ObservableObject {
                 print(
                     "✅ \(newLines.count) lignes chargées avec tracés réels détaillés (courbes du réseau ferré)"
                 )
+
+                // Déclencher le calcul des overlays (offsets) en background
+                Task {
+                    await self.precalculateOverlays()
+                }
             }
 
         } catch {
@@ -337,17 +366,42 @@ class MapDataService: ObservableObject {
 
         do {
             let count = try context.count(for: fetchRequest)
-            if count > 0 {
+            if false /* count > 0 */ {
                 print("💾 Chargement des arrêts depuis CoreData...")
                 let entities = try context.fetch(fetchRequest)
                 self.processEntities(entities)
             } else {
+                // Force loading from CSV to apply filtering (clearing old data first)
+                // TODO: Remove this forced reload after validation
+                print("🔄 Force reload des stations (suppression des anciennes)...")
+                self.clearStopPoints(in: context)
+                self.loadStopsFromCSV()
+                /*
                 print("📂 CoreData vide. Chargement depuis CSV...")
                 self.loadStopsFromCSV()
+                */
             }
         } catch {
             print("❌ Erreur CoreData: \(error)")
             self.loadStopsFromCSV()
+        }
+    }
+
+    private func clearStopPoints(in context: NSManagedObjectContext) {
+        let fetchRequest: NSFetchRequest<NSFetchRequestResult> = StopPointEntity.fetchRequest()
+        let deleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
+        deleteRequest.resultType = .resultTypeObjectIDs
+
+        do {
+            let result = try context.execute(deleteRequest) as? NSBatchDeleteResult
+            if let objectIDs = result?.result as? [NSManagedObjectID] {
+                NSManagedObjectContext.mergeChanges(
+                    fromRemoteContextSave: [NSDeletedObjectsKey: objectIDs], into: [context])
+            }
+            try context.save()
+            print("✅ StopPointEntity cleared.")
+        } catch {
+            print("❌ Error clearing StopPointEntity: \(error)")
         }
     }
 
@@ -391,6 +445,14 @@ class MapDataService: ObservableObject {
 
                         let type = self.mapTransportType(modeStr, lineName: lineName)
 
+                        // Filtrage des lignes TER/Train non-Transilien
+                        let allowedTransiliens = ["H", "J", "K", "L", "N", "P", "R", "U", "V"]
+                        if type == .transilien || type == .train {
+                            if !allowedTransiliens.contains(lineName) {
+                                continue
+                            }
+                        }
+
                         let stop = StopPoint(
                             id: stopId, stopAreaId: "", name: name, coordinate: coordinate,
                             type: type, lineName: lineName)
@@ -422,6 +484,12 @@ class MapDataService: ObservableObject {
             }
 
             self.finalizeStations(groupedStops)
+
+            // Une fois que tout est chargé, on lance le calcul des overlays en tache de fond
+            // On attend un peu que self.lines soit peuplé si ce n'est pas synchrone (mais ici c'est appelé après processEntities)
+            // En fait, loadTraces est appelé en parallèle. On va déclencher le calcul dans loadTraces.
+
+        } catch {
 
         } catch {
             print("❌ Erreur chargement arrêts CSV: \(error)")
@@ -849,6 +917,181 @@ class MapDataService: ObservableObject {
         return allStations
     }
 
+    // MARK: - Overlay Precalculation (Anti-Freeze)
+
+    func precalculateOverlays() async {
+        print("⚙️ Initialisation du calcul des overlays (offsets)...")
+        let linesToProcess = self.lines
+
+        // Ce calcul est lourd, on le fait hors du MainActor
+        let calculatedOverlays: [ColoredPolyline] = await Task.detached(priority: .userInitiated) {
+            var allPolylines: [(line: LineTrace, polyline: MKPolyline, index: Int)] = []
+            for line in linesToProcess {
+                for (index, polyline) in line.polylines.enumerated() {
+                    allPolylines.append((line: line, polyline: polyline, index: index))
+                }
+            }
+
+            var results: [ColoredPolyline] = []
+
+            for (lineIndex, item) in allPolylines.enumerated() {
+
+                let overlappingPolylines = allPolylines.enumerated().filter {
+                    otherIndex, otherItem in
+                    guard otherIndex != lineIndex else { return false }
+                    return MapDataService.polylinesOverlap(item.polyline, otherItem.polyline)
+                }
+
+                let totalOverlapping = overlappingPolylines.count + 1
+                var offsetIndex = 0
+
+                let allInGroup = ([item] + overlappingPolylines.map { $0.element }).sorted {
+                    $0.line.name < $1.line.name
+                }
+
+                if let myPosition = allInGroup.firstIndex(where: {
+                    $0.line.name == item.line.name && $0.index == item.index
+                }) {
+                    offsetIndex = myPosition
+                }
+
+                let offsetDistance: CLLocationDistance
+                if totalOverlapping > 1 {
+                    let baseOffset: CLLocationDistance = 15.0
+                    let centerOffset = Double(totalOverlapping - 1) / 2.0
+                    offsetDistance = (Double(offsetIndex) - centerOffset) * baseOffset
+                } else {
+                    offsetDistance = 0
+                }
+
+                let finalPolyline: MKPolyline
+                if offsetDistance != 0 {
+                    finalPolyline = MapDataService.offsetPolyline(item.polyline, by: offsetDistance)
+                } else {
+                    finalPolyline = item.polyline
+                }
+
+                let colored = ColoredPolyline(
+                    points: finalPolyline.points(), count: finalPolyline.pointCount)
+                colored.color = MapPlatformColor(item.line.color)
+                colored.lineName = item.line.name
+                results.append(colored)
+            }
+            return results
+        }.value
+
+        print("✅ Calcul des overlays terminé: \(calculatedOverlays.count) segments prêts.")
+
+        await MainActor.run {
+            self.cachedOverlays = calculatedOverlays
+        }
+    }
+
+    // MARK: - Geometry Helpers
+
+    /// Check if two polylines overlap (share similar paths)
+    nonisolated static func polylinesOverlap(_ polyline1: MKPolyline, _ polyline2: MKPolyline)
+        -> Bool
+    {
+        // Sample a few points and check if they're close
+        let sampleCount = min(5, polyline1.pointCount, polyline2.pointCount)
+        var matchingPoints = 0
+        let threshold: CLLocationDistance = 50  // 50 meters threshold
+
+        for i in 0..<sampleCount {
+            let idx1 = (i * polyline1.pointCount) / sampleCount
+            let idx2 = (i * polyline2.pointCount) / sampleCount
+
+            guard idx1 < polyline1.pointCount, idx2 < polyline2.pointCount else { continue }
+
+            let p1 = polyline1.points()[idx1]
+            let p2 = polyline2.points()[idx2]
+
+            let coord1 = p1.coordinate
+            let coord2 = p2.coordinate
+
+            let location1 = CLLocation(latitude: coord1.latitude, longitude: coord1.longitude)
+            let location2 = CLLocation(latitude: coord2.latitude, longitude: coord2.longitude)
+
+            if location1.distance(from: location2) < threshold {
+                matchingPoints += 1
+            }
+        }
+
+        return Double(matchingPoints) / Double(sampleCount) > 0.6
+    }
+
+    /// Offset a polyline by a given distance perpendicular to its path
+    nonisolated static func offsetPolyline(_ polyline: MKPolyline, by distance: CLLocationDistance)
+        -> MKPolyline
+    {
+        let pointsPtr = polyline.points()
+        let count = polyline.pointCount
+        var offsetCoordinates: [CLLocationCoordinate2D] = []
+
+        for i in 0..<count {
+            let currentPoint = pointsPtr[i].coordinate
+
+            // Calculate perpendicular direction based on neighboring points
+            var bearing: Double = 0
+
+            if i == 0 && count > 1 {
+                bearing = calculateBearing(from: currentPoint, to: pointsPtr[1].coordinate)
+            } else if i == count - 1 {
+                bearing = calculateBearing(from: pointsPtr[i - 1].coordinate, to: currentPoint)
+            } else {
+                let bearingIn = calculateBearing(
+                    from: pointsPtr[i - 1].coordinate, to: currentPoint)
+                let bearingOut = calculateBearing(
+                    from: currentPoint, to: pointsPtr[i + 1].coordinate)
+                bearing = (bearingIn + bearingOut) / 2
+            }
+
+            let perpendicularBearing = bearing + 90
+            let offsetCoord = coordinate(
+                from: currentPoint, distance: distance, bearing: perpendicularBearing)
+            offsetCoordinates.append(offsetCoord)
+        }
+
+        return MKPolyline(coordinates: offsetCoordinates, count: offsetCoordinates.count)
+    }
+
+    nonisolated static func calculateBearing(
+        from coord1: CLLocationCoordinate2D, to coord2: CLLocationCoordinate2D
+    ) -> Double {
+        let lat1 = coord1.latitude * .pi / 180
+        let lon1 = coord1.longitude * .pi / 180
+        let lat2 = coord2.latitude * .pi / 180
+        let lon2 = coord2.longitude * .pi / 180
+
+        let dLon = lon2 - lon1
+        let y = sin(dLon) * cos(lat2)
+        let x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon)
+        let bearing = atan2(y, x)
+
+        return bearing * 180 / .pi
+    }
+
+    nonisolated static func coordinate(
+        from coord: CLLocationCoordinate2D, distance: CLLocationDistance, bearing: Double
+    ) -> CLLocationCoordinate2D {
+        let earthRadius: Double = 6_371_000
+        let lat1 = coord.latitude * .pi / 180
+        let lon1 = coord.longitude * .pi / 180
+        let bearingRad = bearing * .pi / 180
+
+        let lat2 = asin(
+            sin(lat1) * cos(distance / earthRadius) + cos(lat1) * sin(distance / earthRadius)
+                * cos(bearingRad))
+        let lon2 =
+            lon1
+            + atan2(
+                sin(bearingRad) * sin(distance / earthRadius) * cos(lat1),
+                cos(distance / earthRadius) - sin(lat1) * sin(lat2))
+
+        return CLLocationCoordinate2D(latitude: lat2 * 180 / .pi, longitude: lon2 * 180 / .pi)
+    }
+
 }
 
 // Extension Couleur Hexadécimale (si pas déjà définie ailleurs)
@@ -883,7 +1126,7 @@ extension Color {
 
     /// Convert Color to hex string for caching
     func toHex() -> String? {
-        guard let components = UIColor(self).cgColor.components else { return nil }
+        guard let components = MapPlatformColor(self).cgColor.components else { return nil }
         let r = components.count > 0 ? components[0] : 0
         let g = components.count > 1 ? components[1] : 0
         let b = components.count > 2 ? components[2] : 0

@@ -3,15 +3,15 @@ import Combine
 import CoreLocation
 import Foundation
 
-class NavigationManager: ObservableObject {
-    static let shared = NavigationManager()
+public class NavigationManager: ObservableObject {
+    public static let shared = NavigationManager()
 
     @Published var isNavigating = false
     @Published var currentInstruction: String = ""
+    @Published var nextDepartures: [String] = []  // For UI display
     @Published private(set) var currentJourney: Journey?
     @Published var shouldSwitchToMap = false  // Trigger to switch to map tab
-
-    private var currentSectionIndex: Int = 0
+    @Published private(set) var currentSectionIndex: Int = 0
     private var currentActivity: Activity<NavigationActivityAttributes>?
 
     private var cancellables = Set<AnyCancellable>()
@@ -20,9 +20,9 @@ class NavigationManager: ObservableObject {
     // State tracking
     private enum NavigationState {
         case idle
-        case walkingToStation(targetStation: ItineraryPlace, nextSection: Section)
-        case waitingAtStation(station: ItineraryPlace, section: Section)
-        case onBoard(section: Section)
+        case walkingToStation(targetStation: ItineraryPlace, nextSection: ItinerarySection)
+        case waitingAtStation(station: ItineraryPlace, section: ItinerarySection)
+        case onBoard(section: ItinerarySection)
         case walkingToDestination(destination: ItineraryPlace)
     }
 
@@ -70,6 +70,7 @@ class NavigationManager: ObservableObject {
         state = .idle
         currentJourney = nil
         currentSectionIndex = 0
+        nextDepartures = []
 
         updateTimer?.invalidate()
         updateTimer = nil
@@ -228,7 +229,7 @@ class NavigationManager: ObservableObject {
         }
     }
 
-    private func fetchRealTimeData(for section: Section) {
+    private func fetchRealTimeData(for section: ItinerarySection) {
         guard let stopId = section.from?.id else { return }
 
         // Use IDFMService to fetch
@@ -244,7 +245,7 @@ class NavigationManager: ObservableObject {
             .store(in: &cancellables)
     }
 
-    private func processDepartures(_ departures: [Departure], for section: Section) {
+    private func processDepartures(_ departures: [Departure], for section: ItinerarySection) {
         guard let lineName = section.display_informations?.label,
             let direction = section.display_informations?.direction
         else { return }
@@ -257,6 +258,10 @@ class NavigationManager: ObservableObject {
 
         let nextTimes = relevant.prefix(2).compactMap {
             timeRemaining($0.stopDateTime.departureDateTime)
+        }
+
+        DispatchQueue.main.async {
+            self.nextDepartures = nextTimes
         }
 
         // Update Activity

@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-enum TransportType: String, CaseIterable, Identifiable {
+public enum TransportType: String, CaseIterable, Identifiable {
     case metro = "Métro"
     case tram = "Tramway"
     case rer = "RER"
@@ -10,9 +10,9 @@ enum TransportType: String, CaseIterable, Identifiable {
     case train = "Train"
     case cable = "Câble"
 
-    var id: String { self.rawValue }
+    public var id: String { self.rawValue }
 
-    var accentColor: Color {
+    public var accentColor: Color {
         switch self {
         case .metro: return Color.yellow
         case .rer: return Color.red
@@ -23,7 +23,7 @@ enum TransportType: String, CaseIterable, Identifiable {
         }
     }
 
-    static func getAssetName(mode: String?, label: String) -> String {
+    public static func getAssetName(mode: String?, label: String) -> String {
         guard let mode = mode else { return "" }
         let normalizedMode = mode.lowercased().folding(
             options: .diacriticInsensitive, locale: .current)
@@ -65,18 +65,18 @@ enum TransportType: String, CaseIterable, Identifiable {
     }
 }
 
-enum LineStatus: Int, Comparable {
+public enum LineStatus: Int, Comparable {
     case interrupted = 0  // Rouge: Interruptions exceptionnelles
     case disrupted = 1  // Orange: Perturbations (légers retards)
     case works = 2  // Jaune: Travaux
     case information = 3  // Bleu: Informations diverses
     case normal = 4  // Blanc: Trafic normal
 
-    static func < (lhs: LineStatus, rhs: LineStatus) -> Bool {
+    public static func < (lhs: LineStatus, rhs: LineStatus) -> Bool {
         return lhs.rawValue < rhs.rawValue
     }
 
-    var icon: String {
+    public var icon: String {
         switch self {
         case .interrupted: return "xmark.octagon.fill"
         case .disrupted: return "exclamationmark.triangle.fill"
@@ -86,7 +86,7 @@ enum LineStatus: Int, Comparable {
         }
     }
 
-    var color: Color {
+    public var color: Color {
         switch self {
         case .interrupted: return .red
         case .disrupted: return .orange
@@ -107,19 +107,19 @@ enum LineStatus: Int, Comparable {
     }
 }
 
-struct TransportLine: Identifiable {
-    let id = UUID()
-    let type: TransportType
-    let lineId: String  // ex: "1", "A", "T3a"
-    var status: LineStatus
-    var trafficInfos: [TrafficInfo] = []
+public struct TransportLine: Identifiable {
+    public let id = UUID()
+    public let type: TransportType
+    public let lineId: String  // ex: "1", "A", "T3a"
+    public var status: LineStatus
+    public var trafficInfos: [TrafficInfo] = []
 
     // Computed properties for backward compatibility
-    var message: String? { trafficInfos.first?.message }
-    var details: String? { trafficInfos.map { $0.message }.joined(separator: "\n\n") }
+    public var message: String? { trafficInfos.first?.message }
+    public var details: String? { trafficInfos.map { $0.message }.joined(separator: "\n\n") }
 
     // Logique pour récupérer vos assets SVG nommés spécifiquement
-    var assetName: String {
+    public var assetName: String {
         switch type {
         case .metro:
             var fixedId = lineId
@@ -155,19 +155,19 @@ struct TransportLine: Identifiable {
     }
 }
 
-struct TrafficInfo: Identifiable {
-    let id: String
-    let title: String
-    let message: String
-    let period: TrafficPeriod  // "active" or "future"
-    let severity: LineStatus
-    let startTime: Date?
-    let endTime: Date?
-    let impactedStops: [String]?
-    let impactedSection: String?
+public struct TrafficInfo: Identifiable {
+    public let id: String
+    public let title: String
+    public let message: String
+    public let period: TrafficPeriod  // "active" or "future"
+    public let severity: LineStatus
+    public let startTime: Date?
+    public let endTime: Date?
+    public let impactedStops: [String]?
+    public let impactedSection: String?
 }
 
-enum TrafficPeriod {
+public enum TrafficPeriod {
     case active
     case future
     case past

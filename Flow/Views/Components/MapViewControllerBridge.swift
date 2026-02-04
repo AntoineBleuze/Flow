@@ -162,170 +162,26 @@ struct MapViewControllerBridge: UIViewRepresentable {
     }
 
     private func updateStandardOverlays(_ mapView: MKMapView, data: MapDataService) {
-        let expectedOverlayCount = data.lines.reduce(0) { $0 + $1.polylines.count }
-        if mapView.overlays.count != expectedOverlayCount {
-            mapView.removeOverlays(mapView.overlays)
+        // Optimization: Use cached overlays to prevent freeze
+        if !data.cachedOverlays.isEmpty {
+            // Check if we need to update (simple count check or difference check)
+            // For now, if count implies we have something, we assume it's the right set.
+            // But we must check if current overlays match cached ones.
 
-            var allPolylines: [(line: LineTrace, polyline: MKPolyline, index: Int)] = []
-            for line in data.lines {
-                for (index, polyline) in line.polylines.enumerated() {
-                    allPolylines.append((line: line, polyline: polyline, index: index))
-                }
+            let currentColoredPolylines = mapView.overlays.compactMap { $0 as? ColoredPolyline }
+            if currentColoredPolylines.count != data.cachedOverlays.count {
+                mapView.removeOverlays(mapView.overlays)
+                mapView.addOverlays(data.cachedOverlays)
             }
-
-            for (lineIndex, item) in allPolylines.enumerated() {
-                let overlappingPolylines = allPolylines.enumerated().filter {
-                    otherIndex, otherItem in
-                    guard otherIndex != lineIndex else { return false }
-                    return polylinesOverlap(item.polyline, otherItem.polyline)
+        } else {
+            // If cache is empty, maybe trigger load? Or wait?
+            // If lines exist but cache empty, trigger calculation
+            if !data.lines.isEmpty {
+                Task {
+                    await data.precalculateOverlays()
                 }
-
-                let totalOverlapping = overlappingPolylines.count + 1
-                var offsetIndex = 0
-
-                let allInGroup = ([item] + overlappingPolylines.map { $0.element }).sorted {
-                    $0.line.name < $1.line.name
-                }
-                if let myPosition = allInGroup.firstIndex(where: {
-                    $0.line.name == item.line.name && $0.index == item.index
-                }) {
-                    offsetIndex = myPosition
-                }
-
-                let offsetDistance: CLLocationDistance
-                if totalOverlapping > 1 {
-                    let baseOffset: CLLocationDistance = 15.0
-                    let centerOffset = Double(totalOverlapping - 1) / 2.0
-                    offsetDistance = (Double(offsetIndex) - centerOffset) * baseOffset
-                } else {
-                    offsetDistance = 0
-                }
-
-                let finalPolyline: MKPolyline
-                if offsetDistance != 0 {
-                    finalPolyline = offsetPolyline(item.polyline, by: offsetDistance)
-                } else {
-                    finalPolyline = item.polyline
-                }
-
-                let coloredPolyline = ColoredPolyline(
-                    points: finalPolyline.points(), count: finalPolyline.pointCount)
-                coloredPolyline.color = UIColor(item.line.color)
-                coloredPolyline.lineName = item.line.name
-                mapView.addOverlay(coloredPolyline)
             }
         }
-    }
-
-    // MARK: - Helper Functions for Polyline Offset
-
-    /// Check if two polylines overlap (share similar paths)
-    private func polylinesOverlap(_ polyline1: MKPolyline, _ polyline2: MKPolyline) -> Bool {
-        let points1 = polyline1.points()
-        let points2 = polyline2.points()
-
-        // Sample a few points and check if they're close
-        let sampleCount = min(5, polyline1.pointCount, polyline2.pointCount)
-        var matchingPoints = 0
-        let threshold: CLLocationDistance = 50  // 50 meters threshold
-
-        for i in 0..<sampleCount {
-            let idx1 = (i * polyline1.pointCount) / sampleCount
-            let idx2 = (i * polyline2.pointCount) / sampleCount
-
-            guard idx1 < polyline1.pointCount, idx2 < polyline2.pointCount else { continue }
-
-            let coord1 = points1[idx1].coordinate
-            let coord2 = points2[idx2].coordinate
-
-            let location1 = CLLocation(latitude: coord1.latitude, longitude: coord1.longitude)
-            let location2 = CLLocation(latitude: coord2.latitude, longitude: coord2.longitude)
-
-            if location1.distance(from: location2) < threshold {
-                matchingPoints += 1
-            }
-        }
-
-        // If more than 60% of sampled points are close, consider them overlapping
-        return Double(matchingPoints) / Double(sampleCount) > 0.6
-    }
-
-    /// Offset a polyline by a given distance perpendicular to its path
-    private func offsetPolyline(_ polyline: MKPolyline, by distance: CLLocationDistance)
-        -> MKPolyline
-    {
-        let points = polyline.points()
-        var offsetCoordinates: [CLLocationCoordinate2D] = []
-
-        for i in 0..<polyline.pointCount {
-            let currentPoint = points[i].coordinate
-
-            // Calculate perpendicular direction based on neighboring points
-            var bearing: Double = 0
-
-            if i == 0 && polyline.pointCount > 1 {
-                // First point: use direction to next point
-                bearing = calculateBearing(from: currentPoint, to: points[1].coordinate)
-            } else if i == polyline.pointCount - 1 {
-                // Last point: use direction from previous point
-                bearing = calculateBearing(from: points[i - 1].coordinate, to: currentPoint)
-            } else {
-                // Middle points: use average of incoming and outgoing directions
-                let bearingIn = calculateBearing(from: points[i - 1].coordinate, to: currentPoint)
-                let bearingOut = calculateBearing(from: currentPoint, to: points[i + 1].coordinate)
-                bearing = (bearingIn + bearingOut) / 2
-            }
-
-            // Add 90 degrees to get perpendicular direction
-            let perpendicularBearing = bearing + 90
-
-            // Calculate offset coordinate
-            let offsetCoord = coordinate(
-                from: currentPoint, distance: distance, bearing: perpendicularBearing)
-            offsetCoordinates.append(offsetCoord)
-        }
-
-        return MKPolyline(coordinates: offsetCoordinates, count: offsetCoordinates.count)
-    }
-
-    /// Calculate bearing between two coordinates in degrees
-    private func calculateBearing(
-        from coord1: CLLocationCoordinate2D, to coord2: CLLocationCoordinate2D
-    ) -> Double {
-        let lat1 = coord1.latitude * .pi / 180
-        let lon1 = coord1.longitude * .pi / 180
-        let lat2 = coord2.latitude * .pi / 180
-        let lon2 = coord2.longitude * .pi / 180
-
-        let dLon = lon2 - lon1
-        let y = sin(dLon) * cos(lat2)
-        let x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon)
-        let bearing = atan2(y, x)
-
-        return bearing * 180 / .pi
-    }
-
-    /// Calculate a new coordinate from a starting point, given distance and bearing
-    private func coordinate(
-        from coord: CLLocationCoordinate2D, distance: CLLocationDistance, bearing: Double
-    ) -> CLLocationCoordinate2D {
-        let earthRadius: Double = 6_371_000  // meters
-
-        let lat1 = coord.latitude * .pi / 180
-        let lon1 = coord.longitude * .pi / 180
-        let bearingRad = bearing * .pi / 180
-
-        let lat2 = asin(
-            sin(lat1) * cos(distance / earthRadius) + cos(lat1) * sin(distance / earthRadius)
-                * cos(bearingRad))
-
-        let lon2 =
-            lon1
-            + atan2(
-                sin(bearingRad) * sin(distance / earthRadius) * cos(lat1),
-                cos(distance / earthRadius) - sin(lat1) * sin(lat2))
-
-        return CLLocationCoordinate2D(latitude: lat2 * 180 / .pi, longitude: lon2 * 180 / .pi)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -521,10 +377,4 @@ class StationAnnotationView: MKAnnotationView {
         // To move the view UP relative to the anchor, we need a negative Y offset.
         self.centerOffset = CGPoint(x: 0, y: -size.height / 2)
     }
-}
-
-// Custom Polyline to hold color and line name
-class ColoredPolyline: MKPolyline {
-    var color: UIColor = .blue
-    var lineName: String = ""
 }

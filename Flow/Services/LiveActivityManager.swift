@@ -2,8 +2,8 @@ import ActivityKit
 import Combine
 import Foundation
 
-class LiveActivityManager: ObservableObject {
-    static let shared = LiveActivityManager()
+public class LiveActivityManager: ObservableObject {
+    public static let shared = LiveActivityManager()
 
     @Published var activeActivityID: String?
 
@@ -20,7 +20,7 @@ class LiveActivityManager: ObservableObject {
 
     private init() {}
 
-    func startLiveActivity(
+    public func startLiveActivity(
         stationName: String, lineName: String, direction: String, nextDepartures: [String],
         stopIds: [String], lineColor: String, textColor: String
     ) {

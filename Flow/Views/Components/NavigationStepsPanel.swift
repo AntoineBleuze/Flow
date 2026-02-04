@@ -54,16 +54,7 @@ struct NavigationStepsPanel: View {
                     HStack(spacing: 4) {
                         ForEach(sections.filter { $0.type == "public_transport" }) { section in
                             if let display = section.display_informations {
-                                Circle()
-                                    .fill(Color(hex: display.color ?? "CCCCCC") ?? .gray)
-                                    .frame(width: 24, height: 24)
-                                    .overlay(
-                                        Text(display.code ?? display.label ?? "?")
-                                            .font(.system(size: 10, weight: .bold))
-                                            .foregroundColor(
-                                                Color(hex: display.text_color ?? "FFFFFF") ?? .white
-                                            )
-                                    )
+                                LineIconView(display: display, size: 24)
                             }
                         }
                     }
@@ -83,7 +74,13 @@ struct NavigationStepsPanel: View {
                         VStack(alignment: .leading, spacing: 12) {
                             ForEach(Array(sections.enumerated()), id: \.element.id) {
                                 index, section in
-                                NavigationStepRow(section: section, stepNumber: index + 1)
+                                NavigationStepRow(
+                                    section: section,
+                                    stepNumber: index + 1,
+                                    isCurrentStep: index == navigationManager.currentSectionIndex,
+                                    nextDepartures: index == navigationManager.currentSectionIndex
+                                        ? navigationManager.nextDepartures : []
+                                )
                             }
                         }
                         .padding()
@@ -91,9 +88,9 @@ struct NavigationStepsPanel: View {
                 }
             }
         }
-        .background(.ultraThinMaterial)
+        .background(.ultraThinMaterial.opacity(0.95))
         .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(radius: 10)
+        .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 5)
         .onTapGesture {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                 showFullSteps.toggle()
@@ -104,47 +101,64 @@ struct NavigationStepsPanel: View {
 
 /// Row pour une étape individuelle de navigation
 struct NavigationStepRow: View {
-    let section: Section
+    let section: ItinerarySection
     let stepNumber: Int
+    var isCurrentStep: Bool = false
+    var nextDepartures: [String] = []
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            // Step indicator
-            ZStack {
-                Circle()
-                    .fill(stepColor)
-                    .frame(width: 28, height: 28)
-
-                if section.type == "public_transport" {
-                    if let display = section.display_informations {
-                        Text(display.code ?? display.label ?? "\(stepNumber)")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.white)
-                    }
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                if section.type == "public_transport", let display = section.display_informations {
+                    LineIconView(display: display, size: 28)
                 } else {
-                    Image(systemName: stepIcon)
-                        .font(.system(size: 12))
-                        .foregroundColor(.white)
+                    ZStack {
+                        Circle()
+                            .fill(stepColor)
+                            .frame(width: 28, height: 28)
+
+                        if section.type != "public_transport" {
+                            Image(systemName: stepIcon)
+                                .font(.system(size: 12))
+                                .foregroundColor(.white)
+                        }
+                    }
                 }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(stepTitle)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+
+                    Text(stepSubtitle)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    if let duration = section.duration {
+                        Text("\(duration / 60) min")
+                            .font(.caption2)
+                            .foregroundColor(.blue)
+                    }
+
+                    // Show next departures if current step and waiting/walking to station
+                    if isCurrentStep && !nextDepartures.isEmpty {
+                        Text("Prochains départs: " + nextDepartures.joined(separator: ", "))
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .foregroundColor(.green)
+                            .transition(.opacity)
+                    }
+                }
+
+                Spacer()
             }
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(stepTitle)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-
-                Text(stepSubtitle)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                if let duration = section.duration {
-                    Text("\(duration / 60) min")
-                        .font(.caption2)
-                        .foregroundColor(.blue)
-                }
+            // Vertical stops list (only for public transport)
+            if section.type == "public_transport" {
+                VerticalItineraryStopsView(section: section)
+                    .padding(.leading, 14)  // Center with the circle (28/2 = 14)
+                    .padding(.top, 4)
             }
-
-            Spacer()
         }
     }
 
@@ -207,5 +221,51 @@ struct NavigationStepRow: View {
         default:
             return ""
         }
+    }
+}
+
+struct LineIconView: View {
+    let display: DisplayInformation
+    let size: CGFloat
+
+    var body: some View {
+        let assetName = getLineAssetName(
+            mode: display.commercial_mode, code: display.code ?? display.label ?? "")
+
+        if UIImage(named: assetName) != nil {
+            Image(assetName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: size, height: size)
+        } else {
+            Circle()
+                .fill(Color(hex: display.color ?? "CCCCCC") ?? .gray)
+                .frame(width: size, height: size)
+                .overlay(
+                    Text(display.code ?? display.label ?? "?")
+                        .font(.system(size: size * 0.4, weight: .bold))
+                        .foregroundColor(Color(hex: display.text_color ?? "FFFFFF") ?? .white)
+                )
+        }
+    }
+
+    private func getLineAssetName(mode: String?, code: String) -> String {
+        guard let mode = mode?.lowercased() else { return "" }
+
+        if mode.contains("metro") || mode.contains("métro") {
+            var fixedCode = code
+            if code == "3B" { fixedCode = "3bis" } else if code == "7B" { fixedCode = "7bis" }
+            return "metro\(fixedCode)"
+        } else if mode.contains("rer") {
+            return "rer\(code.uppercased())"
+        } else if mode.contains("tram") {
+            if code.lowercased().starts(with: "t") {
+                return code
+            }
+            return "T\(code)"
+        } else if mode.contains("train") || mode.contains("transilien") {
+            return "transilien\(code)"
+        }
+        return ""
     }
 }

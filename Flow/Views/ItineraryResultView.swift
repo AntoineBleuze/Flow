@@ -557,7 +557,7 @@ struct JourneyRow: View {
 }
 
 struct SectionDetailView: View {
-    let section: Section
+    let section: ItinerarySection
     let isLast: Bool
 
     var body: some View {

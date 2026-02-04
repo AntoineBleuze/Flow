@@ -2,12 +2,6 @@ import CoreData
 import Foundation
 import MapKit
 
-/// Structure locale pour éviter les problèmes d'isolation d'acteur avec le modèle global
-private struct BackgroundGeoJSONShape: Codable, Sendable {
-    let type: String
-    let coordinates: [[[Double]]]
-}
-
 /// Service de persistence pour les lignes de transport
 public class TransportLinePersistence {
 
@@ -63,67 +57,64 @@ public class TransportLinePersistence {
 
     /// Migre les données depuis les fichiers GeoJSON vers CoreData (à faire une seule fois)
     func migrateFromGeoJSON(completion: @escaping (Bool) -> Void) {
-        // Vérifie si déjà peuplé
+        // FORCE RELOAD: On ignore la vérification isDatabasePopulated pour forcer la mise à jour
+        // avec le nouveau fichier traces-du-reseau-ferre-idf.geojson
+        // TODO: Retirer ce contournement après validation si nécessaire
+        /*
         if isDatabasePopulated() {
             print("ℹ️ Base de données déjà peuplée, migration ignorée")
             completion(true)
             return
         }
+         */
 
         print("🔄 Début de la migration GeoJSON → CoreData...")
 
         // Utilise un contexte background pour ne pas bloquer l'UI
         persistentContainer.performBackgroundTask { backgroundContext in
-            // Parse les fichiers GeoJSON au lieu du CSV
+            // 1. Nettoyage préventif (Clear All Data en background)
+            print("🧹 Suppression des anciennes données...")
+            let deleteFetch = NSFetchRequest<NSFetchRequestResult>(
+                entityName: "TransportLineEntity")
+            let deleteRequest = NSBatchDeleteRequest(fetchRequest: deleteFetch)
+
+            do {
+                try backgroundContext.execute(deleteRequest)
+                try backgroundContext.save()
+                print("✅ Anciennes données supprimées.")
+            } catch {
+                print("❌ Erreur lors du nettoyage de la base: \(error)")
+                // On continue quand même, au risque de doublons (mais peu probable avec un batch delete)
+            }
+
+            // 2. Chargement des nouvelles données
+            // Parse les fichiers GeoJSON (GeoJSONTransportParser utilise maintenant traces-du-reseau-ferre-idf.geojson)
             let transportLines = GeoJSONTransportParser.parseAllTransportGeoJSON()
             print("📊 \(transportLines.count) lignes à migrer")
 
             var migratedCount = 0
 
             for (index, line) in transportLines.enumerated() {
-                // Crée l'entité TransportLineTrace
+                // Crée l'entité TransportLineEntity
                 let entity = TransportLineEntity(context: backgroundContext)
                 entity.routeId = line.routeId
-                entity.routeShortName = line.routeShortName
-                entity.routeLongName = line.routeLongName
-                entity.routeType = line.routeType
-                entity.routeColor = line.routeColor
+                entity.routeShortName = line.shortName
+                entity.routeLongName = line.longName
+                entity.routeType = line.type
+                entity.routeColor = line.color
 
-                // Parse le GeoJSON (déjà propre depuis le parser)
-                let geoJSONString = line.shape
-
-                // 🐛 DEBUG: Log le format pour les premières lignes
-                if index < 3 {
-                    print("\n🔍 DEBUG Ligne \(index):")
-                    print("   Route: \(line.routeId) - \(line.routeShortName)")
-                    print("   Shape: \(geoJSONString.prefix(150))")
-                }
-
-                if let jsonData = geoJSONString.data(using: .utf8),
-                    let geoJSON = try? JSONDecoder().decode(
-                        BackgroundGeoJSONShape.self, from: jsonData)
-                {
-
-                    // Pour chaque segment (LineString) dans le MultiLineString
-                    for (segmentIndex, lineString) in geoJSON.coordinates.enumerated() {
-                        // Pour chaque point dans le segment
-                        for point in lineString {
-                            guard point.count >= 2 else { continue }
-
-                            let coordEntity = CoordinatePointEntity(context: backgroundContext)
-                            coordEntity.longitude = point[0]  // GeoJSON: [lon, lat]
-                            coordEntity.latitude = point[1]
-                            coordEntity.segmentIndex = Int32(segmentIndex)
-                            coordEntity.transportLine = entity
-                        }
-                    }
-
-                    migratedCount += 1
-                } else {
-                    if index < 10 {
-                        print("⚠️ Ligne \(index) (\(line.routeShortName)): Échec parsing GeoJSON")
+                // Plus besoin de parser le string GeoJSON, on a déjà les coordonnées structurées
+                for (segmentIndex, segment) in line.coordinates.enumerated() {
+                    for point in segment {
+                        let coordEntity = CoordinatePointEntity(context: backgroundContext)
+                        coordEntity.latitude = point.latitude
+                        coordEntity.longitude = point.longitude
+                        coordEntity.segmentIndex = Int32(segmentIndex)
+                        coordEntity.transportLine = entity
                     }
                 }
+
+                migratedCount += 1
 
                 // Sauvegarde par batch tous les 50 éléments
                 if index % 50 == 0 {

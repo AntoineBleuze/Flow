@@ -2,15 +2,21 @@ import CoreData
 import Foundation
 import MapKit
 
+#if canImport(UIKit)
+    import UIKit
+#elseif canImport(AppKit)
+    import AppKit
+#endif
+
 @objc(TransportLineEntity)
 public class TransportLineEntity: NSManagedObject {
 
-    /// Convertit l'entité CoreData en CustomPolyline pour affichage sur la carte
-    func toCustomPolylines() -> [CustomPolyline] {
-        var polylines: [CustomPolyline] = []
+    /// Convertit l'entité CoreData en ColoredPolyline pour affichage sur la carte
+    func toCustomPolylines() -> [ColoredPolyline] {
+        var polylines: [ColoredPolyline] = []
 
         // Récupère la couleur à partir de la chaîne hexadécimale
-        let color = UIColor(hex: self.routeColor ?? "000000") ?? .blue  // Bleu par défaut
+        let color = MapPlatformColor(hex: self.routeColor ?? "000000") ?? .blue  // Bleu par défaut
 
         // Groupe les coordonnées par segment
         let sortedCoordinates = coordinates?.array as? [CoordinatePointEntity] ?? []
@@ -33,7 +39,7 @@ public class TransportLineEntity: NSManagedObject {
         // Crée une polyline pour chaque segment
         for (_, coords) in segmentDict.sorted(by: { $0.key < $1.key }) {
             if coords.count >= 2 {
-                let polyline = CustomPolyline(coordinates: coords, count: coords.count)
+                let polyline = ColoredPolyline(coordinates: coords, count: coords.count)
                 polyline.color = color
                 polyline.lineName = self.routeShortName ?? ""
                 polylines.append(polyline)
