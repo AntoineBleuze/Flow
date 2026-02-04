@@ -333,8 +333,8 @@ struct FavoriteStationRow: View {
             .sink(
                 receiveCompletion: { _ in isLoading = false },
                 receiveValue: { deps in
-                    let sorted = deps.sorted { (dep1: Departure, dep2: Departure) -> Bool in
-                        dep1.stopDateTime.departureDateTime < dep2.stopDateTime.departureDateTime
+                    let sorted = deps.sorted {
+                        $0.stopDateTime.departureDateTime < $1.stopDateTime.departureDateTime
                     }
                     self.nextDepartures = sorted.prefix(2).compactMap { dep in
                         let dateStr = dep.stopDateTime.departureDateTime

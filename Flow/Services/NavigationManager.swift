@@ -3,8 +3,8 @@ import Combine
 import CoreLocation
 import Foundation
 
-public class NavigationManager: ObservableObject {
-    public static let shared = NavigationManager()
+class NavigationManager: ObservableObject {
+    static let shared = NavigationManager()
 
     @Published var isNavigating = false
     @Published var currentInstruction: String = ""

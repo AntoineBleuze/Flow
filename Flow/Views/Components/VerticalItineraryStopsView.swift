@@ -1,13 +1,9 @@
 import SwiftUI
 
-public struct VerticalItineraryStopsView: View {
-    public let section: ItinerarySection
+struct VerticalItineraryStopsView: View {
+    let section: ItinerarySection
 
-    public init(section: ItinerarySection) {
-        self.section = section
-    }
-
-    public var body: some View {
+    var body: some View {
         if let stops = section.stop_date_times, !stops.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(stops.enumerated()), id: \.element.id) { index, stop in

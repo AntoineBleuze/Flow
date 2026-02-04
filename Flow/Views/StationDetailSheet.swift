@@ -308,16 +308,6 @@ struct StationDetailSheet: View {
             let timeStr = timeRemaining(dep.stopDateTime.departureDateTime)
             if timeStr.isEmpty { continue }
 
-            // Filtrage TER : On exclut si c'est un Train/TER mais PAS un Transilien connu
-            let mode = info.commercial_mode?.lowercased() ?? ""
-            let lbl = info.label ?? ""
-            let allowedTransiliens = ["H", "J", "K", "L", "N", "P", "R", "U", "V"]
-
-            if mode.contains("ter") || (mode.contains("train") && !allowedTransiliens.contains(lbl))
-            {
-                continue
-            }
-
             if groups[lineKey] == nil {
                 groups[lineKey] = LineGroup(
                     id: lineKey,

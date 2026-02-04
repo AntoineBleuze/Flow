@@ -3,7 +3,7 @@ import CoreLocation
 import Foundation
 import SwiftUI
 
-public class NearbyStationsViewModel: ObservableObject {
+class NearbyStationsViewModel: ObservableObject {
     @Published var nearbyStations: [MapStation] = []
     @Published var isLoading = false
     @Published var userLocation: CLLocationCoordinate2D?
@@ -24,7 +24,7 @@ public class NearbyStationsViewModel: ObservableObject {
     private let locationManager = LocationManager.shared
     private let mapDataService = MapDataService.shared
 
-    public init() {
+    init() {
         // Observer la localisation
         locationManager.$userLocation
             .receive(on: DispatchQueue.main)

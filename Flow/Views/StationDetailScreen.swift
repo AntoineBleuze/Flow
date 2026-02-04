@@ -2,12 +2,8 @@ import Combine
 import CoreLocation
 import SwiftUI
 
-public struct StationDetailScreen: View {
-    public let station: MapStation
-
-    public init(station: MapStation) {
-        self.station = station
-    }
+struct StationDetailScreen: View {
+    let station: MapStation
     @State private var departures: [Departure] = []
     @ObservedObject var favoritesService = FavoritesService.shared
     @State private var isLoading = false
@@ -34,7 +30,7 @@ public struct StationDetailScreen: View {
         var times: [String]
     }
 
-    public var body: some View {
+    var body: some View {
         ZStack {
             // Background
             Color(UIColor.systemGroupedBackground)

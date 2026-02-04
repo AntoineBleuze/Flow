@@ -2,21 +2,15 @@ import CoreData
 import Foundation
 import MapKit
 
-#if canImport(UIKit)
-    import UIKit
-#elseif canImport(AppKit)
-    import AppKit
-#endif
-
 @objc(TransportLineEntity)
 public class TransportLineEntity: NSManagedObject {
 
     /// Convertit l'entité CoreData en ColoredPolyline pour affichage sur la carte
-    func toCustomPolylines() -> [ColoredPolyline] {
+    func toColoredPolylines() -> [ColoredPolyline] {
         var polylines: [ColoredPolyline] = []
 
         // Récupère la couleur à partir de la chaîne hexadécimale
-        let color = MapPlatformColor(hex: self.routeColor ?? "000000") ?? .blue  // Bleu par défaut
+        let color = UIColor(hex: self.routeColor ?? "000000") ?? .blue  // Bleu par défaut
 
         // Groupe les coordonnées par segment
         let sortedCoordinates = coordinates?.array as? [CoordinatePointEntity] ?? []

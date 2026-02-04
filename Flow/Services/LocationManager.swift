@@ -45,20 +45,11 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         self.authorizationStatus = manager.authorizationStatus
-
-        #if os(iOS)
-            if manager.authorizationStatus == .authorizedWhenInUse
-                || manager.authorizationStatus == .authorizedAlways
-            {
-                manager.startUpdatingLocation()
-            }
-        #elseif os(macOS)
-            if manager.authorizationStatus == .authorized
-                || manager.authorizationStatus == .authorizedAlways
-            {
-                manager.startUpdatingLocation()
-            }
-        #endif
+        if manager.authorizationStatus == .authorizedWhenInUse
+            || manager.authorizationStatus == .authorizedAlways
+        {
+            manager.startUpdatingLocation()
+        }
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {

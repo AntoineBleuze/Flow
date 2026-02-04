@@ -140,18 +140,29 @@ struct ItineraryMapViewRepresentable: UIViewRepresentable {
                 view?.annotation = annotation
             }
             
-            // Color based on type
+            // Refined marker appearance
+            view?.displayPriority = .required
+            
             switch markerAnnotation.markerType {
             case .start:
-                view?.markerTintColor = .systemBlue
-                view?.glyphImage = UIImage(systemName: "circle.fill")
+                view?.markerTintColor = .white
+                view?.glyphImage = UIImage(systemName: "figure.walk")
+                view?.glyphTintColor = .systemBlue
             case .end:
                 view?.markerTintColor = .systemRed
-                view?.glyphImage = UIImage(systemName: "mappin")
+                view?.glyphImage = UIImage(systemName: "mappin.and.ellipse")
+                view?.glyphTintColor = .white
             case .transfer:
                 view?.markerTintColor = .systemOrange
                 view?.glyphImage = UIImage(systemName: "arrow.triangle.2.circlepath")
+                view?.glyphTintColor = .white
             }
+            
+            // Soft shadow
+            view?.layer.shadowColor = UIColor.black.cgColor
+            view?.layer.shadowOpacity = 0.2
+            view?.layer.shadowOffset = CGSize(width: 0, height: 2)
+            view?.layer.shadowRadius = 4
             
             return view
         }

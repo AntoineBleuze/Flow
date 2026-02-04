@@ -4,7 +4,8 @@ import UIKit
 
 struct StationMarker: View {
     let station: MapStation
-    let zoomLevel: Double  // Pour ajuster la taille si besoin (optionnel)
+    let zoomLevel: Double
+    var isSelected: Bool = false
 
     var body: some View {
         let lines = station.lines.prefix(4)
@@ -12,17 +13,19 @@ struct StationMarker: View {
 
         // Dimensions du marqueur
         let pointerHeight: CGFloat = 8
-        let bubbleSize: CGFloat = 40  // Taille du cercle blanc
+        let bubbleSize: CGFloat = isSelected ? 48 : 40  // Taille dynamique
 
         ZStack {
             // Forme de bulle (Ballon + Pointe)
             MarkerBubbleShape(pointerHeight: pointerHeight)
                 .fill(Color.white)
+                .glassEffect()
                 .frame(width: bubbleSize, height: bubbleSize + pointerHeight)
-                .shadow(color: Color.black.opacity(0.15), radius: 3, x: 0, y: 2)
+                .shadow(color: Color.black.opacity(isSelected ? 0.3 : 0.15), radius: isSelected ? 6 : 3, x: 0, y: 2)
+                .scaleEffect(isSelected ? 1.1 : 1.0)
+                .animation(.spring(response: 0.3, dampingFraction: 0.6, blendDuration: 0), value: isSelected)
 
             // Contenu (Lignes)
-            // On le décale légèrement vers le haut pour qu'il soit centré dans la partie "cercle"
             VStack(spacing: 0) {
                 if lines.isEmpty {
                     Circle()
@@ -30,111 +33,81 @@ struct StationMarker: View {
                         .frame(width: 12, height: 12)
                 } else if lines.count == 1 {
                     let line = lines[0]
-                    icon(for: line, size: 28)  // Un peu plus grand pour une seule ligne
+                    LineIcon(type: line.type, lineId: line.name, size: isSelected ? 34 : 28)
                 } else {
                     // Grille 2x2
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 2) {
+                    let iconSize: CGFloat = isSelected ? 14 : 12
+                    LazyVGrid(columns: [GridItem(.fixed(iconSize)), GridItem(.fixed(iconSize))], spacing: 2) {
                         ForEach(Array(lines.enumerated()), id: \.element) { index, line in
-                            icon(for: line, size: 12)
+                            LineIcon(type: line.type, lineId: line.name, size: iconSize)
                         }
                         if hasMore {
                             Circle()
-                                .fill(Color.gray.opacity(0.2))  // Plus subtil que le blanc sur blanc
-                                .frame(width: 8, height: 8)
+                                .fill(Color.gray.opacity(0.1))
+                                .frame(width: iconSize, height: iconSize)
                                 .overlay(
-                                    Text("+").font(.system(size: 6)).bold().foregroundColor(.black))
+                                    Text("+")
+                                        .font(.system(size: iconSize * 0.5, weight: .bold))
+                                        .foregroundColor(.secondary)
+                                )
                         }
                     }
-                    .frame(width: 28, height: 28)  // Conteneur borné pour la grille
+                    .frame(width: bubbleSize * 0.7, height: bubbleSize * 0.7)
                 }
             }
-            .padding(.bottom, pointerHeight)  // Remonter le contenu pour ne pas être dans la pointe
+            .padding(.bottom, pointerHeight)
+            .scaleEffect(isSelected ? 1.1 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.6, blendDuration: 0), value: isSelected)
         }
-        // Le nom de la station est masqué par défaut comme sur Apple Maps,
-        // ou on peut le rajouter en dessous/au-dessus si demandé, mais pour l'instant on se focus sur le marqueur.
-        // Si on veut le garder:
         .overlay(
             Text(station.name)
-                .font(.system(size: 10, weight: .bold))  // Plus lisible
-                .foregroundColor(.black)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(Color.white.opacity(0.95))
-                .cornerRadius(4)
-                .shadow(radius: 1)
+                .font(.system(size: isSelected ? 12 : 10, weight: .bold))
+                .foregroundColor(.primary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
                 .fixedSize()
-                .offset(y: 35)  // En dessous du marqueur
+                .offset(y: isSelected ? 45 : 35)
+                .opacity(isSelected || zoomLevel > 0.8 ? 1 : 0) // Show name when selected or zoomed in
             , alignment: .bottom
         )
     }
-
-    @ViewBuilder
-    private func icon(for line: StationLine, size: CGFloat) -> some View {
-        let assetName = TransportType.getAssetName(mode: line.type.rawValue, label: line.name)
-
-        if UIImage(named: assetName) != nil {
-            Image(assetName)
-                .resizable()
-                .scaledToFit()
-                .frame(width: size, height: size)
-        } else {
-            // Fallback shape
-            let color = MapDataService.shared.lineColorCache[line.name] ?? .gray
-
-            ZStack {
-                if line.type == .rer || line.type == .transilien {
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(color)
-                        .frame(width: size, height: size)
-                } else {
-                    Circle()
-                        .fill(color)
-                        .frame(width: size, height: size)
-                }
-
-                // Si on n'a pas d'image, on affiche le nom de la ligne
-                Text(line.name)
-                    .font(.system(size: size * 0.6, weight: .bold))
-                    .foregroundColor(.white)
-            }
-        }
-    }
 }
 
-// Forme personnalisée style Apple Maps
+// Forme personnalisée style Apple Maps améliorée
 struct MarkerBubbleShape: Shape {
     var pointerHeight: CGFloat = 8
-    var cornerRadius: CGFloat = 20  // Demi-largeur implicite pour un cercle
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
 
         let width = rect.width
         let height = rect.height - pointerHeight
-        let bottomCenter = CGPoint(x: width / 2, y: rect.height)
-
+        let radius = width / 2
+        let center = CGPoint(x: width / 2, y: radius)
+        
         // Cercle principal
         path.addArc(
-            center: CGPoint(x: width / 2, y: height / 2),
-            radius: width / 2,
-            startAngle: Angle(degrees: 0),
-            endAngle: Angle(degrees: 360),
+            center: center,
+            radius: radius,
+            startAngle: Angle(degrees: 150),
+            endAngle: Angle(degrees: 30),
             clockwise: false)
 
-        // Pointe
-        // On dessine un petit triangle ou une courbe de Bézier attachée au bas du cercle
-        // Pour faire simple et joli : une courbe quadratique
-
-        let pointerWidth: CGFloat = 12
-        path.move(to: CGPoint(x: width / 2 - pointerWidth / 2, y: height * 0.95))  // Départ un peu avant le bas du cercle
-
+        // Pointe plus douce
+        let bottomCenter = CGPoint(x: width / 2, y: rect.height)
+        
         path.addQuadCurve(
             to: bottomCenter,
-            control: CGPoint(x: width / 2 - pointerWidth / 4, y: height + pointerHeight / 2))
-
+            control: CGPoint(x: width / 2, y: rect.height - pointerHeight * 0.2))
+        
         path.addQuadCurve(
-            to: CGPoint(x: width / 2 + pointerWidth / 2, y: height * 0.95),
-            control: CGPoint(x: width / 2 + pointerWidth / 4, y: height + pointerHeight / 2))
+            to: CGPoint(x: width * 0.25, y: height * 0.9), // Point de retour sur le cercle
+            control: CGPoint(x: width / 2, y: rect.height - pointerHeight * 0.2))
+            
+        path.closeSubpath()
 
         return path
     }

@@ -1,8 +1,8 @@
 import Combine
 import Foundation
 
-public class FavoritesService: ObservableObject {
-    public static let shared = FavoritesService()
+class FavoritesService: ObservableObject {
+    static let shared = FavoritesService()
 
     @Published var favoriteStationIds: Set<String> = []
 
@@ -25,7 +25,7 @@ public class FavoritesService: ObservableObject {
         }
     }
 
-    public func toggleFavorite(stationId: String) {
+    func toggleFavorite(stationId: String) {
         if favoriteStationIds.contains(stationId) {
             favoriteStationIds.remove(stationId)
         } else {
@@ -34,7 +34,7 @@ public class FavoritesService: ObservableObject {
         saveFavorites()
     }
 
-    public func isFavorite(stationId: String) -> Bool {
+    func isFavorite(stationId: String) -> Bool {
         return favoriteStationIds.contains(stationId)
     }
 

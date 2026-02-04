@@ -1,208 +1,107 @@
 import CoreLocation
 import Foundation
 
-/// Structure pour représenter une trace de ligne de transport
-public struct TransportLineTrace: Identifiable {
-    public let id = UUID()
-    public let routeId: String
-    public let shortName: String
-    public let longName: String
-    public let type: String  // "Subway", "Tram", "Rail", "Bus"
-    public let color: String  // Hex string
-    public let coordinates: [[CLLocationCoordinate2D]]  // Array of polylines (segments)
-
-    public init(
-        routeId: String, shortName: String, longName: String, type: String, color: String,
-        coordinates: [[CLLocationCoordinate2D]]
-    ) {
-        self.routeId = routeId
-        self.shortName = shortName
-        self.longName = longName
-        self.type = type
-        self.color = color
-        self.coordinates = coordinates
-    }
-}
-
+/// Parser pour les fichiers GeoJSON de lignes de transport
 class GeoJSONTransportParser {
 
-    // Structures internes pour le décodage JSON
-    private struct FeatureCollection: Codable {
+    // MARK: - Structures
+
+    struct TransportLineTrace {
+        let routeId: String
+        let routeShortName: String
+        let routeLongName: String
+        let routeType: String
+        let routeColor: String
+        let shape: String
+    }
+
+    struct FeatureCollection: Codable {
         let type: String
         let features: [Feature]
     }
 
-    private struct Feature: Codable {
+    struct Feature: Codable {
         let type: String
         let geometry: Geometry
         let properties: Properties
     }
 
-    private struct Geometry: Codable {
+    struct Geometry: Codable {
+        let coordinates: [[[Double]]]  // MultiLineString: array of LineStrings
         let type: String
-        let multiLineStringCoordinates: [[[Double]]]?
-        let lineStringCoordinates: [[Double]]?
+    }
+
+    struct Properties: Codable {
+        let route_id: String
+        let route_short_name: String
+        let route_long_name: String
+        let route_type: String
+        let route_color: String
 
         enum CodingKeys: String, CodingKey {
-            case type, coordinates
-        }
-
-        init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            type = try container.decode(String.self, forKey: .type)
-
-            if type == "MultiLineString" {
-                multiLineStringCoordinates = try container.decode(
-                    [[[Double]]].self, forKey: .coordinates)
-                lineStringCoordinates = nil
-            } else if type == "LineString" {
-                lineStringCoordinates = try container.decode([[Double]].self, forKey: .coordinates)
-                multiLineStringCoordinates = nil
-            } else {
-                multiLineStringCoordinates = nil
-                lineStringCoordinates = nil
-            }
-        }
-
-        func encode(to encoder: Encoder) throws {
-            var container = encoder.container(keyedBy: CodingKeys.self)
-            try container.encode(type, forKey: .type)
-            if let multi = multiLineStringCoordinates {
-                try container.encode(multi, forKey: .coordinates)
-            } else if let line = lineStringCoordinates {
-                try container.encode(line, forKey: .coordinates)
-            }
+            case route_id
+            case route_short_name
+            case route_long_name
+            case route_type
+            case route_color
         }
     }
 
-    private struct Properties: Codable {
-        // Anciennes clés (lignes_metro.geojson etc)
-        let route_id: String?
-        let route_short_name: String?
-        let route_long_name: String?
-        let route_type: String?
-        let route_color: String?
+    // MARK: - Parsing
 
-        // Nouvelles clés (traces-du-reseau-ferre-idf.geojson)
-        let idrefligc: String?
-        let indice_lig: String?
-        let res_com: String?
-        let mode: String?
-        let colourweb_hexa: String?
-    }
-
-    static func parseGeoJSON(from url: URL) -> [TransportLineTrace] {
-        guard let data = try? Data(contentsOf: url) else {
-            print("❌ Erreur lecture fichier: \(url.lastPathComponent)")
-            return []
-        }
+    /// Parse un fichier GeoJSON et retourne un tableau de TransportLineTrace
+    static func parseGeoJSON(from fileURL: URL) -> [TransportLineTrace] {
+        var results: [TransportLineTrace] = []
 
         do {
-            let featureCollection = try JSONDecoder().decode(FeatureCollection.self, from: data)
-            var traces: [TransportLineTrace] = []
+            let data = try Data(contentsOf: fileURL)
+            let collection = try JSONDecoder().decode(FeatureCollection.self, from: data)
 
-            for feature in featureCollection.features {
-                // Determine properties based on available keys
-                var routeId = feature.properties.route_id
-                var shortName = feature.properties.route_short_name
-                var longName = feature.properties.route_long_name
-                var rawType = feature.properties.route_type
-                var color = feature.properties.route_color
+            print("📊 Parsing \(fileURL.lastPathComponent): \(collection.features.count) features")
 
-                // Mappings pour le nouveau fichier
-                if let newId = feature.properties.idrefligc {
-                    routeId = "IDFM:" + newId
-                }
-                if let newShortName = feature.properties.indice_lig {
-                    shortName = newShortName
-                }
-                if let newLongName = feature.properties.res_com {
-                    longName = newLongName
-                }
-                if let newMode = feature.properties.mode {
-                    // Mapping des modes
-                    // "METRO" -> "Subway"
-                    // "RER" -> "Rail"
-                    // "TRAIN" -> "Rail" (Transilien)
-                    // "TRAMWAY" -> "Tram"
-                    // "VAL" -> "Subway" (Orlyval)
-                    // "TER" -> Ignorer
-                    switch newMode {
-                    case "METRO", "VAL": rawType = "Subway"
-                    case "RER", "TRAIN": rawType = "Rail"
-                    case "TRAMWAY": rawType = "Tram"
-                    case "TER": continue  // Skip TER lines
-                    default: rawType = "Bus"  // Fallback but unlikely for ferre
-                    }
-                }
-                if let newColor = feature.properties.colourweb_hexa {
-                    color = newColor
-                }
+            for feature in collection.features {
+                // Convertit le geometry en GeoJSONShape pour compatibilité
+                let geoJSONShape = GeoJSONShape(
+                    type: feature.geometry.type,
+                    coordinates: feature.geometry.coordinates
+                )
 
-                // Secondary check for TER in res_com just in case
-                if let lName = longName, lName.contains("TER") {
-                    continue
-                }
+                // Encode le GeoJSONShape en string JSON pour storage
+                if let shapeData = try? JSONEncoder().encode(geoJSONShape),
+                    let shapeString = String(data: shapeData, encoding: .utf8)
+                {
 
-                guard let rId = routeId,
-                    let sName = shortName,
-                    let lName = longName,
-                    let rType = rawType,
-                    let rColor = color
-                else {
-                    continue
-                }
-
-                // Extract coordinates
-                var segments: [[[Double]]] = []
-                if let multi = feature.geometry.multiLineStringCoordinates {
-                    segments = multi
-                } else if let line = feature.geometry.lineStringCoordinates {
-                    segments = [line]
-                }
-
-                var polyLines: [[CLLocationCoordinate2D]] = []
-                for segment in segments {
-                    var segmentCoords: [CLLocationCoordinate2D] = []
-                    for point in segment {
-                        if point.count >= 2 {
-                            // GeoJSON est [lon, lat]
-                            segmentCoords.append(
-                                CLLocationCoordinate2D(latitude: point[1], longitude: point[0]))
-                        }
-                    }
-                    if !segmentCoords.isEmpty {
-                        polyLines.append(segmentCoords)
-                    }
-                }
-
-                if !polyLines.isEmpty {
                     let trace = TransportLineTrace(
-                        routeId: rId,
-                        shortName: sName,
-                        longName: lName,
-                        type: rType,
-                        color: rColor,
-                        coordinates: polyLines
+                        routeId: feature.properties.route_id,
+                        routeShortName: feature.properties.route_short_name,
+                        routeLongName: feature.properties.route_long_name,
+                        routeType: feature.properties.route_type,
+                        routeColor: feature.properties.route_color,
+                        shape: shapeString
                     )
-                    traces.append(trace)
+
+                    results.append(trace)
                 }
             }
 
-            return traces
+            print("✅ Parsé \(results.count) lignes depuis \(fileURL.lastPathComponent)")
 
         } catch {
-            print("❌ Erreur décodage GeoJSON (\(url.lastPathComponent)): \(error)")
-            return []
+            print("❌ Erreur parsing GeoJSON \(fileURL.lastPathComponent): \(error)")
         }
+
+        return results
     }
 
+    /// Parse tous les fichiers GeoJSON de transport depuis le bundle
     static func parseAllTransportGeoJSON() -> [TransportLineTrace] {
         var allLines: [TransportLineTrace] = []
 
-        // On utilise uniquement le nouveau fichier complet
         let fileNames = [
-            "traces-du-reseau-ferre-idf"
+            "lignes_metro",
+            "lignes_rer",
+            "lignes_tram",
+            "lignes_transiliens",
         ]
 
         for fileName in fileNames {
@@ -214,7 +113,7 @@ class GeoJSONTransportParser {
             }
         }
 
-        print("📊 Total: \(allLines.count) lignes de transport chargées depuis \(fileNames)")
+        print("📊 Total: \(allLines.count) lignes de transport chargées")
         return allLines
     }
 }

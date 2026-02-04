@@ -7,7 +7,7 @@
 #endif
 
 extension PlatformColor {
-    public convenience init?(hex: String) {
+    convenience init?(hex: String) {
         let hexString = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
         var int: UInt64 = 0
         Scanner(string: hexString).scanHexInt64(&int)

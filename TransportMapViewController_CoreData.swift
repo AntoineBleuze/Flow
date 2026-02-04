@@ -122,8 +122,8 @@ class TransportMapViewControllerWithCoreData: UIViewController {
         print("🗺️ Affichage de \(entities.count) lignes sur la carte")
         
         for entity in entities {
-            // Convertit chaque entité en CustomPolylines
-            let polylines = entity.toCustomPolylines()
+            // Convertit chaque entité en ColoredPolylines
+            let polylines = entity.toColoredPolylines()
             
             // Ajoute à la carte
             mapView.addOverlays(polylines)
@@ -149,9 +149,9 @@ class TransportMapViewControllerWithCoreData: UIViewController {
 extension TransportMapViewControllerWithCoreData: MKMapViewDelegate {
     
     func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
-        if let customPolyline = overlay as? CustomPolyline {
-            let renderer = MKPolylineRenderer(polyline: customPolyline)
-            renderer.strokeColor = customPolyline.color
+        if let coloredPolyline = overlay as? ColoredPolyline {
+            let renderer = MKPolylineRenderer(polyline: coloredPolyline)
+            renderer.strokeColor = coloredPolyline.color
             renderer.lineWidth = 4.0
             renderer.lineCap = .round
             renderer.lineJoin = .round

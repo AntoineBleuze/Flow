@@ -34,22 +34,20 @@ struct AppMapView: View {
             )
             .ignoresSafeArea()
 
-            // Top Controls
-            VStack(spacing: 0) {
-                if navigationManager.isNavigating {
-                    NavigationStepsPanel(showFullSteps: $showNavigationSteps)
-                        .padding(.horizontal)
-                        .padding(.top, 50)  // Adjust for safe area/notch
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                        .zIndex(2)  // Ensure it's on top
-                }
+            // Top Controls (Vide pour l'instant ou supprime le VStack du haut si vide)
 
-                Spacer()
-            }
+            Spacer()
 
             if showControls {
                 VStack(spacing: 0) {
                     Spacer()
+
+                    // Navigation Steps Panel (replaces old button)
+                    if navigationManager.isNavigating {
+                        NavigationStepsPanel(showFullSteps: $showNavigationSteps)
+                            .padding(.horizontal)
+                            .padding(.bottom, 8)
+                    }
 
                     // Recenter Button (Bottom Right)
                     HStack {

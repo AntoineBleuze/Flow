@@ -40,22 +40,19 @@ class TransportLineDebugger {
         print("📦 1. VÉRIFICATION DES DÉPENDANCES")
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-        // Test Color extension (via MapPlatformColor)
-        if let testColor = MapPlatformColor(hex: "FF0000") {
+        // Test UIColor extension (via PlatformColor)
+        if let testColor = PlatformColor(hex: "FF0000") {
             print("✅ UIColor/NSColor(hex:) fonctionne - Couleur test: \(testColor)")
         } else {
             print("❌ ERREUR: UIColor/NSColor(hex:) ne fonctionne pas!")
         }
 
         // Test ColoredPolyline
-        let testCoords = [
-            CLLocationCoordinate2D(latitude: 48.8566, longitude: 2.3522),
-            CLLocationCoordinate2D(latitude: 48.8606, longitude: 2.3376),
-        ]
+        let testCoords = [CLLocationCoordinate2D(latitude: 48.8, longitude: 2.3)]
         let testPolyline = ColoredPolyline(coordinates: testCoords, count: testCoords.count)
-        testPolyline.lineName = "Ligne Test"
         testPolyline.color = .red
-        print("✅ ColoredPolyline créée: \(testPolyline.lineName)")
+        testPolyline.lineName = "TEST"
+        print("✅ CustomPolyline créée: \(testPolyline.lineName)")
 
         // Test GeoJSONShape parsing
         let testJSON = """
@@ -201,7 +198,7 @@ class TransportLineDebugger {
             // Teste la conversion en polylines
             if let firstLine = allLines.first {
                 print("\n🧪 Test de conversion en polylines:")
-                let polylines = firstLine.toCustomPolylines()
+                let polylines = firstLine.toColoredPolylines()
                 print("   Ligne: \(firstLine.routeShortName ?? "?")")
                 print("   Polylines générées: \(polylines.count)")
                 for (index, polyline) in polylines.enumerated() {
