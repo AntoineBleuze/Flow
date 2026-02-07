@@ -145,7 +145,7 @@ struct RadiusSelector: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
-            .glassEffect(Glass.regular, in: .capsule)
+            .glassEffect(.standard.interactive(), in: Capsule())
             .overlay(
                 Capsule()
                     .stroke(Color.blue.opacity(0.3), lineWidth: 1)
@@ -249,9 +249,9 @@ struct NearbyStationRow: View {
         }
         .padding()
         // Application de l'effet Liquid Glass "intelligemment"
-        // On utilise .rect pour conserver l'aspect carte, et on le rend interactif
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
-        .padding(.vertical, 4)
+        // On utilise RoundedRectangle pour conserver l'aspect carte, et on le rend interactif
+        .glassEffect(.standard.interactive(), in: RoundedRectangle(cornerRadius: 12))
+        .padding(.vertical, 8)
         .onAppear {
             loadPreview()
         }

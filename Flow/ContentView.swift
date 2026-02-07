@@ -126,7 +126,7 @@ struct TrafficViewContent: View {
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
-                        .glassEffect(Glass.regular, in: Capsule())
+                        .glassEffect(.standard.interactive(), in: Capsule())
                         .overlay(
                             Capsule()
                                 .stroke(
@@ -138,16 +138,7 @@ struct TrafficViewContent: View {
 
                     // Filtered Lines by Status
                     ForEach(TransportType.allCases) { type in
-                        // Filter lines based on selected status filter
-                        let filteredLines = service.lines.filter { line in
-                            // Filter by status
-                            if selectedFilter == .all {
-                                return line.type == type
-                            } else {
-                                return line.type == type
-                                    && line.status == selectedFilter.matchingStatus
-                            }
-                        }
+                        let filteredLines = lines(for: type)
 
                         if !filteredLines.isEmpty {
                             VStack(alignment: .leading, spacing: 10) {
@@ -169,7 +160,7 @@ struct TrafficViewContent: View {
                                                 LineIcon(line: line, size: 55)
                                                     .frame(width: 80, height: 80)
                                                     .glassEffect(
-                                                        .regular.interactive(),
+                                                        .standard.interactive(),
                                                         in: .rect(cornerRadius: 16))
 
                                                 // Status Badge Overlay - positionné en bas à droite
@@ -215,6 +206,16 @@ struct TrafficViewContent: View {
             }
             .navigationTitle("Trafic")
             .navigationBarTitleDisplayMode(.large)
+        }
+    }
+
+    private func lines(for type: TransportType) -> [TransportLine] {
+        service.lines.filter { line in
+            if selectedFilter == .all {
+                return line.type == type
+            } else {
+                return line.type == type && line.status == selectedFilter.matchingStatus
+            }
         }
     }
 }
@@ -313,8 +314,7 @@ struct FavoriteStationRow: View {
                 .font(.caption)
         }
         .padding()
-        .background(.regularMaterial)
-        .cornerRadius(12)
+        .glassEffect(.standard.interactive(), in: RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal)
         .onAppear {
             loadPreview()

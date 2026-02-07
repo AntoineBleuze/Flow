@@ -112,7 +112,7 @@ struct StationDetailScreen: View {
                 }
                 .pickerStyle(SegmentedPickerStyle())
                 .padding(.horizontal)
-                .padding(.top, 10)
+                .padding(.top, 16)
             }
 
             ScrollView {
@@ -125,107 +125,124 @@ struct StationDetailScreen: View {
                     }
 
                     ForEach(filteredGroups) { group in
-                        VStack(alignment: .leading, spacing: 10) {
-                            // En-tête de ligne (Icone + Nom optionnel)
-                            HStack {
-                                // Icone Ligne
-                                LineIcon(
-                                    type: determineType(mode: group.mode),
-                                    lineId: group.label,
-                                    size: 40
+                        StationLineRow(
+                            group: group,
+                            onLiveActivityStart: { lineName, direction, nextDepartures, lineColor, textColor in
+                                startLiveActivity(
+                                    lineName: lineName,
+                                    direction: direction,
+                                    nextDepartures: nextDepartures,
+                                    lineColor: lineColor,
+                                    textColor: textColor
                                 )
-
-                                if let network = group.network {
-                                    Text(network)
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                }
-
-                                Spacer()
                             }
-                            .padding(.horizontal)
-
-                            // Carte des directions
-                            VStack(spacing: 0) {
-                                ForEach(Array(group.directions.enumerated()), id: \.element.id) {
-                                    index, direction in
-                                    HStack {
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text(direction.direction)
-                                                .font(.body)
-                                                .foregroundColor(.primary)
-                                                .lineLimit(2)
-
-                                            // Liste des temps (ex: "1, 4 min")
-                                            HStack(spacing: 0) {
-                                                ForEach(
-                                                    Array(direction.times.enumerated()),
-                                                    id: \.offset
-                                                ) { tIndex, time in
-                                                    Text(
-                                                        time
-                                                            + (tIndex < direction.times.count - 1
-                                                                ? ", " : "")
-                                                    )
-                                                    .font(.body)
-                                                    .bold()
-                                                    .foregroundColor(.green)
-                                                }
-
-                                                Image(systemName: "wifi")  // Symbole temps réel
-                                                    .font(.caption)
-                                                    .foregroundColor(.green)
-                                                    .padding(.leading, 4)
-                                            }
-                                        }
-
-                                        Spacer()
-
-                                        // Bouton Live Activity pour cette direction
-                                        Button(action: {
-                                            startLiveActivity(
-                                                lineName: group.label,
-                                                direction: direction.direction,
-                                                nextDepartures: direction.times,
-                                                lineColor: group.color,
-                                                textColor: group.text_color ?? "FFFFFF"
-                                            )
-                                        }) {
-                                            Image(systemName: "waveform.path.ecg")
-                                                .font(.title3)
-                                                .foregroundColor(.green)
-                                                .padding(8)
-                                                .background(Color.green.opacity(0.1))
-                                                .clipShape(Circle())
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                    .padding()
-
-                                    if index < group.directions.count - 1 {
-                                        Divider()
-                                            .padding(.leading)
-                                    }
-                                }
-                            }
-                            // Replace glassEffect with standard styling for screen
-                            .background(Color(UIColor.secondarySystemGroupedBackground))
-                            .cornerRadius(12)
-                            // Or use glassEffect if user prefers consistency even on white bg
-                            //.glassEffect()
-                        }
-                        .padding(.horizontal)
+                        )
                     }
                 }
                 .padding(.top)
-                .padding(.bottom, 50)  // Bottom padding for content
+                .padding(.bottom, 50)
             }
+        }
+    }
+
+    struct StationLineRow: View {
+        let group: LineGroup
+        let onLiveActivityStart: (String, String, [String], String, String) -> Void
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 10) {
+                // En-tête de ligne (Icone + Nom optionnel)
+                HStack {
+                    // Icone Ligne
+                    LineIcon(
+                        type: StationDetailScreen.determineType(mode: group.mode),
+                        lineId: group.label,
+                        size: 40
+                    )
+
+                    if let network = group.network {
+                        Text(network)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+
+                    Spacer()
+                }
+                .padding(.horizontal)
+
+                // Carte des directions
+                VStack(spacing: 0) {
+                    ForEach(Array(group.directions.enumerated()), id: \.element.id) {
+                        index, direction in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(direction.direction)
+                                    .font(.body)
+                                    .foregroundColor(.primary)
+                                    .lineLimit(2)
+
+                                // Liste des temps (ex: "1, 4 min")
+                                HStack(spacing: 0) {
+                                    ForEach(
+                                        Array(direction.times.enumerated()),
+                                        id: \.offset
+                                    ) { tIndex, time in
+                                        Text(
+                                            time
+                                                + (tIndex < direction.times.count - 1
+                                                    ? ", " : "")
+                                        )
+                                        .font(.body)
+                                        .bold()
+                                        .foregroundColor(.green)
+                                    }
+
+                                    Image(systemName: "wifi")  // Symbole temps réel
+                                        .font(.caption)
+                                        .foregroundColor(.green)
+                                        .padding(.leading, 4)
+                                }
+                            }
+
+                            Spacer()
+
+                            // Bouton Live Activity pour cette direction
+                            Button(action: {
+                                onLiveActivityStart(
+                                    group.label,
+                                    direction.direction,
+                                    direction.times,
+                                    group.color,
+                                    group.text_color ?? "FFFFFF"
+                                )
+                            }) {
+                                Image(systemName: "waveform.path.ecg")
+                                    .font(.title3)
+                                    .foregroundColor(.green)
+                                    .padding(8)
+                                    .background(Color.green.opacity(0.1))
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding()
+
+                        if index < group.directions.count - 1 {
+                            Divider()
+                                .padding(.leading)
+                        }
+                    }
+                }
+                // Utilisation de l'effet Glass pour la cohérence
+                .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 12))
+            }
+            .padding(.horizontal)
         }
     }
 
     // MARK: - Logic Helpers (Copied/Adapted from StationDetailSheet)
 
-    private func determineType(mode: String?) -> TransportType {
+    static func determineType(mode: String?) -> TransportType {
         guard let mode = mode?.lowercased() else { return .bus }
         if mode.contains("rer") { return .rer }
         if mode.contains("metro") || mode.contains("métro") { return .metro }

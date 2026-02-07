@@ -1,5 +1,6 @@
 import MapKit
 import SwiftUI
+import Combine
 
 struct AppMapView: View {
     // 1. Définition de la région par défaut (Paris)
@@ -17,8 +18,19 @@ struct AppMapView: View {
     @State private var selectedStation: MapStation?
 
     @State private var visibleRegion: MKCoordinateRegion?
-    @State private var followUserLocation = false
-    @State private var showNavigationSteps = false  // For NavigationStepsPanel expansion
+    @State private var userTrackingMode: MKUserTrackingMode = .none
+    
+    // MARK: - Itinerary State
+    @State private var startStation: MapStation?
+    @State private var endStation: MapStation?
+    @State private var departureDate = Date()
+    @State private var isArrivalTime = false
+    @State private var searchResults: [Journey] = []
+    @State private var selectedJourney: Journey?
+    @State private var itineraryPanelState: ItineraryPanelState = .compact
+    @State private var isNavigatingImmersive = false
+    
+    @State private var cancellables = Set<AnyCancellable>()
 
     var showControls: Bool = true
 
@@ -27,45 +39,50 @@ struct AppMapView: View {
             MapViewControllerBridge(
                 data: data,
                 selectedStation: $selectedStation,
-                followUserLocation: $followUserLocation,
-                journey: navigationManager.currentJourney,
+                userTrackingMode: $userTrackingMode,
+                journey: navigationManager.isNavigating ? navigationManager.currentJourney : selectedJourney,
                 useMainMap: showControls,
                 showAnnotations: showControls
             )
             .ignoresSafeArea()
+            
+            // ItinerarySearchPanel removed. Integrated into SearchTabContent.
+            
+            // Immersive Navigation View
+            // Immersive Navigation View
+            if navigationManager.isNavigating, let journey = navigationManager.currentJourney {
+                ImmersiveNavigationView(
+                    journey: journey,
+                    navigationMode: $navigationManager.isNavigating,
+                    userTrackingMode: $userTrackingMode
+                )
+                .zIndex(20)
+                .transition(.move(edge: .bottom))
+            }
 
-            // Top Controls (Vide pour l'instant ou supprime le VStack du haut si vide)
-
-            Spacer()
-
-            if showControls {
+            // Controls Layer (Recenter Button)
+            if showControls && !isNavigatingImmersive {
                 VStack(spacing: 0) {
                     Spacer()
-
-                    // Navigation Steps Panel (replaces old button)
-                    if navigationManager.isNavigating {
-                        NavigationStepsPanel(showFullSteps: $showNavigationSteps)
-                            .padding(.horizontal)
-                            .padding(.bottom, 8)
-                    }
 
                     // Recenter Button (Bottom Right)
                     HStack {
                         Spacer()
 
                         Button(action: {
-                            followUserLocation = true
+                            cycleUserTrackingMode()
                         }) {
-                            Image(systemName: followUserLocation ? "location.fill" : "location")
+                            Image(systemName: userTrackingModeImageName)
                                 .font(.title2)
-                                .foregroundColor(followUserLocation ? .blue : .primary)
+                                .foregroundColor(userTrackingMode == .none ? .primary : .blue)
                                 .padding(14)
                                 .background(.clear)
                                 .glassEffect(.regular.interactive(), in: .circle)
                         }
                         .padding(.trailing, 16)
                     }
-                    .padding(.bottom, 20)  // Juste au-dessus de la tab bar
+                    // Adjust padding based on panel state to avoid overlap
+                    .padding(.bottom, itineraryPanelState == .compact ? 100 : 20)
                 }
             }
         }
@@ -78,18 +95,66 @@ struct AppMapView: View {
         }
         .onChange(of: data.externalSelection) { _, newStation in
             if let station = newStation {
-                // Centrer la carte
                 withAnimation {
-                    position = .region(
-                        MKCoordinateRegion(
-                            center: station.coordinate,
-                            span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
-                        ))
+                    // Center roughly on station
                 }
-                // Ouvrir le détail
                 selectedStation = station
             }
         }
+        // Start Navigation Trigger
+        .onChange(of: selectedJourney?.id) { _, newId in
+            if newId != nil {
+                // Determine if we should auto-start navigation or just show route on map
+                // For now, user taps "Start" in the JourneyCard? 
+                // Wait, JourneyCard is just display. We need a "Start" button in the results or card details.
+                // The Panel shows results. Tapping a card selects it.
+                // We should add a "Start Navigation" button in the Panel when a journey is selected.
+            }
+        }
+    }
+
+    private var userTrackingModeImageName: String {
+        switch userTrackingMode {
+        case .none: return "location"
+        case .follow: return "location.fill"
+        case .followWithHeading: return "location.north.line.fill"
+        @unknown default: return "location"
+        }
+    }
+
+    private func cycleUserTrackingMode() {
+        switch userTrackingMode {
+        case .none:
+            userTrackingMode = .follow
+        case .follow:
+            userTrackingMode = .followWithHeading
+        case .followWithHeading:
+            userTrackingMode = .none
+        @unknown default:
+            userTrackingMode = .none
+        }
+    }
+    
+    private func performSearch() {
+        guard let start = startStation, let end = endStation else { return }
+        
+        // Ensure start coordinate is valid or use user location
+        // ... (simplified logic)
+        
+        IDFMItineraryService.shared.searchItinerary(
+            from: start.coordinate,
+            to: end,
+            date: departureDate,
+            isArrival: isArrivalTime
+        )
+        .receive(on: DispatchQueue.main)
+        .sink(receiveCompletion: { _ in }, receiveValue: { results in
+            self.searchResults = results
+            withAnimation {
+                self.itineraryPanelState = .results
+            }
+        })
+        .store(in: &cancellables)
     }
 }
 

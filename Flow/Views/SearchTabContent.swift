@@ -1,6 +1,7 @@
 import CoreData
 import CoreLocation
 import SwiftUI
+import Combine
 
 struct SearchTabContent: View {
     @Binding var searchText: String
@@ -11,29 +12,51 @@ struct SearchTabContent: View {
     @ObservedObject var historyManager = SearchHistoryManager.shared
 
     let context = PersistenceController.shared.container.viewContext
+    @State private var cancellables = Set<AnyCancellable>()
+    
+    // Itinerary State
+    @State private var searchMode: SearchMode = .station
+    @State private var startStation: MapStation?
+    @State private var endStation: MapStation?
+    @State private var departureDate = Date()
+    @State private var isArrivalTime = false
+    @State private var itineraryResults: [Journey] = []
+    @State private var selectedJourney: Journey?
+    @State private var itineraryPanelState: ItineraryPanelState = .expanded
+    
+    enum SearchMode: String, CaseIterable {
+        case station = "Stations"
+        case itinerary = "Itinéraire"
+    }
 
     var body: some View {
         NavigationStack {
-            List {
-                if searchText.isEmpty {
-                    if !historyManager.recentStations.isEmpty {
-                        SwiftUI.Section("Recherches récentes") {
-                            ForEach(historyManager.recentStations) { station in
-                                Button(action: {
-                                    selectStation(station)
-                                }) {
-                                    StationRow(station: station)
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                            }
-                        }
+            VStack(spacing: 0) {
+                Picker("Mode", selection: $searchMode) {
+                    ForEach(SearchMode.allCases, id: \.self) { mode in
+                        Text(mode.rawValue).tag(mode)
                     }
+                }
+                .pickerStyle(.segmented)
+                .padding()
+                
+                if searchMode == .station {
+                    stationSearchView
                 } else {
-                    if searchResults.isEmpty {
-                        Text("Aucun résultat")
-                            .foregroundColor(.secondary)
-                    } else {
-                        ForEach(searchResults) { station in
+                    itinerarySearchView
+                }
+            }
+            .navigationTitle("Recherche")
+        }
+    }
+    
+    // MARK: - Station Search View
+    var stationSearchView: some View {
+        List {
+            if searchText.isEmpty {
+                if !historyManager.recentStations.isEmpty {
+                    SwiftUI.Section("Recherches récentes") {
+                        ForEach(historyManager.recentStations) { station in
                             Button(action: {
                                 selectStation(station)
                             }) {
@@ -43,26 +66,96 @@ struct SearchTabContent: View {
                         }
                     }
                 }
-            }
-            .navigationTitle("Recherche")
-            .searchable(
-                text: $searchText, placement: .navigationBarDrawer(displayMode: .always)
-            )
-            .scrollContentBackground(.hidden)
-            .onChange(of: searchText) { _, newValue in
-                performSearch(query: newValue)
-            }
-            .onAppear {
-                historyManager.refreshHistory()
-                if !searchText.isEmpty {
-                    performSearch(query: searchText)
+            } else {
+                if searchResults.isEmpty {
+                    Text("Aucun résultat")
+                        .foregroundColor(.secondary)
+                } else {
+                    ForEach(searchResults) { station in
+                        Button(action: {
+                            selectStation(station)
+                        }) {
+                            StationRow(station: station)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
                 }
             }
-            .background {
-                AdaptiveMapBackground()
+        }
+        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always))
+        .scrollContentBackground(.hidden)
+        .onChange(of: searchText) { _, newValue in
+            performSearch(query: newValue)
+        }
+        .onAppear {
+            historyManager.refreshHistory()
+            if !searchText.isEmpty {
+                performSearch(query: searchText)
             }
         }
+        .background {
+            AdaptiveMapBackground()
+        }
     }
+    
+    // MARK: - Itinerary Search View
+    var itinerarySearchView: some View {
+        VStack {
+            ItinerarySearchPanel(
+                startStation: $startStation,
+                endStation: $endStation,
+                departureDate: $departureDate,
+                isArrivalTime: $isArrivalTime,
+                journeys: $itineraryResults,
+                selectedJourney: $selectedJourney,
+                panelState: $itineraryPanelState,
+                onSearch: performItinerarySearch,
+                onSwap: {
+                    let temp = startStation
+                    startStation = endStation
+                    endStation = temp
+                },
+                onCurrentLocation: {
+                   if let coord = LocationManager.shared.userLocation {
+                       startStation = MapStation(id: "user-location", name: "Ma position", coordinate: coord, platforms: [], isHub: false, mainType: .bus, lines: [])
+                   }
+                },
+                onStartNavigation: {
+                    print("🔘 Start Navigation Button Tapped")
+                    if let journey = selectedJourney {
+                        print("🚀 Launching Journey: \(journey.id)")
+                        // 1. Direct Start
+                        NavigationManager.shared.startNavigation(journey: journey)
+                        // 2. Direct Switch
+                        coordinator.switchToExplore()
+                    } else {
+                        print("⚠️ No selected journey to start")
+                    }
+                }
+            )
+            Spacer()
+        }
+    }
+    
+    func performItinerarySearch() {
+        guard let start = startStation, let end = endStation else { return }
+        
+        IDFMItineraryService.shared.searchItinerary(
+            from: start.coordinate,
+            to: end,
+            date: departureDate,
+            isArrival: isArrivalTime
+        )
+        .receive(on: DispatchQueue.main)
+        .sink(receiveCompletion: { _ in }, receiveValue: { results in
+            self.itineraryResults = results
+            withAnimation {
+                self.itineraryPanelState = .results
+            }
+        })
+        .store(in: &cancellables) // Need to add cancellables set
+    }
+
 
     func selectStation(_ station: MapStation) {
         // 1. Sauvegarder dans l'historique
@@ -108,7 +201,7 @@ struct SearchTabContent: View {
             let results = try context.fetch(request)
             let grouped = Dictionary(grouping: results) { "\($0.name ?? "")_\($0.city ?? "")" }
 
-            let stations: [MapStation] = grouped.compactMap { (_, stops) in
+            let stations: [MapStation] = grouped.compactMap { (_, stops) -> MapStation? in
                 guard let first = stops.first,
                     let name = first.name
                 else { return nil }
@@ -147,8 +240,11 @@ struct SearchTabContent: View {
                     )
                 }
 
+                // MapStation.id is String, not UUID
+                let stationId: String = first.id ?? UUID().uuidString
+
                 return MapStation(
-                    id: first.id ?? UUID().uuidString,
+                    id: stationId,
                     name: name,
                     coordinate: center,
                     platforms: platforms,
@@ -217,3 +313,4 @@ struct StationRow: View {
         }
     }
 }
+

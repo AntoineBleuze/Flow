@@ -349,25 +349,56 @@ struct StationDetailSheet: View {
         isLoading = true
         errorMessage = nil
 
-        // Récupérer tous les IDs uniques des quais de la station pour avoir toutes les lignes
-        let stopIds = Set(station.platforms.map { $0.id })
-        print("🔑 API Key used: \(IDFMService.shared.apiKey)")
-        print("📡 Fetching for \(stopIds.count) stop points: \(stopIds)")
-
-        // Créer un tableau de publishers pour chaque arrêt
-        let publishers = stopIds.map { id in
-            IDFMService.shared.fetchDepartures(for: id)
+        // Récupérer les stopAreaIds uniques des quais (le vrai ID de zone d'arrêt pour l'API)
+        let stopAreaIds = Set(station.platforms.compactMap { platform -> String? in
+            let id = platform.stopAreaId
+            return id.isEmpty ? nil : id
+        })
+        
+        print("🏪 Station: \(station.name)")
+        print("📡 Unique stop_area IDs: \(stopAreaIds)")
+        
+        // Si pas de stopAreaId valide, fallback sur les stop_points individuels
+        if stopAreaIds.isEmpty {
+            print("⚠️ No valid stopAreaIds, falling back to stop_points")
+            let stopPointIds = Set(station.platforms.map { $0.id })
+            
+            // Limiter à 15 requêtes max pour économiser le quota mais avoir tout le hub
+            let limitedIds = Array(stopPointIds.prefix(15))
+            print("📡 Using \(limitedIds.count) stop_points (limited): \(limitedIds)")
+            
+            let publishers = limitedIds.map { id in
+                IDFMService.shared.fetchDepartures(for: id)
+                    .catch { _ in Just<[Departure]>([]) }
+            }
+            
+            cancellable = Publishers.MergeMany(publishers)
+                .collect()
+                .map { $0.flatMap { $0 } }
+                .receive(on: DispatchQueue.main)
+                .sink(
+                    receiveCompletion: { _ in self.isLoading = false },
+                    receiveValue: { deps in
+                        self.departures = deps.sorted { $0.stopDateTime.departureDateTime < $1.stopDateTime.departureDateTime }
+                        print("✅ Received \(deps.count) departures")
+                    })
+            return
+        }
+        
+        // Utiliser les stop_areas (1 requête par zone unique, généralement 1-2 max)
+        let publishers = stopAreaIds.map { id in
+            IDFMService.shared.fetchDepartures(for: "stop_area:\(id)")
                 .catch { error -> Just<[Departure]> in
-                    print("⚠️ Error fetching for \(id): \(error)")
-                    return Just([])  // Ignorer les erreurs individuelles
+                    print("⚠️ Error for stop_area \(id): \(error)")
+                    return Just([])
                 }
         }
-
-        // Combiner tous les résultats
+        
+        print("📡 Fetching \(stopAreaIds.count) stop_area(s)")
+        
         cancellable = Publishers.MergeMany(publishers)
             .collect()
             .map { results in
-                // Aplatir et trier par heure de départ
                 results.flatMap { $0 }.sorted {
                     $0.stopDateTime.departureDateTime < $1.stopDateTime.departureDateTime
                 }
@@ -375,16 +406,15 @@ struct StationDetailSheet: View {
             .receive(on: DispatchQueue.main)
             .sink(
                 receiveCompletion: { completion in
-                    isLoading = false
-                    switch completion {
-                    case .finished:
-                        break
-                    case .failure(let error):
+                    self.isLoading = false
+                    if case .failure(let error) = completion {
                         self.errorMessage = error.localizedDescription
+                        print("❌ Error: \(error)")
                     }
                 },
                 receiveValue: { allDepartures in
                     self.departures = allDepartures
+                    print("✅ Received \(allDepartures.count) departures")
                 })
     }
 

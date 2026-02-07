@@ -2,6 +2,7 @@ import ActivityKit
 import Combine
 import CoreLocation
 import Foundation
+import SwiftUI
 
 class NavigationManager: ObservableObject {
     static let shared = NavigationManager()
@@ -12,13 +13,19 @@ class NavigationManager: ObservableObject {
     @Published private(set) var currentJourney: Journey?
     @Published var shouldSwitchToMap = false  // Trigger to switch to map tab
     @Published private(set) var currentSectionIndex: Int = 0
+    
+    // Advanced Tracking
+    @Published var progress: Double = 0.0 // 0.0 to 1.0 along the current segment (station to station)
+    @Published var currentLegIndex: Int = 0 // Index of the leg *within* the section (index in stop_date_times)
+    @Published var showBoardingPrompt: Bool = false
+    
     private var currentActivity: Activity<NavigationActivityAttributes>?
 
     private var cancellables = Set<AnyCancellable>()
     private var updateTimer: Timer?
 
     // State tracking
-    private enum NavigationState {
+    public enum NavigationState {
         case idle
         case walkingToStation(targetStation: ItineraryPlace, nextSection: ItinerarySection)
         case waitingAtStation(station: ItineraryPlace, section: ItinerarySection)
@@ -26,7 +33,7 @@ class NavigationManager: ObservableObject {
         case walkingToDestination(destination: ItineraryPlace)
     }
 
-    private var state: NavigationState = .idle
+    @Published public var state: NavigationState = .idle
 
     // Location
     private var lastLocation: CLLocationCoordinate2D?
@@ -34,11 +41,17 @@ class NavigationManager: ObservableObject {
     private init() {}
 
     func startNavigation(journey: Journey) {
-        print("🚀 Starting navigation")
+        print("🚀 NavigationManager.startNavigation called")
+        print("   Journey ID: \(journey.id)")
+        print("   Sections count: \(journey.sections?.count ?? 0)")
+        
         self.currentJourney = journey
         self.currentSectionIndex = 0
         self.isNavigating = true
         self.shouldSwitchToMap = true  // Trigger switch to map
+        
+        print("   ✅ isNavigating set to: \(self.isNavigating)")
+        print("   ✅ currentJourney set: \(self.currentJourney != nil)")
 
         // Request location access if needed
         LocationManager.shared.requestLocation()
@@ -52,7 +65,9 @@ class NavigationManager: ObservableObject {
             .store(in: &cancellables)
 
         // Determine initial state
+        print("   Calling determineNextState...")
         determineNextState()
+        print("   State after determineNextState: \(state)")
 
         // Start Live Activity
         startActivity()
@@ -62,6 +77,7 @@ class NavigationManager: ObservableObject {
 
         // Start periodic updates (for API calls)
         startTimer()
+        print("🚀 startNavigation completed")
     }
 
     func stopNavigation() {
@@ -74,6 +90,8 @@ class NavigationManager: ObservableObject {
 
         updateTimer?.invalidate()
         updateTimer = nil
+        animationTimer?.invalidate()
+        animationTimer = nil
         cancellables.removeAll()
 
         // Disable background location updates
@@ -88,7 +106,7 @@ class NavigationManager: ObservableObject {
         else {
             print("🏁 Arrived or invalid journey")
             state = .idle
-            stopNavigation()
+            // stopNavigation() // DEBUG: prevent immediate stop to see if UI appears
             return
         }
 
@@ -152,16 +170,18 @@ class NavigationManager: ObservableObject {
                     state = .waitingAtStation(station: station, section: nextSection)
                     // Trigger immediate update
                     fetchRealTimeData(for: nextSection)
+                    
+                    // Show Prompt
+                    DispatchQueue.main.async {
+                        self.showBoardingPrompt = true
+                    }
                 }
             }
 
         case .waitingAtStation(_, _):
-            // Logic handled in timer (checking departure times)
-            // But we also check if user leaves the station *on the train*
-            // This is hard to distinguish from walking away.
-            // We rely on the time-based trigger requested by user.
+            // Fallback for visual state update if needed
             break
-
+            
         case .onBoard(let section):
             // Check distance to destination
             if let to = section.to, let coord = to.coord, let lat = Double(coord.lat ?? ""),
@@ -202,12 +222,57 @@ class NavigationManager: ObservableObject {
         }
     }
 
+    // User Action: Confirm they are on board
+    func confirmBoarding() {
+        if case .waitingAtStation(_, let section) = state {
+            print("👤 User confirmed boarding")
+            state = .onBoard(section: section)
+            // Immediately update UI with ETA to next stop
+            updateLoop()
+        }
+    }
+
+    // Calculates ETA to the end of the current section
+    func calculateETA(for section: ItinerarySection) -> String? {
+        guard let arrivalTime = section.arrival_date_time else { return nil }
+        
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd'T'HHmmss"
+        
+        if let arrivalDate = formatter.date(from: arrivalTime) {
+            let diff = Int(arrivalDate.timeIntervalSinceNow / 60)
+            if diff <= 0 { return "Maintenant" }
+            return "\(diff) min"
+        }
+        return nil
+    }
+
+    private var animationTimer: Timer?
+
     private func startTimer() {
+        // Network / Heavy update every 30s
         updateTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
             self?.updateLoop()
         }
+        
+        // UI / Progress update every 1s
+        animationTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.updateProgressLoop()
+        }
+        
         // Initial call
         updateLoop()
+    }
+    
+    private func updateProgressLoop() {
+        guard let journey = currentJourney, 
+              let sections = journey.sections,
+              currentSectionIndex < sections.count else { return }
+              
+        let section = sections[currentSectionIndex]
+        if section.type == "public_transport" {
+            calculateProgressForCurrentLeg(section: section)
+        }
     }
 
     private func updateLoop() {
@@ -220,12 +285,81 @@ class NavigationManager: ObservableObject {
             fetchRealTimeData(for: section)
 
         case .onBoard(let section):
-            // Maybe show progress?
+            let eta = calculateETA(for: section) ?? "--"
+            let destination = section.to?.name ?? "Arrêt suivant"
+            
             updateActivity(
-                instruction: "En direction de \(section.to?.name ?? "")", nextDepartures: [])
+                instruction: "En direction de \(destination)",
+                nextDepartures: ["ETA: \(eta)"]
+            )
+            
+            DispatchQueue.main.async {
+                self.currentInstruction = "Prochain arrêt: \(destination)"
+                self.nextDepartures = ["Arrivée dans \(eta)"]
+            }
+            // Update continuous progress
+            calculateProgressForCurrentLeg(section: section)
 
         default:
             break
+        }
+    }
+    
+    // MARK: - Advanced Progress Logic
+    private func calculateProgressForCurrentLeg(section: ItinerarySection) {
+        guard let stops = section.stop_date_times, !stops.isEmpty else { return }
+        
+        // Find current leg based on time or location
+        // For simplicity, let's assume currentLegIndex is managed or inferred
+        // In a real app, we'd match user location to the nearest segment between stops.
+        
+        // Fallback: Time Based
+        let now = Date()
+        
+        // Find the "active" leg where DepTime(Stop N) < Now < ArrTime(Stop N+1)
+        // Or if strictly waiting, progress is 0.
+        
+        // Let's stick to a simple time interpolation for the current leg if GPS is weak
+        if currentLegIndex >= 0 && currentLegIndex < stops.count - 1 {
+            let startStop = stops[currentLegIndex]
+            let endStop = stops[currentLegIndex+1]
+            
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyyMMdd'T'HHmmss"
+            
+            if let start = formatter.date(from: startStop.departure_date_time),
+               let end = formatter.date(from: endStop.arrival_date_time) {
+                
+                let totalDuration = end.timeIntervalSince(start)
+                let elapsed = now.timeIntervalSince(start)
+                
+                var newProgress = elapsed / totalDuration
+                
+                // Hybrid: If we have GPS, project it?
+                if let location = lastLocation {
+                    // TODO: Project on Polyline logic (Complex geometry calculation)
+                    // For now, trust time if underground, trust GPS if close?
+                    // Let's rely on Time primarily for Metro as GPS is unreliable.
+                }
+                
+                // Clamp
+                if newProgress < 0 { newProgress = 0 }
+                if newProgress > 1 {
+                    newProgress = 1
+                    // Maybe auto-advance leg if time passed?
+                    if currentLegIndex < stops.count - 2 {
+                         DispatchQueue.main.async {
+                             self.currentLegIndex += 1
+                         }
+                    }
+                }
+                
+                DispatchQueue.main.async {
+                    withAnimation {
+                        self.progress = newProgress
+                    }
+                }
+            }
         }
     }
 

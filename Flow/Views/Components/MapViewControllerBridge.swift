@@ -2,6 +2,15 @@ import Combine
 import MapKit
 import SwiftUI
 
+// Helper for resizing images
+private func resizedImage(named name: String, to size: CGSize) -> UIImage? {
+    guard let image = UIImage(named: name) else { return nil }
+    let renderer = UIGraphicsImageRenderer(size: size)
+    return renderer.image { _ in
+        image.draw(in: CGRect(origin: .zero, size: size))
+    }
+}
+
 class SharedMapView {
     static let main = SharedMapView()
     static let background = SharedMapView()
@@ -36,7 +45,7 @@ class SharedMapView {
 struct MapViewControllerBridge: UIViewRepresentable {
     @ObservedObject var data: MapDataService
     @Binding var selectedStation: MapStation?
-    @Binding var followUserLocation: Bool
+    @Binding var userTrackingMode: MKUserTrackingMode
     var journey: Journey?  // Optional journey to display
     var useMainMap: Bool = false  // Default to background map if not specified
     var showAnnotations: Bool = true  // If false, skip annotations and overlays (for background mode)
@@ -54,19 +63,9 @@ struct MapViewControllerBridge: UIViewRepresentable {
     func updateUIView(_ mapView: MKMapView, context: Context) {
         context.coordinator.parent = self
 
-        // Handle centering
-        if followUserLocation {
-            if let userLocation = mapView.userLocation.location {
-                let region = MKCoordinateRegion(
-                    center: userLocation.coordinate,
-                    span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02)
-                )
-                mapView.setRegion(region, animated: true)
-            }
-
-            DispatchQueue.main.async {
-                followUserLocation = false
-            }
+        // Handle Tracking Mode
+        if mapView.userTrackingMode != userTrackingMode {
+            mapView.setUserTrackingMode(userTrackingMode, animated: true)
         }
 
         // If showAnnotations is false, clear everything and skip updates (background mode)
@@ -415,7 +414,10 @@ struct MapViewControllerBridge: UIViewRepresentable {
                 (view as? StationAnnotationView)?.annotation = stationAnnotation // Trigger update
                 
                 if parent.selectedStation?.id == stationAnnotation.station.id {
-                    parent.selectedStation = nil
+                    // Defer state modification to avoid "Modifying state during view update"
+                    DispatchQueue.main.async {
+                        self.parent.selectedStation = nil
+                    }
                 }
             }
         }
@@ -424,14 +426,12 @@ struct MapViewControllerBridge: UIViewRepresentable {
             updateAnnotations(in: mapView.region, for: mapView)
         }
 
-        func mapView(_ mapView: MKMapView, didUpdate userLocation: MKUserLocation) {
-            if !parent.data.hasCenteredOnUser && userLocation.location != nil {
-                let region = MKCoordinateRegion(
-                    center: userLocation.coordinate,
-                    span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02)
-                )
-                mapView.setRegion(region, animated: true)
-                parent.data.hasCenteredOnUser = true
+
+
+        
+        func mapView(_ mapView: MKMapView, didChange mode: MKUserTrackingMode, animated: Bool) {
+            DispatchQueue.main.async {
+                self.parent.userTrackingMode = mode
             }
         }
 
@@ -487,7 +487,7 @@ class StationAnnotation: NSObject, MKAnnotation {
 }
 
 // Custom Annotation View hosting SwiftUI
-class StationAnnotationView: MKAnnotationView {
+class StationAnnotationView: MKMarkerAnnotationView {
 
     override var annotation: MKAnnotation? {
         didSet { configure() }
@@ -495,7 +495,6 @@ class StationAnnotationView: MKAnnotationView {
 
     override init(annotation: MKAnnotation?, reuseIdentifier: String?) {
         super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
-        self.backgroundColor = .clear
         configure()
     }
 
@@ -505,44 +504,113 @@ class StationAnnotationView: MKAnnotationView {
 
     private func configure() {
         guard let stationAnnotation = annotation as? StationAnnotation else { return }
+        let station = stationAnnotation.station
 
-        // Remove existing subviews
-        subviews.forEach { $0.removeFromSuperview() }
-
-        // Create SwiftUI view
-        let isSelected = (annotation as? StationAnnotation)?.isSelected ?? false
-        let stationMarker = StationMarker(
-            station: stationAnnotation.station, 
-            zoomLevel: 1.0,
-            isSelected: isSelected
-        )
-
-        // Host it
-        let controller = UIHostingController(rootView: stationMarker)
-        controller.view.backgroundColor = .clear
-        controller.view.translatesAutoresizingMaskIntoConstraints = false
-
-        addSubview(controller.view)
-
-        // Auto Layout to fit content
-        NSLayoutConstraint.activate([
-            controller.view.centerXAnchor.constraint(equalTo: centerXAnchor),
-            controller.view.centerYAnchor.constraint(equalTo: centerYAnchor),
-            // On force une largeur max raisonnable
-            controller.view.widthAnchor.constraint(lessThanOrEqualToConstant: 180),
-        ])
-
-        // Force layout to calculate size
-        controller.view.layoutIfNeeded()
-        let size = controller.view.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
-
-        // Update frame to match content size (centered)
-        self.frame = CGRect(x: 0, y: 0, width: size.width, height: size.height)
-
-        // Center offset adjustment:
-        self.centerOffset = CGPoint(x: 0, y: -size.height / 2)
+        self.canShowCallout = false
         
-        // Z-Index priority if selected
-        self.displayPriority = isSelected ? .required : .defaultHigh
+        // Title behavior
+        self.titleVisibility = .adaptive
+        self.subtitleVisibility = .hidden
+        
+        // Remove old hub icon subview if exists
+        self.subviews.forEach { if $0.tag == 999 { $0.removeFromSuperview() } }
+        
+        if station.lines.count > 1 {
+            // HUB: Multiple lines -> White marker with mode-specific logo
+            self.markerTintColor = .white
+            self.glyphTintColor = .black // Contrast for white marker if using SF Symbol
+            self.glyphText = nil
+            
+            // User requested "train/station symbols" for hubs.
+            // We can use a standard SF Symbol representing a station/interchange.
+            // "tram.fill" is often used for generic transit, or "building.columns.fill" for a grand station.
+            // But if the user specifically asked "remettre les symboles de train/gare", they might mean
+            // the specific icon associated with the main type (e.g. RER logo if it's an RER hub).
+            
+            // Let's stick to the mainType logo logic but simplified, or use a generic "station" icon if that's what was implied.
+            // Given "symboles de train/gare", "tram.fill" (which looks like a train front) or "train.side.front.car" is good.
+            // Let's try to be smart: if it's a major hub (RER/Train), use a train icon.
+            
+            let systemIconName: String
+            switch station.mainType {
+            case .train, .transilien, .rer:
+                systemIconName = "train.side.front.car"
+            case .metro:
+                systemIconName = "tram.fill" // Metro icon often looks like this in SF Symbols
+            case .tram:
+                systemIconName = "tram"
+            case .bus:
+                systemIconName = "bus.fill"
+            case .cable:
+                systemIconName = "cablecar.fill"
+            default:
+                systemIconName = "building.columns.fill"
+            }
+            
+            self.glyphImage = UIImage(systemName: systemIconName)
+            self.glyphTintColor = .black
+            
+        } else if let firstLine = station.lines.first {
+            // SINGLE LINE: Use official color and line name/number
+            let markerColor = resolveColor(for: firstLine.name, type: firstLine.type)
+            self.markerTintColor = markerColor
+            
+            self.glyphText = firstLine.name
+            self.glyphTintColor = .white
+            self.glyphImage = nil
+        } else {
+            self.markerTintColor = UIColor.systemGray
+            self.glyphImage = UIImage(systemName: "circle.fill")
+            self.glyphText = nil
+        }
+
+        // Handle selection state visually
+        if stationAnnotation.isSelected {
+            self.displayPriority = .required
+            self.zPriority = .max
+        } else {
+            self.displayPriority = .defaultHigh
+            self.zPriority = MKAnnotationViewZPriority(rawValue: 0)
+        }
+    }
+
+    private func resolveColor(for lineName: String, type: TransportType) -> UIColor {
+        let normalized = lineName.uppercased()
+            .replacingOccurrences(of: "TRAM", with: "")
+            .replacingOccurrences(of: "METRO", with: "")
+            .replacingOccurrences(of: "RER", with: "")
+            .replacingOccurrences(of: "T", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            
+        // 1. Hardcoded official colors (PRIORITY)
+        // Correct IDF Mobile colors
+        let officialColors: [String: String] = [
+            "1": "FFCD00", "2": "003CA6", "3": "837902", "3bis": "6EC4E8", "4": "CF009E",
+            "5": "FF7E2E", "6": "6ECA97", "7": "FA9ABA", "7bis": "6ECA97", "8": "E19BDF",
+            "9": "B6BD00", "10": "C9910D", "11": "704B1C", "12": "007852", "13": "6EC4E8",
+            "14": "62259D", "15": "A81232", "16": "E47881", "17": "AEC802", "18": "0099C4",
+            "A": "E3051C", "B": "5291CE", "C": "FFCE00", "D": "00643C",
+            "E": "B2559C", "H": "8D5E2A", "J": "B58800", "K": "B58800", "L": "CECECE",
+            "N": "00B092", "P": "F28E42", "R": "E4B4D1", "U": "DE4086", "3A": "F28E42",
+            "3B": "00AC8C", "T3A": "F28E42", "T3B": "00AC8C", "T1": "003CA6", "T2": "CF009E",
+            "T4": "E69622", "T5": "662483", "T6": "E8391A", "T7": "A4662F", "T8": "7D7F7E",
+            "T9": "4092C5", "T10": "D8BC59", "T11": "F1634B", "T12": "AF172B", "T13": "6E5031"
+        ]
+        
+        if let hex = officialColors[lineName.uppercased()] ?? officialColors[normalized] {
+            return UIColor(hex: hex) ?? UIColor(type.accentColor)
+        }
+        
+        // 2. Try match from MapDataService cache (Secondary)
+        if let color = MapDataService.shared.lineColorCache[lineName] {
+            return UIColor(color)
+        }
+        if let color = MapDataService.shared.lineColorCache[normalized] {
+            return UIColor(color)
+        }
+        
+        // 3. Final fallback
+        return UIColor(type.accentColor)
     }
 }
+
