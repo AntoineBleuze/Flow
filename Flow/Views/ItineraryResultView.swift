@@ -97,7 +97,7 @@ struct ItineraryResultView: View {
 
             // Middle: text fields
             VStack(spacing: 8) {
-                // Start Row
+                // Start Row — grouped in one glass container
                 HStack {
                     Button(action: { showStartPicker = true }) {
                         HStack {
@@ -106,21 +106,20 @@ struct ItineraryResultView: View {
                                 .lineLimit(1)
                             Spacer()
                         }
-                        .padding(10)
-                        .background(Color(.systemGray6))
-                        .cornerRadius(8)
                     }
+
+                    Divider()
+                        .frame(height: 20)
 
                     // Quick "Ma Position" button
                     Button(action: { setCurrentLocationAsStart() }) {
                         Image(systemName: "location.fill")
                             .font(.system(size: 14))
                             .foregroundColor(.blue)
-                            .padding(10)
-                            .background(Color(.systemGray6))
-                            .cornerRadius(8)
                     }
                 }
+                .padding(10)
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 10))
 
                 // End Row
                 Button(action: { showEndPicker = true }) {
@@ -131,9 +130,8 @@ struct ItineraryResultView: View {
                         Spacer()
                     }
                     .padding(10)
-                    .background(Color(.systemGray6))
-                    .cornerRadius(8)
                 }
+                .buttonStyle(.glass)
             }
 
             // Right: Swap button
@@ -142,9 +140,8 @@ struct ItineraryResultView: View {
                     .font(.system(size: 16, weight: .medium))
                     .foregroundColor(.primary)
                     .padding(12)
-                    .background(.ultraThinMaterial)
-                    .clipShape(Circle())
             }
+            .buttonStyle(.glass)
         }
     }
 
@@ -426,7 +423,7 @@ struct JourneyRow: View {
                         .foregroundColor(.gray)
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.glass)
 
             // Summary line icons with real assets
             HStack(spacing: 6) {
@@ -471,13 +468,11 @@ struct JourneyRow: View {
                             .fontWeight(.semibold)
                     }
                     .font(.subheadline)
-                    .foregroundColor(.white)
+                    .foregroundColor(.blue)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
-                    .background(Color.blue)
-                    .clipShape(Capsule())
-                    .glassEffect(.regular.interactive(), in: .capsule)
                 }
+                .buttonStyle(.glass)
             }
 
             // Detailed view when expanded
@@ -734,9 +729,7 @@ struct FavoriteStationButton: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(isSelected ? Color.blue.opacity(0.2) : Color(.systemGray6))
-            .cornerRadius(12)
         }
-        .buttonStyle(PlainButtonStyle())
+        .buttonStyle(.glass)
     }
 }

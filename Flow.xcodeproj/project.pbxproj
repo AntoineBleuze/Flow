@@ -37,6 +37,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		47E84B792F3B68B1009EB947 /* Adopting Liquid Glass | Apple Developer Documentation.pdf */ = {isa = PBXFileReference; lastKnownFileType = image.pdf; path = "Adopting Liquid Glass | Apple Developer Documentation.pdf"; sourceTree = "<group>"; };
 		6E1327DA2ED25FAD00A28845 /* FlowWidgetsExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = FlowWidgetsExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		6E1327DC2ED25FAD00A28845 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		6E1327DE2ED25FAE00A28845 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
@@ -115,6 +116,7 @@
 				6E1327E02ED25FAE00A28845 /* FlowWidgets */,
 				6E1327DB2ED25FAD00A28845 /* Frameworks */,
 				6E5DC3AA2ECD311E005188FE /* Products */,
+				47E84B792F3B68B1009EB947 /* Adopting Liquid Glass | Apple Developer Documentation.pdf */,
 			);
 			sourceTree = "<group>";
 		};
@@ -471,6 +473,10 @@
 				PRODUCT_BUNDLE_IDENTIFIER = AntoineBleuze.Flow;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -507,6 +513,10 @@
 				PRODUCT_BUNDLE_IDENTIFIER = AntoineBleuze.Flow;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;

@@ -126,13 +126,7 @@ struct TrafficViewContent: View {
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
-                        .glassEffect(.standard.interactive(), in: Capsule())
-                        .overlay(
-                            Capsule()
-                                .stroke(
-                                    Color.blue.opacity(0.3),
-                                    lineWidth: 1)
-                        )
+                        .glassEffect(.standard, in: Capsule())
                     }
                     .padding(.horizontal)
 
@@ -159,9 +153,6 @@ struct TrafficViewContent: View {
                                                 // Main Icon
                                                 LineIcon(line: line, size: 55)
                                                     .frame(width: 80, height: 80)
-                                                    .glassEffect(
-                                                        .standard.interactive(),
-                                                        in: .rect(cornerRadius: 16))
 
                                                 // Status Badge Overlay - positionné en bas à droite
                                                 if line.status != .normal {
@@ -182,7 +173,7 @@ struct TrafficViewContent: View {
                                                 }
                                             }
                                         }
-                                        .buttonStyle(PlainButtonStyle())
+                                        .buttonStyle(.glass)
                                     }
                                 }
                                 .padding(.horizontal)
@@ -259,7 +250,7 @@ struct FavoritesViewContent: View {
                                 ) {
                                     FavoriteStationRow(station: station)
                                 }
-                                .buttonStyle(PlainButtonStyle())
+                                .buttonStyle(.glass)
                             }
                         }
                     }
@@ -314,8 +305,6 @@ struct FavoriteStationRow: View {
                 .font(.caption)
         }
         .padding()
-        .glassEffect(.standard.interactive(), in: RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal)
         .onAppear {
             loadPreview()
         }

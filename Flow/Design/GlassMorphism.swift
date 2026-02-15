@@ -140,3 +140,4 @@ struct GlassEffectModifier<S: Shape>: ViewModifier {
             )
     }
 }
+

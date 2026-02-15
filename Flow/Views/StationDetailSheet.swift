@@ -85,33 +85,31 @@ struct StationDetailSheet: View {
     var contentView: some View {
         VStack(spacing: 0) {
             // Custom Header
-            HStack {
+            HStack(spacing: 12) {
+                // Y aller — prominent glass button
                 Button(action: {
                     showItinerary = true
                 }) {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 8) {
                         Image(systemName: "arrow.triangle.turn.up.right.circle.fill")
+                            .font(.title3)
                         Text("Y aller")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
+                            .font(.callout)
+                            .fontWeight(.bold)
                     }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 12)
-                    .background(.ultraThinMaterial)
-                    .clipShape(Capsule())
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 16)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.glassProminent)
 
-                Spacer()
-
+                // Station name
                 Text(station.name)
                     .font(.headline)
                     .lineLimit(1)
-                    .padding(.horizontal, 4)
+                    .frame(maxWidth: .infinity)
 
-                Spacer()
-
-                HStack(spacing: 12) {
+                // Action buttons grouped in a single glass container
+                HStack(spacing: 14) {
                     Button(action: {
                         loadDepartures()
                     }) {
@@ -119,8 +117,6 @@ struct StationDetailSheet: View {
                             .font(.title3)
                             .foregroundColor(.blue)
                     }
-                    .buttonStyle(.plain)
-                    .glassEffect(.regular.interactive())
 
                     Button(action: {
                         FavoritesService.shared.toggleFavorite(stationId: station.id)
@@ -132,7 +128,6 @@ struct StationDetailSheet: View {
                         .font(.title3)
                         .foregroundColor(.red)
                     }
-                    .buttonStyle(.plain)
 
                     Button(action: {
                         dismiss()
@@ -141,11 +136,13 @@ struct StationDetailSheet: View {
                             .font(.title2)
                             .foregroundColor(.secondary)
                     }
-                    .buttonStyle(.plain)
                 }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 12)
+                .glassEffect(.regular, in: Capsule())
             }
-            .padding()
-            .padding(.top, 10)  // Extra padding for top safe area if needed, though sheet usually handles it.
+            .padding(.horizontal)
+            .padding(.top, 14)
 
             // Filtre des modes
             let availableModes = getAvailableModes(from: departures)
@@ -269,13 +266,8 @@ struct StationDetailSheet: View {
                                                 .font(.title3)
                                                 .foregroundColor(isActive ? .green : .red)
                                                 .padding(8)
-                                                .background(
-                                                    (isActive ? Color.green : Color.red).opacity(
-                                                        0.1)
-                                                )
-                                                .clipShape(Circle())
                                         }
-                                        .buttonStyle(.plain)
+                                        .buttonStyle(.glass)
                                     }
                                     .padding()
 

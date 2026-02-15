@@ -32,10 +32,6 @@ struct StationDetailScreen: View {
 
     var body: some View {
         ZStack {
-            // Background
-            Color(UIColor.systemGroupedBackground)
-                .edgesIgnoringSafeArea(.all)
-
             if isLoading {
                 ProgressView("Chargement des horaires...")
             } else if let error = errorMessage {
@@ -56,6 +52,9 @@ struct StationDetailScreen: View {
             } else {
                 contentView
             }
+        }
+        .background {
+            AdaptiveMapBackground()
         }
         .navigationTitle(station.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -220,10 +219,8 @@ struct StationDetailScreen: View {
                                     .font(.title3)
                                     .foregroundColor(.green)
                                     .padding(8)
-                                    .background(Color.green.opacity(0.1))
-                                    .clipShape(Circle())
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.glass)
                         }
                         .padding()
 

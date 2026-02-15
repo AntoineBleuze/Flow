@@ -62,7 +62,7 @@ struct SearchTabContent: View {
                             }) {
                                 StationRow(station: station)
                             }
-                            .buttonStyle(PlainButtonStyle())
+                            .buttonStyle(.glass)
                         }
                     }
                 }
@@ -77,7 +77,7 @@ struct SearchTabContent: View {
                         }) {
                             StationRow(station: station)
                         }
-                        .buttonStyle(PlainButtonStyle())
+                        .buttonStyle(.glass)
                     }
                 }
             }

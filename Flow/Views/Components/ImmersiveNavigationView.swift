@@ -49,13 +49,11 @@ struct ImmersiveNavigationView: View {
                     }) {
                         Text("Quitter")
                             .fontWeight(.bold)
+                            .foregroundColor(.red)
                             .padding(.horizontal, 20)
                             .padding(.vertical, 10)
-                            .background(Color.red.gradient)
-                            .foregroundColor(.white)
-                            .clipShape(Capsule())
-                            .shadow(radius: 5)
                     }
+                    .buttonStyle(.glass)
                 }
                 .padding(.horizontal)
                 .padding(.top, 60)
@@ -80,10 +78,8 @@ struct ImmersiveNavigationView: View {
                                 .font(.title2)
                                 .foregroundColor(.blue)
                                 .padding(16)
-                                .background(.regularMaterial)
-                                .glassEffect(.standard.interactive(), in: Circle()) // Liquid Glass
-                                .shadow(radius: 8)
                         }
+                        .buttonStyle(.glass)
                         .padding(.trailing, 24)
                     }
                     
@@ -133,7 +129,7 @@ struct ImmersiveNavigationView: View {
                         .foregroundColor(.white)
                         .multilineTextAlignment(.center)
                     
-                    HStack(spacing: 20) {
+                    HStack(spacing: 0) {
                         Button(action: {
                             withAnimation {
                                 navigationManager.showBoardingPrompt = false
@@ -141,12 +137,13 @@ struct ImmersiveNavigationView: View {
                         }) {
                             Text("Pas encore")
                                 .fontWeight(.semibold)
+                                .foregroundColor(.primary)
                                 .padding()
                                 .frame(maxWidth: .infinity)
-                                .background(.ultraThinMaterial)
-                                .glassEffect(.standard.interactive(), in: RoundedRectangle(cornerRadius: 12))
-                                .foregroundColor(.white)
                         }
+                        
+                        Divider()
+                            .frame(height: 30)
                         
                         Button(action: {
                             withAnimation {
@@ -156,13 +153,12 @@ struct ImmersiveNavigationView: View {
                         }) {
                             Text("Oui, c'est parti !")
                                 .fontWeight(.bold)
+                                .foregroundColor(.green)
                                 .padding()
                                 .frame(maxWidth: .infinity)
-                                .background(Color.green.gradient)
-                                .cornerRadius(12)
-                                .shadow(radius: 5)
                         }
                     }
+                    .glassEffect(.regular, in: Capsule())
                 }
                 .padding(30)
                 .background(.regularMaterial)
@@ -232,11 +228,10 @@ struct ImmersiveNavigationView: View {
                 Button(action: nextStep) {
                      Image(systemName: "chevron.right")
                         .font(.title2)
-                        .foregroundColor(.white)
+                        .foregroundColor(.primary)
                         .padding()
-                        .background(.ultraThinMaterial)
-                        .clipShape(Circle())
                 }
+                .buttonStyle(.glass)
             }
             
             Divider().background(Color.white.opacity(0.2))
@@ -253,13 +248,11 @@ struct ImmersiveNavigationView: View {
                              Text("Je suis monté")
                                  .fontWeight(.bold)
                          }
+                         .foregroundColor(.green)
                          .frame(maxWidth: .infinity)
                          .padding()
-                         .background(Color.green.gradient)
-                         .foregroundColor(.white)
-                         .cornerRadius(12)
-                         .shadow(radius: 5)
                      }
+                     .buttonStyle(.glass)
                  } else {
                      HStack {
                          Image(systemName: "clock")

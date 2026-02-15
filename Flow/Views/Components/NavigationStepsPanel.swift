@@ -43,6 +43,7 @@ struct NavigationStepsPanel: View {
                         .font(.title2)
                         .foregroundColor(.red)
                 }
+                .buttonStyle(.glass)
             }
             .padding()
 

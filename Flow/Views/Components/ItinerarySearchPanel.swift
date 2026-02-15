@@ -77,9 +77,8 @@ struct ItinerarySearchPanel: View {
                     Spacer()
                 }
                 .padding()
-                .background(Color(.systemGray6))
-                .cornerRadius(12)
             }
+            .buttonStyle(.glass)
             
             // Profile or Settings button (optional)
             Button(action: {}) {
@@ -87,6 +86,7 @@ struct ItinerarySearchPanel: View {
                     .font(.title)
                     .foregroundColor(.blue)
             }
+            .buttonStyle(.glass)
         }
         .padding(.horizontal)
         .padding(.bottom, 30) // Safe area
@@ -111,10 +111,11 @@ struct ItinerarySearchPanel: View {
                         .font(.title2)
                         .foregroundColor(.gray)
                 }
+                .buttonStyle(.glass)
             }
             .padding(.horizontal)
             
-            // Station Inputs
+            // Station Inputs — grouped glass card
             VStack(spacing: 0) {
                 // From
                 HStack {
@@ -135,7 +136,6 @@ struct ItinerarySearchPanel: View {
                     }
                 }
                 .padding()
-                .background(Color(.systemGray6))
                 
                 Divider().padding(.leading, 40)
                 
@@ -152,9 +152,8 @@ struct ItinerarySearchPanel: View {
                     }
                 }
                 .padding()
-                .background(Color(.systemGray6))
             }
-            .cornerRadius(12)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12))
             .padding(.horizontal)
             .overlay(
                  // Swap Button
@@ -179,9 +178,8 @@ struct ItinerarySearchPanel: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(Color(.systemGray6))
-                    .cornerRadius(8)
                 }
+                .buttonStyle(.glass)
                 .foregroundColor(.primary)
                 
                 Spacer()
@@ -198,13 +196,11 @@ struct ItinerarySearchPanel: View {
             Button(action: onSearch) {
                 Text("Rechercher")
                     .font(.headline)
-                    .foregroundColor(.white)
+                    .foregroundColor(.blue)
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(Color.blue)
-                    .cornerRadius(12)
-                    .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
             }
+            .buttonStyle(.glass)
             .padding(.horizontal)
             .padding(.bottom, 30) // Safe area
             .disabled(endStation == nil)
@@ -248,12 +244,11 @@ struct ItinerarySearchPanel: View {
                                  Button(action: onStartNavigation) {
                                      Text("Démarrer la navigation")
                                          .fontWeight(.bold)
-                                         .foregroundColor(.white)
+                                         .foregroundColor(.green)
                                          .frame(maxWidth: .infinity)
                                          .padding()
-                                         .background(Color.green)
-                                         .cornerRadius(12)
                                  }
+                                 .buttonStyle(.glass)
                                  .padding(.horizontal)
                                  .transition(.scale)
                              }

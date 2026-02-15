@@ -21,8 +21,7 @@ struct TrafficDetailView: View {
                     Spacer()
                 }
                 .padding()
-                .background(Color(UIColor.secondarySystemBackground))
-                .cornerRadius(15)
+                .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 15))
 
                 // Section: En cours
                 let activeInfos = deduplicateInfos(
@@ -63,6 +62,9 @@ struct TrafficDetailView: View {
                 Spacer()
             }
             .padding()
+        }
+        .background {
+            AdaptiveMapBackground()
         }
         .navigationTitle("Info Trafic")
         .navigationBarTitleDisplayMode(.inline)
@@ -133,9 +135,11 @@ struct TrafficInfoCard: View {
                     }) {
                         Text(isExpanded ? "Voir moins" : "Voir plus")
                             .font(.caption)
-                            .foregroundColor(.blue)
+                            .foregroundColor(.primary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
                     }
-                    .buttonStyle(PlainButtonStyle())
+                    .buttonStyle(.glass)
                 }
             }
 
@@ -172,9 +176,7 @@ struct TrafficInfoCard: View {
             }
         }
         .padding()
-        .background(Color(UIColor.systemBackground))
-        .cornerRadius(10)
-        .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+        .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 10))
     }
 
     /// Nettoie et formate le message en supprimant les redondances courantes
