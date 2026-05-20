@@ -18,6 +18,36 @@
             endingLineNumber = "42"
             landmarkName = "sheetContent"
             landmarkType = "24">
+            <Locations>
+               <Location
+                  uuid = "8F5F14E9-C472-44E0-841E-B8A03078AD82 - b29da2ce11ed0255"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "Flow.StationDetailSheet.sheetContent.getter : some"
+                  moduleName = "Flow.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/antoinebleuze/Documents/projet%20xcode/Flow/Flow/Views/StationDetailSheet.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "42"
+                  endingLineNumber = "42">
+               </Location>
+               <Location
+                  uuid = "8F5F14E9-C472-44E0-841E-B8A03078AD82 - 41a036684892f79b"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "closure #1 () -&gt; SwiftUI.TupleView&lt;(&lt;&lt;opaque return type of SwiftUI.View.padding(SwiftUI.Edge.Set, Swift.Optional&lt;CoreGraphics.CGFloat&gt;) -&gt; some&gt;&gt;.0, Swift.Optional&lt;SwiftUI.Text&gt;)&gt; in Flow.StationDetailSheet.sheetContent.getter : some"
+                  moduleName = "Flow.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/antoinebleuze/Documents/projet%20xcode/Flow/Flow/Views/StationDetailSheet.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "43"
+                  endingLineNumber = "43">
+               </Location>
+            </Locations>
          </BreakpointContent>
       </BreakpointProxy>
       <BreakpointProxy

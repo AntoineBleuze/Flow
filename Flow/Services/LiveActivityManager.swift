@@ -143,39 +143,44 @@ class LiveActivityManager: ObservableObject {
     private func startUpdating() {
         stopUpdating()  // Safety check
 
-        print("⏱️ Starting Live Activity update timer (60s interval)")
+        print("📡 Starting Live Activity monitoring (WS Push + 120s Fallback)")
         print(
             "📍 Monitoring \(currentStopIds.count) stop IDs for \(currentLineName) → \(currentDirection)"
         )
 
-        // Main update timer (60s)
-        updateTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) {
-            [weak self] timer in
-            guard let self = self else { return }
-            let timestamp = DateFormatter.localizedString(
-                from: Date(), dateStyle: .none, timeStyle: .medium)
-            print("\n🔔 Timer fired at \(timestamp) - Fetching updates...")
-            self.fetchUpdates()
-        }
+        // 1. S'abonner via WebSocket
+        FlowServerService.shared.sendSubscribeDepartures(
+            stopIds: currentStopIds,
+            line: currentLineName,
+            direction: currentDirection
+        )
 
-        // Debug timer to show countdown (every 10s)
-        Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] timer in
-            guard let self = self, let updateTimer = self.updateTimer else {
-                timer.invalidate()
-                return
+        // 2. Écouter les notifications de push (WS)
+        NotificationCenter.default.publisher(for: .flowServerDepartureUpdate)
+            .compactMap { $0.userInfo?["departures"] as? [Departure] }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] departures in
+                print("⚡️ [LiveActivity] Push reçu: \(departures.count) départs")
+                self?.processUpdates(departures)
             }
+            .store(in: &cancellables)
 
-            let remaining = Int(updateTimer.fireDate.timeIntervalSinceNow)
-            if remaining > 0 {
-                print("⏳ Next update in \(remaining)s")
-            }
+        // 3. Fallback timer (120s) au cas où le WS est déconnecté
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 120.0, repeats: true) {
+            [weak self] _ in
+            print("\n⏰ [LiveActivity] Fallback timer fired - Fetching updates...")
+            self?.fetchUpdates()
         }
     }
 
     private func stopUpdating() {
         if updateTimer != nil {
-            print("🛑 Stopping Live Activity update timer")
+            print("🛑 Stopping Live Activity monitoring")
         }
+        
+        // Se désabonner du WS
+        FlowServerService.shared.sendUnsubscribeDepartures()
+        
         updateTimer?.invalidate()
         updateTimer = nil
         cancellables.removeAll()
@@ -246,15 +251,8 @@ class LiveActivityManager: ObservableObject {
         }
     }
 
-    // Helper to calculate time remaining (duplicated from StationDetailSheet for now, could be shared)
+    // Helper to calculate time remaining
     private func timeRemaining(_ dateString: String) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd'T'HHmmss"
-        if let date = formatter.date(from: dateString) {
-            let diff = Int(date.timeIntervalSinceNow / 60)
-            if diff <= 0 { return "0 min" }
-            return "\(diff) min"
-        }
-        return ""
+        return DateFormat.timeRemaining(from: dateString)
     }
 }

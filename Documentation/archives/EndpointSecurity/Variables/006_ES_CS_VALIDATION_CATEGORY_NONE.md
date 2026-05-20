@@ -1,0 +1,11 @@
+# 006_ES_CS_VALIDATION_CATEGORY_NONE.pdf
+
+## Page 1
+
+Endpoint Security / ES_CS_VALIDATION_CATEGORY_NONE
+Global Variable
+ES_CS_VALIDATION_CATEGORY_NONE
+Mac Catalyst
+macOS
+
+

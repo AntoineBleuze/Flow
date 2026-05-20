@@ -10,6 +10,8 @@ struct SearchTabContent: View {
 
     @EnvironmentObject var coordinator: NavigationCoordinator
     @ObservedObject var historyManager = SearchHistoryManager.shared
+    @ObservedObject var favoritesService = FavoritesService.shared
+    @ObservedObject var mapData = MapDataService.shared
 
     let context = PersistenceController.shared.container.viewContext
     @State private var cancellables = Set<AnyCancellable>()
@@ -39,6 +41,10 @@ struct SearchTabContent: View {
                 }
                 .pickerStyle(.segmented)
                 .padding()
+                .background(.ultraThinMaterial.opacity(0.5))
+                .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal)
+                .padding(.top, 8)
                 
                 if searchMode == .station {
                     stationSearchView
@@ -46,44 +52,109 @@ struct SearchTabContent: View {
                     itinerarySearchView
                 }
             }
+            .background {
+                AdaptiveMapBackground()
+            }
             .navigationTitle("Recherche")
         }
     }
     
     // MARK: - Station Search View
     var stationSearchView: some View {
-        List {
-            if searchText.isEmpty {
-                if !historyManager.recentStations.isEmpty {
-                    SwiftUI.Section("Recherches récentes") {
-                        ForEach(historyManager.recentStations) { station in
-                            Button(action: {
-                                selectStation(station)
-                            }) {
-                                StationRow(station: station)
+        ScrollView {
+            LazyVStack(spacing: 8) {
+                if searchText.isEmpty {
+                    // MARK: Favorites Section
+                    if !favoritesService.favoriteStationIds.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Image(systemName: "star.fill")
+                                    .foregroundColor(.yellow)
+                                Text("Favoris")
+                                    .font(.caption).bold()
+                                    .foregroundColor(.secondary)
                             }
-                            .buttonStyle(.glass)
+                            .padding(.horizontal)
+                            .padding(.top, 8)
+                            
+                            ForEach(Array(favoritesService.favoriteStationIds), id: \.self) { stationId in
+                                if let station = mapData.allStations.first(where: { $0.id == stationId })
+                                    ?? mapData.getAllStationsSync().first(where: { $0.id == stationId })
+                                {
+                                    Button(action: {
+                                        selectStation(station)
+                                    }) {
+                                        StationRow(station: station)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .padding(.horizontal)
+                                }
+                            }
+                        }
+                        
+                        Divider()
+                            .padding(.vertical, 4)
+                    }
+                    
+                    // MARK: Recent Searches Section
+                    if !historyManager.recentStations.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .foregroundColor(.secondary)
+                                Text("Recherches récentes")
+                                    .font(.caption).bold()
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.horizontal)
+                            .padding(.top, 8)
+                            
+                            ForEach(historyManager.recentStations) { station in
+                                Button(action: {
+                                    selectStation(station)
+                                }) {
+                                    StationRow(station: station)
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.horizontal)
+                                
+                                if station.id != historyManager.recentStations.last?.id {
+                                    Divider().padding(.leading, 56)
+                                }
+                            }
                         }
                     }
-                }
-            } else {
-                if searchResults.isEmpty {
-                    Text("Aucun résultat")
-                        .foregroundColor(.secondary)
                 } else {
-                    ForEach(searchResults) { station in
-                        Button(action: {
-                            selectStation(station)
-                        }) {
-                            StationRow(station: station)
+                    if searchResults.isEmpty {
+                        VStack {
+                            Spacer()
+                            Text("Aucun résultat")
+                                .foregroundColor(.secondary)
+                            Spacer()
                         }
-                        .buttonStyle(.glass)
+                        .frame(minHeight: 200)
+                    } else {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(searchResults) { station in
+                                Button(action: {
+                                    selectStation(station)
+                                }) {
+                                    StationRow(station: station)
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.horizontal)
+                                
+                                if station.id != searchResults.last?.id {
+                                    Divider().padding(.leading, 56)
+                                }
+                            }
+                        }
                     }
                 }
             }
+            .padding(.top, 8)
         }
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always))
-        .scrollContentBackground(.hidden)
         .onChange(of: searchText) { _, newValue in
             performSearch(query: newValue)
         }
@@ -92,9 +163,6 @@ struct SearchTabContent: View {
             if !searchText.isEmpty {
                 performSearch(query: searchText)
             }
-        }
-        .background {
-            AdaptiveMapBackground()
         }
     }
     
@@ -243,6 +311,12 @@ struct SearchTabContent: View {
                 // MapStation.id is String, not UUID
                 let stationId: String = first.id ?? UUID().uuidString
 
+                let uniqueLines = Set(stops.compactMap { entity -> StationLine? in
+                    guard let lineName = entity.lineName, let typeStr = entity.type else { return nil }
+                    return StationLine(name: lineName, type: mapType(typeStr))
+                })
+                let sortedLines = Array(uniqueLines).sorted { $0.name < $1.name }
+
                 return MapStation(
                     id: stationId,
                     name: name,
@@ -250,7 +324,7 @@ struct SearchTabContent: View {
                     platforms: platforms,
                     isHub: false,
                     mainType: type,
-                    lines: []
+                    lines: sortedLines
                 )
             }
 
@@ -274,19 +348,51 @@ struct SearchTabContent: View {
 struct StationRow: View {
     let station: MapStation
 
+    private var transportModes: [TransportType] {
+        let modes = Set(station.lines.map { $0.type })
+        return Array(modes).sorted { $0.priority > $1.priority }
+    }
+
+    private var modesString: String {
+        transportModes.map { $0.rawValue.capitalized }.joined(separator: ", ")
+    }
+
+    private var isMultiModal: Bool {
+        transportModes.count > 1
+    }
+
     var body: some View {
-        HStack {
-            Image(systemName: iconName(for: station.mainType))
-                .foregroundColor(color(for: station.mainType))
-            VStack(alignment: .leading) {
-                Text(station.name)
-                    .font(.headline)
+        HStack(spacing: 16) {
+            // Icon with soft glass circle
+            ZStack {
+                Circle()
+                    .fill((isMultiModal ? .blue : color(for: station.mainType)).opacity(0.15))
+                    .frame(width: 40, height: 40)
+                    .glassEffect(.standard, in: Circle())
+                
+                Image(systemName: isMultiModal ? "train.side.front.car" : iconName(for: station.mainType))
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(isMultiModal ? .blue : color(for: station.mainType))
             }
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(station.name)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.primary)
+                
+                Text(modesString)
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+            }
+            
             Spacer()
+            
             Image(systemName: "chevron.right")
-                .foregroundColor(.gray)
-                .font(.caption)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(.secondary.opacity(0.5))
         }
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
     }
 
     func iconName(for type: TransportType) -> String {

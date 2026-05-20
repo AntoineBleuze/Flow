@@ -19,7 +19,18 @@ enum TransportType: String, CaseIterable, Identifiable {
         case .train, .transilien: return Color.blue
         case .tram: return Color.green
         case .bus: return Color.orange
-        case .cable: return Color.gray  // Ou une couleur spécifique si demandée, par défaut gris ou violet clair? Le logo semble gris/blanc.
+        case .cable: return Color.gray
+        }
+    }
+
+    var priority: Int {
+        switch self {
+        case .rer: return 100
+        case .train, .transilien: return 80
+        case .metro: return 60
+        case .tram: return 40
+        case .bus: return 20
+        case .cable: return 10
         }
     }
 
@@ -111,6 +122,7 @@ struct TransportLine: Identifiable {
     let id = UUID()
     let type: TransportType
     let lineId: String  // ex: "1", "A", "T3a"
+    var navitiaId: String? = nil // ex: "line:IDFM:C01374"
     var status: LineStatus
     var trafficInfos: [TrafficInfo] = []
 
@@ -165,6 +177,7 @@ struct TrafficInfo: Identifiable {
     let endTime: Date?
     let impactedStops: [String]?
     let impactedSection: String?
+    var summary: String? // Résumé généré par Foundation Models
 }
 
 enum TrafficPeriod {
@@ -301,5 +314,41 @@ struct ImpactedSection: Codable {
     struct SectionPoint: Codable {
         let name: String?
         let id: String?
+    }
+}
+
+// MARK: - Line Route Models
+
+struct LineStation: Identifiable, Codable {
+    let id: String
+    let name: String
+    let order: Int
+    let commercialModes: [String] // "Metro", "RER", etc. para les transfers
+}
+
+struct RouteScheduleResponse: Codable {
+    let route_schedules: [RouteSchedule]?
+    
+    struct RouteSchedule: Codable {
+        let table: Table?
+    }
+    
+    struct Table: Codable {
+        let rows: [Row]?
+    }
+    
+    struct Row: Codable {
+        let stop_point: StopPointInfo?
+    }
+    
+    struct StopPointInfo: Codable {
+        let id: String
+        let name: String
+        let commercial_modes: [CommercialMode]?
+    }
+    
+    struct CommercialMode: Codable {
+        let id: String
+        let name: String
     }
 }

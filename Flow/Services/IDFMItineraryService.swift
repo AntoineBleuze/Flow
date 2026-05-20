@@ -9,6 +9,18 @@ class IDFMItineraryService: ObservableObject {
     func searchItinerary(
         from: CLLocationCoordinate2D, to: MapStation, date: Date = Date(), isArrival: Bool = false
     ) -> AnyPublisher<[Journey], Error> {
+        // Mode serveur : passer par FlowServer si activé
+        if FlowServerService.shared.isEnabled {
+            print("📡 [Server Mode] Itinerary via FlowServer")
+            return FlowServerService.shared.searchItinerary(
+                from: from,
+                to: to.coordinate,
+                date: date,
+                isArrival: isArrival
+            )
+        }
+
+        // Mode direct : appel API IDFM
         // Format coordinates: "lon;lat"
         let fromCoord = "\(from.longitude);\(from.latitude)"
         // Use station coordinates as destination

@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  flow-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: flow-server
+    restart: always
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - IDFM_API_KEY=${IDFM_API_KEY}
+    env_file:
+      - .env

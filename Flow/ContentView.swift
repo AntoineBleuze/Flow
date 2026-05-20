@@ -26,10 +26,9 @@ struct ContentView: View {
                 }
             }
 
-            Tab("Favoris", systemImage: "star.fill", value: "Favoris") {
+            Tab("Plans", systemImage: "map.fill", value: "Plans") {
                 NavigationStack {
-                    FavoritesViewContent()
-                        .navigationTitle("Favoris")
+                    LineSchematicSelectionView()
                 }
             }
 
@@ -53,6 +52,8 @@ struct ContentView: View {
 
 struct TrafficViewContent: View {
     @StateObject var service = TrafficService()
+    @AppStorage("isTrafficSummaryEnabled") private var isTrafficSummaryEnabled = false
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     enum StatusFilter: String, CaseIterable, Identifiable {
         case all = "Tout"
@@ -77,126 +78,140 @@ struct TrafficViewContent: View {
     @State private var selectedFilter: StatusFilter = .all
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    // Header avec heure de dernière mise à jour
-                    HStack {
-                        if let lastUpdate = service.lastUpdateTime {
-                            let formatter = DateFormatter()
-                            let _ = (formatter.dateFormat = "HH:mm")
-                            Text("Dernière mise à jour: \(formatter.string(from: lastUpdate))")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        } else {
-                            Text("Chargement...")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        Spacer()
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                // Header avec heure de dernière mise à jour
+                HStack {
+                    if let lastUpdate = service.lastUpdateTime {
+                        let formatter = DateFormatter()
+                        let _ = (formatter.dateFormat = "HH:mm")
+                        Text("Dernière mise à jour: \(formatter.string(from: lastUpdate))")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("Chargement...")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
-                    .padding(.horizontal)
+                    Spacer()
+                }
+                .padding(.horizontal)
 
-                    // Status Filter Menu
-                    Menu {
-                        ForEach(StatusFilter.allCases) { filter in
-                            Button(action: {
-                                selectedFilter = filter
-                            }) {
-                                HStack {
-                                    Text(filter.rawValue)
-                                    if selectedFilter == filter {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "line.3.horizontal.decrease.circle.fill")
-                                .foregroundColor(.blue)
-                                .frame(width: 20, height: 20)
-                            Text(selectedFilter.rawValue)
+                // Toggle IA (Global)
+                if TrafficSummarizer.shared.isAvailable {
+                    Toggle(isOn: $isTrafficSummaryEnabled) {
+                        HStack {
+                            Image(systemName: "sparkles")
+                                .foregroundColor(.purple)
+                            Text("Résumer le trafic avec l'IA")
                                 .font(.subheadline)
                                 .fontWeight(.bold)
-                                .foregroundColor(.primary)
-                            Image(systemName: "chevron.down")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .glassEffect(.standard, in: Capsule())
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 15))
                     .padding(.horizontal)
+                }
 
-                    // Filtered Lines by Status
-                    ForEach(TransportType.allCases) { type in
-                        let filteredLines = lines(for: type)
-
-                        if !filteredLines.isEmpty {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text(type.rawValue.uppercased())
-                                    .font(.caption).bold()
-                                    .foregroundColor(.secondary)
-                                    .padding(.leading, 20)
-
-                                // Grid Layout
-                                LazyVGrid(
-                                    columns: [
-                                        GridItem(.adaptive(minimum: 80, maximum: 100), spacing: 16)
-                                    ], spacing: 16
-                                ) {
-                                    ForEach(filteredLines) { line in
-                                        NavigationLink(destination: TrafficDetailView(line: line)) {
-                                            ZStack {
-                                                // Main Icon
-                                                LineIcon(line: line, size: 55)
-                                                    .frame(width: 80, height: 80)
-
-                                                // Status Badge Overlay - positionné en bas à droite
-                                                if line.status != .normal {
-                                                    Image(systemName: line.status.icon)
-                                                        .resizable()
-                                                        .scaledToFit()
-                                                        .frame(width: 16, height: 16)
-                                                        .padding(5)
-                                                        .foregroundColor(.white)
-                                                        .background(line.status.color)
-                                                        .clipShape(Circle())
-                                                        .overlay(
-                                                            Circle()
-                                                                .stroke(
-                                                                    .regularMaterial, lineWidth: 2)
-                                                        )
-                                                        .offset(x: 28, y: 28)
-                                                }
-                                            }
-                                        }
-                                        .buttonStyle(.glass)
-                                    }
+                // Status Filter Menu
+                Menu {
+                    ForEach(StatusFilter.allCases) { filter in
+                        Button(action: {
+                            selectedFilter = filter
+                        }) {
+                            HStack {
+                                Text(filter.rawValue)
+                                if selectedFilter == filter {
+                                    Image(systemName: "checkmark")
                                 }
-                                .padding(.horizontal)
                             }
                         }
                     }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                            .foregroundColor(.blue)
+                            .frame(width: 20, height: 20)
+                        Text(selectedFilter.rawValue)
+                            .font(.subheadline)
+                            .fontWeight(.bold)
+                            .foregroundColor(.primary)
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .glassEffect(.standard, in: Capsule())
                 }
-                .padding(.vertical)
-            }
-            .refreshable {
-                await withCheckedContinuation { continuation in
-                    service.refresh()
-                    // Wait for refresh to complete
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        continuation.resume()
+                .padding(.horizontal)
+
+                // Filtered Lines by Status
+                ForEach(TransportType.allCases) { type in
+                    let filteredLines = lines(for: type)
+
+                    if !filteredLines.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(type.rawValue.uppercased())
+                                .font(.caption).bold()
+                                .foregroundColor(.secondary)
+                                .padding(.leading, 20)
+
+                            // Grid Layout — adaptive for iPad
+                            let isIPad = horizontalSizeClass == .regular
+                            LazyVGrid(
+                                columns: [
+                                    GridItem(.adaptive(minimum: isIPad ? 100 : 80, maximum: isIPad ? 130 : 100), spacing: isIPad ? 20 : 16)
+                                ], spacing: isIPad ? 20 : 16
+                            ) {
+                                ForEach(filteredLines) { line in
+                                    NavigationLink(destination: TrafficDetailView(line: line)) {
+                                        ZStack {
+                                            // Main Icon
+                                            LineIcon(line: line, size: isIPad ? 70 : 55)
+                                                .frame(width: isIPad ? 100 : 80, height: isIPad ? 100 : 80)
+
+                                            // Status Badge Overlay - positionné en bas à droite
+                                            if line.status != .normal {
+                                                Image(systemName: line.status.icon)
+                                                    .resizable()
+                                                    .scaledToFit()
+                                                    .frame(width: 16, height: 16)
+                                                    .padding(5)
+                                                    .foregroundColor(.white)
+                                                    .background(line.status.color)
+                                                    .clipShape(Circle())
+                                                    .overlay(
+                                                        Circle()
+                                                            .stroke(
+                                                                .regularMaterial, lineWidth: 2)
+                                                    )
+                                                    .offset(x: 28, y: 28)
+                                            }
+                                        }
+                                    }
+                                    .buttonStyle(.glass)
+                                }
+                            }
+                            .padding(.horizontal)
+                        }
                     }
                 }
             }
-            .background {
-                AdaptiveMapBackground()
+            .padding(.vertical)
+        }
+        .refreshable {
+            await withCheckedContinuation { continuation in
+                service.refresh()
+                // Wait for refresh to complete
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    continuation.resume()
+                }
             }
-            .navigationTitle("Trafic")
-            .navigationBarTitleDisplayMode(.large)
+        }
+        .background {
+            AdaptiveMapBackground()
         }
     }
 
@@ -216,54 +231,52 @@ struct FavoritesViewContent: View {
     @StateObject var mapData = MapDataService.shared
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                if favoritesService.favoriteStationIds.isEmpty {
-                    VStack(spacing: 20) {
-                        Image(systemName: "star.slash")
-                            .font(.system(size: 50))
-                            .foregroundColor(.gray)
-                        Text("Aucun favori pour le moment")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-                        Text("Ajoutez des stations depuis la carte pour les voir ici.")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 100)
-                } else {
-                    VStack(spacing: 15) {
-                        ForEach(Array(favoritesService.favoriteStationIds), id: \.self) {
-                            stationId in
-                            if let station = mapData.visibleStations.first(where: {
+        ScrollView {
+            if favoritesService.favoriteStationIds.isEmpty {
+                VStack(spacing: 20) {
+                    Image(systemName: "star.slash")
+                        .font(.system(size: 50))
+                        .foregroundColor(.gray)
+                    Text("Aucun favori pour le moment")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                    Text("Ajoutez des stations depuis la carte pour les voir ici.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 100)
+            } else {
+                VStack(spacing: 15) {
+                    ForEach(Array(favoritesService.favoriteStationIds), id: \.self) {
+                        stationId in
+                        if let station = mapData.visibleStations.first(where: {
+                            $0.id == stationId
+                        })
+                            ?? mapData.getAllStationsSync().first(where: {
                                 $0.id == stationId
                             })
-                                ?? mapData.getAllStationsSync().first(where: {
-                                    $0.id == stationId
-                                })
-                            {
-                                NavigationLink(
-                                    destination: StationDetailScreen(station: station)
-                                ) {
-                                    FavoriteStationRow(station: station)
-                                }
-                                .buttonStyle(.glass)
+                        {
+                            NavigationLink(
+                                destination: StationDetailScreen(station: station)
+                            ) {
+                                FavoriteStationRow(station: station)
                             }
+                            .buttonStyle(.glass)
                         }
                     }
-                    .padding(.top)
-                    .padding(.horizontal)
                 }
+                .padding(.top)
+                .padding(.horizontal)
             }
-            .background {
-                AdaptiveMapBackground()
-            }
-            .navigationTitle("Favoris")
-            .navigationBarTitleDisplayMode(.large)
         }
+        .background {
+            AdaptiveMapBackground()
+        }
+        .navigationTitle("Favoris")
+        .navigationBarTitleDisplayMode(.large)
     }
 }
 
@@ -316,7 +329,6 @@ struct FavoriteStationRow: View {
         guard let firstId = stopIds.first else { return }
 
         // On prend juste le premier arrêt pour l'aperçu rapide pour éviter de spammer l'API
-        // Idéalement il faudrait une requête agrégée ou stocker le dernier état
         IDFMService.shared.fetchDepartures(for: firstId)
             .receive(on: DispatchQueue.main)
             .sink(
@@ -326,15 +338,9 @@ struct FavoriteStationRow: View {
                         $0.stopDateTime.departureDateTime < $1.stopDateTime.departureDateTime
                     }
                     self.nextDepartures = sorted.prefix(2).compactMap { dep in
-                        let dateStr = dep.stopDateTime.departureDateTime
-                        let formatter = DateFormatter()
-                        formatter.dateFormat = "yyyyMMdd'T'HHmmss"
-                        if let date = formatter.date(from: dateStr) {
-                            let diff = Int(date.timeIntervalSinceNow / 60)
-                            if diff <= 0 { return "Maintenant" }
-                            return "\(diff) min"
-                        }
-                        return nil
+                        let remaining = DateFormat.timeRemaining(from: dep.stopDateTime.departureDateTime)
+                        if remaining.isEmpty { return nil }
+                        return remaining == "0 min" ? "Maintenant" : remaining
                     }
                 }
             )

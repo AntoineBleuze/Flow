@@ -4,6 +4,7 @@ import SwiftUI
 
 struct StationDetailSheet: View {
     let station: MapStation
+    var onDismiss: (() -> Void)? = nil  // For inline iPad panel
     @State private var departures: [Departure] = []
     @ObservedObject var favoritesService = FavoritesService.shared
     @State private var isLoading = false
@@ -84,65 +85,70 @@ struct StationDetailSheet: View {
 
     var contentView: some View {
         VStack(spacing: 0) {
-            // Custom Header
-            HStack(spacing: 12) {
-                // Y aller — prominent glass button
+            // Header — Station name + close
+            HStack(alignment: .center) {
+                Text(station.name)
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
+
+                Spacer()
+
+                // Close button
                 Button(action: {
-                    showItinerary = true
-                }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "arrow.triangle.turn.up.right.circle.fill")
-                            .font(.title3)
-                        Text("Y aller")
-                            .font(.callout)
-                            .fontWeight(.bold)
+                    if let onDismiss = onDismiss {
+                        onDismiss()
+                    } else {
+                        dismiss()
                     }
-                    .padding(.vertical, 10)
-                    .padding(.horizontal, 16)
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title)
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.top, 16)
+
+            // Row 2: Y aller button + action buttons
+            HStack(spacing: 10) {
+                // Y aller — prominent button
+                Button(action: { showItinerary = true }) {
+                    Label("Y aller", systemImage: "arrow.triangle.turn.up.right.circle.fill")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
                 }
                 .buttonStyle(.glassProminent)
 
-                // Station name
-                Text(station.name)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity)
+                Spacer()
 
-                // Action buttons grouped in a single glass container
-                HStack(spacing: 14) {
-                    Button(action: {
-                        loadDepartures()
-                    }) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.title3)
-                            .foregroundColor(.blue)
-                    }
-
-                    Button(action: {
-                        FavoritesService.shared.toggleFavorite(stationId: station.id)
-                    }) {
-                        Image(
-                            systemName: FavoritesService.shared.isFavorite(stationId: station.id)
-                                ? "heart.fill" : "heart"
-                        )
-                        .font(.title3)
-                        .foregroundColor(.red)
-                    }
-
-                    Button(action: {
-                        dismiss()
-                    }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.title2)
-                            .foregroundColor(.secondary)
-                    }
+                // Action buttons — individual glass circles
+                Button(action: { loadDepartures() }) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.body)
+                        .fontWeight(.medium)
+                        .frame(width: 36, height: 36)
                 }
-                .padding(.vertical, 8)
-                .padding(.horizontal, 12)
-                .glassEffect(.regular, in: Capsule())
+                .buttonStyle(.glass)
+
+                Button(action: {
+                    FavoritesService.shared.toggleFavorite(stationId: station.id)
+                }) {
+                    Image(
+                        systemName: FavoritesService.shared.isFavorite(stationId: station.id)
+                            ? "heart.fill" : "heart"
+                    )
+                    .font(.body)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.red)
+                    .frame(width: 36, height: 36)
+                }
+                .buttonStyle(.glass)
             }
             .padding(.horizontal)
-            .padding(.top, 14)
+            .padding(.top, 8)
 
             // Filtre des modes
             let availableModes = getAvailableModes(from: departures)
@@ -155,11 +161,11 @@ struct StationDetailSheet: View {
                 }
                 .pickerStyle(SegmentedPickerStyle())
                 .padding(.horizontal)
-                .padding(.top, 10)
+                .padding(.top, 8)
             }
 
             ScrollView {
-                VStack(spacing: 20) {
+                VStack(spacing: 16) {
                     let groups = groupDepartures(departures)
                     let filteredGroups = groups.filter { group in
                         if selectedMode == "Tout" { return true }
@@ -168,9 +174,9 @@ struct StationDetailSheet: View {
                     }
 
                     ForEach(filteredGroups) { group in
-                        VStack(alignment: .leading, spacing: 10) {
-                            // En-tête de ligne (Icone + Nom optionnel)
-                            HStack {
+                        VStack(alignment: .leading, spacing: 8) {
+                            // En-tête de ligne (Icone + Réseau)
+                            HStack(spacing: 10) {
                                 // Icone Ligne
                                 let assetName = TransportType.getAssetName(
                                     mode: group.mode, label: group.label)
@@ -178,13 +184,13 @@ struct StationDetailSheet: View {
                                     Image(assetName)
                                         .resizable()
                                         .scaledToFit()
-                                        .frame(width: 40, height: 40)
+                                        .frame(width: 36, height: 36)
                                 } else {
                                     ZStack {
                                         if group.mode == "RER" || group.mode == "Train" {
-                                            RoundedRectangle(cornerRadius: 8)
+                                            RoundedRectangle(cornerRadius: 6)
                                                 .fill(Color(hex: group.color))
-                                                .frame(width: 40, height: 40)
+                                                .frame(width: 36, height: 36)
                                         } else {
                                             Circle()
                                                 .fill(Color(hex: group.color))
@@ -192,7 +198,7 @@ struct StationDetailSheet: View {
                                         }
 
                                         Text(group.label)
-                                            .font(.headline)
+                                            .font(.subheadline)
                                             .bold()
                                             .foregroundColor(
                                                 Color(hex: group.text_color ?? "FFFFFF"))
@@ -201,7 +207,7 @@ struct StationDetailSheet: View {
 
                                 if let network = group.network {
                                     Text(network)
-                                        .font(.subheadline)
+                                        .font(.caption)
                                         .foregroundColor(.secondary)
                                 }
 
@@ -216,11 +222,11 @@ struct StationDetailSheet: View {
                                     HStack {
                                         VStack(alignment: .leading, spacing: 4) {
                                             Text(direction.direction)
-                                                .font(.body)
+                                                .font(.subheadline)
                                                 .foregroundColor(.primary)
                                                 .lineLimit(2)
 
-                                            // Liste des temps (ex: "1, 4 min")
+                                            // Liste des temps
                                             HStack(spacing: 0) {
                                                 ForEach(
                                                     Array(direction.times.enumerated()),
@@ -231,13 +237,13 @@ struct StationDetailSheet: View {
                                                             + (tIndex < direction.times.count - 1
                                                                 ? ", " : "")
                                                     )
-                                                    .font(.body)
+                                                    .font(.subheadline)
                                                     .bold()
                                                     .foregroundColor(.green)
                                                 }
 
-                                                Image(systemName: "wifi")  // Symbole temps réel
-                                                    .font(.caption)
+                                                Image(systemName: "wifi")
+                                                    .font(.caption2)
                                                     .foregroundColor(.green)
                                                     .padding(.leading, 4)
                                             }
@@ -263,26 +269,28 @@ struct StationDetailSheet: View {
                                             }
                                         }) {
                                             Image(systemName: "bolt.fill")
-                                                .font(.title3)
-                                                .foregroundColor(isActive ? .green : .red)
-                                                .padding(8)
+                                                .font(.body)
+                                                .foregroundColor(isActive ? .green : .pink)
+                                                .frame(width: 34, height: 34)
                                         }
                                         .buttonStyle(.glass)
                                     }
-                                    .padding()
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 12)
 
                                     if index < group.directions.count - 1 {
                                         Divider()
-                                            .padding(.leading)
+                                            .padding(.leading, 14)
                                     }
                                 }
                             }
-                            .glassEffect()
+                            .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 16))
                         }
                         .padding(.horizontal)
                     }
                 }
-                .padding(.top)
+                .padding(.top, 12)
+                .padding(.bottom, 30)
             }
             .scrollContentBackground(.hidden)
         }
@@ -329,8 +337,13 @@ struct StationDetailSheet: View {
             }
         }
 
-        // Tri: Lignes (Numérique/Alpha) puis Directions
-        return groups.values.sorted { $0.label < $1.label }.map { group in
+        // Tri: Par mode (Métro → RER → Transilien → Tram → autre) puis numérique/alpha
+        return groups.values.sorted { a, b in
+            let priorityA = modePriority(a.mode)
+            let priorityB = modePriority(b.mode)
+            if priorityA != priorityB { return priorityA < priorityB }
+            return compareLineLabels(a.label, b.label)
+        }.map { group in
             var newGroup = group
             newGroup.directions.sort { $0.direction < $1.direction }
             return newGroup
@@ -411,24 +424,11 @@ struct StationDetailSheet: View {
     }
 
     private func formatDate(_ dateString: String) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd'T'HHmmss"
-        if let date = formatter.date(from: dateString) {
-            formatter.dateFormat = "HH:mm"
-            return formatter.string(from: date)
-        }
-        return dateString
+        return DateFormat.formatTime(from: dateString)
     }
 
     private func timeRemaining(_ dateString: String) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd'T'HHmmss"
-        if let date = formatter.date(from: dateString) {
-            let diff = Int(date.timeIntervalSinceNow / 60)
-            if diff <= 0 { return "0 min" }
-            return "\(diff) min"
-        }
-        return ""
+        return DateFormat.timeRemaining(from: dateString)
     }
 
     private func startLiveActivity(
@@ -445,15 +445,54 @@ struct StationDetailSheet: View {
 
         let departuresToUse = Array(nextDepartures.prefix(2))
 
+        // Optimisation :
+        // 1. Filtrer les quais qui correspondent à la ligne sélectionnée
+        // 2. Utiliser les stop_area_id si disponibles (1 requête au lieu de N)
+        // 3. Dédupliquer
+        let relevantPlatforms = station.platforms.filter { $0.lineName == lineName }
+        
+        let optimizedIds: Set<String> = Set(relevantPlatforms.compactMap { platform in
+            if !platform.stopAreaId.isEmpty {
+                return "stop_area:\(platform.stopAreaId)"
+            } else {
+                // Fallback sur stop_point.
+                // Le serveur utilise .contains("stop_point") pour choisir l'endpoint.
+                let id = platform.id
+                if !id.contains("stop_point") {
+                    return "stop_point:\(id)"
+                }
+                return id
+            }
+        })
+
         LiveActivityManager.shared.startLiveActivity(
             stationName: station.name,
             lineName: lineName,
             direction: direction,
             nextDepartures: departuresToUse,
-            stopIds: station.platforms.map { $0.id },
+            stopIds: Array(optimizedIds),
             lineColor: lineColor,
             textColor: textColor
         )
+    }
+
+    private func modePriority(_ mode: String?) -> Int {
+        guard let m = mode?.lowercased() else { return 99 }
+        if m.contains("metro") || m.contains("métro") { return 0 }
+        if m.contains("rer") { return 1 }
+        if m.contains("train") || m.contains("transilien") { return 2 }
+        if m.contains("tram") { return 3 }
+        if m.contains("bus") { return 4 }
+        return 5
+    }
+
+    private func compareLineLabels(_ a: String, _ b: String) -> Bool {
+        if let numA = Int(a), let numB = Int(b) {
+            return numA < numB
+        }
+        if Int(a) != nil { return true }
+        if Int(b) != nil { return false }
+        return a.localizedStandardCompare(b) == .orderedAscending
     }
 
     private func getAvailableModes(from departures: [Departure]) -> [String] {

@@ -236,10 +236,7 @@ class NavigationManager: ObservableObject {
     func calculateETA(for section: ItinerarySection) -> String? {
         guard let arrivalTime = section.arrival_date_time else { return nil }
         
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd'T'HHmmss"
-        
-        if let arrivalDate = formatter.date(from: arrivalTime) {
+        if let arrivalDate = DateFormat.navitia.date(from: arrivalTime) {
             let diff = Int(arrivalDate.timeIntervalSinceNow / 60)
             if diff <= 0 { return "Maintenant" }
             return "\(diff) min"
@@ -324,8 +321,7 @@ class NavigationManager: ObservableObject {
             let startStop = stops[currentLegIndex]
             let endStop = stops[currentLegIndex+1]
             
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyyMMdd'T'HHmmss"
+            let formatter = DateFormat.navitia
             
             if let start = formatter.date(from: startStop.departure_date_time),
                let end = formatter.date(from: endStop.arrival_date_time) {
@@ -445,14 +441,7 @@ class NavigationManager: ObservableObject {
     }
 
     private func timeRemaining(_ dateString: String) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd'T'HHmmss"
-        if let date = formatter.date(from: dateString) {
-            let diff = Int(date.timeIntervalSinceNow / 60)
-            if diff <= 0 { return "0 min" }
-            return "\(diff) min"
-        }
-        return ""
+        return DateFormat.timeRemaining(from: dateString)
     }
 
     // MARK: - Activity

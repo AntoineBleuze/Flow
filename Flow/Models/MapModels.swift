@@ -181,8 +181,6 @@ class MapDataService: ObservableObject {
 
     private func loadTraces() {
         // Try cache first
-        // Bypass cache check for now to ensure data refresh
-        /*
         if let cached = loadTracesFromCache() {
             DispatchQueue.main.async {
                 self.lines = cached
@@ -195,10 +193,15 @@ class MapDataService: ObservableObject {
                         self.lineColorCache[name] = Color(hex: hex)
                     }
                 }
+                // Déclencher le calcul des overlays
+                Task {
+                    await self.precalculateOverlays()
+                }
             }
+            print("✅ Traces chargées depuis le cache (\(cached.count) lignes)")
             return
         }
-        */
+
 
         // Cache miss - parse from GeoJSON
         struct Feature: Codable {
@@ -366,20 +369,22 @@ class MapDataService: ObservableObject {
 
         do {
             let count = try context.count(for: fetchRequest)
-            if false /* count > 0 */ {
-                print("💾 Chargement des arrêts depuis CoreData...")
+            if count > 0 {
+                // Tenter le chargement CoreData, avec fallback CSV si les données sont corrompues
+                print("💾 Chargement des arrêts depuis CoreData (\(count) entités)...")
                 let entities = try context.fetch(fetchRequest)
-                self.processEntities(entities)
+                // Vérifier que les données sont valides (id et name requis)
+                if let first = entities.first, first.id != nil, first.name != nil {
+                    self.processEntities(entities)
+                } else {
+                    // Données corrompues/anciennes — recharger depuis CSV
+                    print("⚠️ Données CoreData invalides, rechargement CSV...")
+                    self.clearStopPoints(in: context)
+                    self.loadStopsFromCSV()
+                }
             } else {
-                // Force loading from CSV to apply filtering (clearing old data first)
-                // TODO: Remove this forced reload after validation
-                print("🔄 Force reload des stations (suppression des anciennes)...")
-                self.clearStopPoints(in: context)
-                self.loadStopsFromCSV()
-                /*
                 print("📂 CoreData vide. Chargement depuis CSV...")
                 self.loadStopsFromCSV()
-                */
             }
         } catch {
             print("❌ Erreur CoreData: \(error)")

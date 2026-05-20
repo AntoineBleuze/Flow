@@ -27,17 +27,37 @@ struct ItinerarySearchPanel: View {
     @State private var showEndPicker = false
     @State private var showDatePicker = false
     
+    // Resizable panel properties
+    @State private var panelHeight: CGFloat = 500
+    @GestureState private var dragOffset: CGFloat = 0
+    private let minPanelHeight: CGFloat = 300
+    private let maxPanelHeight: CGFloat = 700
+    
     // Animation properties
     @Namespace private var animation
     
     var body: some View {
         VStack(spacing: 0) {
-            // Drag Handle
+            // Drag Handle — interactive for resizing
             Capsule()
                 .fill(Color.secondary.opacity(0.5))
                 .frame(width: 40, height: 5)
                 .padding(.top, 8)
                 .padding(.bottom, 12)
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle().size(width: 120, height: 40))
+                .gesture(
+                    DragGesture()
+                        .updating($dragOffset) { value, state, _ in
+                            state = value.translation.height
+                        }
+                        .onEnded { value in
+                            let newHeight = panelHeight - value.translation.height
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                panelHeight = min(maxPanelHeight, max(minPanelHeight, newHeight))
+                            }
+                        }
+                )
             
             if panelState == .compact {
                 compactView
@@ -47,6 +67,7 @@ struct ItinerarySearchPanel: View {
                 resultsView
             }
         }
+        .frame(height: min(maxPanelHeight, max(minPanelHeight, panelHeight - dragOffset)))
         .background {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(.regularMaterial)

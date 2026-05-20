@@ -1,0 +1,11 @@
+# 011_ES_EVENT_TYPE_NOTIFY_TCC_MODIFY.pdf
+
+## Page 1
+
+Endpoint Security / ES_EVENT_TYPE_NOTIFY_TCC_MODIFY
+Global Variable
+ES_EVENT_TYPE_NOTIFY_TCC_MODIFY
+Mac Catalyst
+macOS
+
+

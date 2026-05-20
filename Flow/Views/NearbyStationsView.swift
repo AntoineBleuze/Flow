@@ -4,6 +4,7 @@ import SwiftUI
 
 struct NearbyStationsView: View {
     @StateObject private var viewModel = NearbyStationsViewModel()
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
         NavigationStack {
@@ -94,6 +95,8 @@ struct NearbyStationsView: View {
                         }
                         .listStyle(.plain)
                         .scrollContentBackground(.hidden)
+                        .frame(maxWidth: horizontalSizeClass == .regular ? 700 : .infinity)
+                        .frame(maxWidth: .infinity) // center within parent
                     }
                 }
             }
@@ -182,7 +185,12 @@ struct NearbyStationRow: View {
                 } else {
                     // Affichage groupé par ligne
                     VStack(alignment: .leading, spacing: 8) {
-                        ForEach(groupedDepartures.keys.sorted(), id: \.self) { lineKey in
+                        ForEach(groupedDepartures.keys.sorted { a, b in
+                            if let numA = Int(a), let numB = Int(b) { return numA < numB }
+                            if Int(a) != nil { return true }
+                            if Int(b) != nil { return false }
+                            return a.localizedStandardCompare(b) == .orderedAscending
+                        }, id: \.self) { lineKey in
                             if let directions = groupedDepartures[lineKey] {
                                 VStack(alignment: .leading, spacing: 4) {
                                     HStack(alignment: .center, spacing: 6) {
@@ -261,30 +269,61 @@ struct NearbyStationRow: View {
     }
 
     private func loadPreview() {
-        // Pour une vue à proximité complète, on veut tous les départs de tous les quais de la zone
-        let stopIds = Set(station.platforms.map { $0.id })
+        // Utiliser les stop_area quand disponibles (1-2 requêtes au lieu de 5-15)
+        let stopAreaIds = Set(station.platforms.compactMap { platform -> String? in
+            let id = platform.stopAreaId
+            return id.isEmpty ? nil : id
+        })
 
-        let publishers = stopIds.map { id in
-            IDFMService.shared.fetchDepartures(for: id)
-                .catch { _ in Just<[Departure]>([]) }
-        }
-
-        Publishers.MergeMany(publishers)
-            .collect()
-            .map { results in
-                results.flatMap { $0 }.sorted {
-                    $0.stopDateTime.departureDateTime < $1.stopDateTime.departureDateTime
-                }
+        if !stopAreaIds.isEmpty {
+            // Requête par stop_area (beaucoup plus efficace)
+            let publishers = stopAreaIds.prefix(2).map { id in
+                IDFMService.shared.fetchDepartures(for: "stop_area:\(id)")
+                    .catch { _ in Just<[Departure]>([]) }
             }
-            .receive(on: DispatchQueue.main)
-            .sink(
-                receiveCompletion: { _ in isLoading = false },
-                receiveValue: { deps in
-                    self.groupDeparturesWithDirections(deps)
-                    self.isLoading = false
+
+            Publishers.MergeMany(publishers)
+                .collect()
+                .map { results in
+                    results.flatMap { $0 }.sorted {
+                        $0.stopDateTime.departureDateTime < $1.stopDateTime.departureDateTime
+                    }
                 }
-            )
-            .store(in: &cancellables)
+                .receive(on: DispatchQueue.main)
+                .sink(
+                    receiveCompletion: { _ in isLoading = false },
+                    receiveValue: { deps in
+                        self.groupDeparturesWithDirections(deps)
+                        self.isLoading = false
+                    }
+                )
+                .store(in: &cancellables)
+        } else {
+            // Fallback: limiter à 3 stop_points pour l'aperçu
+            let stopIds = Array(Set(station.platforms.map { $0.id }).prefix(3))
+
+            let publishers = stopIds.map { id in
+                IDFMService.shared.fetchDepartures(for: id)
+                    .catch { _ in Just<[Departure]>([]) }
+            }
+
+            Publishers.MergeMany(publishers)
+                .collect()
+                .map { results in
+                    results.flatMap { $0 }.sorted {
+                        $0.stopDateTime.departureDateTime < $1.stopDateTime.departureDateTime
+                    }
+                }
+                .receive(on: DispatchQueue.main)
+                .sink(
+                    receiveCompletion: { _ in isLoading = false },
+                    receiveValue: { deps in
+                        self.groupDeparturesWithDirections(deps)
+                        self.isLoading = false
+                    }
+                )
+                .store(in: &cancellables)
+        }
     }
 
     private func groupDeparturesWithDirections(_ deps: [Departure]) {
@@ -312,15 +351,8 @@ struct NearbyStationRow: View {
     }
 
     private func formatDepartureTime(_ dep: Departure) -> String {
-        let dateStr = dep.stopDateTime.departureDateTime
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd'T'HHmmss"
-        if let date = formatter.date(from: dateStr) {
-            let diff = Int(date.timeIntervalSinceNow / 60)
-            if diff <= 0 { return "Maintenant" }
-            return "\(diff) min"
-        }
-        return "?"
+        let remaining = DateFormat.timeRemaining(from: dep.stopDateTime.departureDateTime)
+        return remaining.isEmpty ? "?" : (remaining == "0 min" ? "Maintenant" : remaining)
     }
 
     private func determineType(from info: DisplayInformations?) -> TransportType {

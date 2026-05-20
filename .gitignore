@@ -1,1 +1,33 @@
+# Xcode
+build/
+*.xcodeproj/*
+!*.xcodeproj/project.pbxproj
+!*.xcodeproj/xcshareddata/
+!*.xcworkspace/contents.xcworkspacedata
+*.username
+*.xcworkspace
+!default.xcworkspace
+*.xcuserdata
+*.scptd
+*.scpt
+*.applescript
+ProfileRedirects
+*.moved-aside
+DerivedData
+.LSOverride
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Node / FlowServer
+node_modules/
+npm-debug.log
+FlowServer/node_modules/
+FlowServer/.env
+
+# Documentation & large binaries
+*.pdf
+.DS_Store
+**/ .DS_Store
 /AppleDoc

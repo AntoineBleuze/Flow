@@ -1,0 +1,12 @@
+# 014_ES_TCC_AUTHORIZATION_REASON_ERROR.pdf
+
+## Page 1
+
+Endpoint Security / ES_TCC_AUTHORIZATION_REASON_ERROR
+Global Variable
+ES_TCC_AUTHORIZATION_REASON
+_ERROR
+Mac Catalyst
+macOS
+
+

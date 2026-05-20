@@ -290,8 +290,13 @@ struct StationDetailScreen: View {
             }
         }
 
-        // Tri: Lignes (Numérique/Alpha) puis Directions
-        return groups.values.sorted { $0.label < $1.label }.map { group in
+        // Tri: Par mode (Métro → RER → Transilien → Tram → autre) puis numérique/alpha
+        return groups.values.sorted { a, b in
+            let priorityA = modePriority(a.mode)
+            let priorityB = modePriority(b.mode)
+            if priorityA != priorityB { return priorityA < priorityB }
+            return compareLineLabels(a.label, b.label)
+        }.map { group in
             var newGroup = group
             newGroup.directions.sort { $0.direction < $1.direction }
             return newGroup
@@ -340,14 +345,7 @@ struct StationDetailScreen: View {
     }
 
     private func timeRemaining(_ dateString: String) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd'T'HHmmss"
-        if let date = formatter.date(from: dateString) {
-            let diff = Int(date.timeIntervalSinceNow / 60)
-            if diff <= 0 { return "0 min" }
-            return "\(diff) min"
-        }
-        return ""
+        return DateFormat.timeRemaining(from: dateString)
     }
 
     private func startLiveActivity(
@@ -365,6 +363,25 @@ struct StationDetailScreen: View {
             lineColor: lineColor,
             textColor: textColor
         )
+    }
+
+    private func modePriority(_ mode: String?) -> Int {
+        guard let m = mode?.lowercased() else { return 99 }
+        if m.contains("metro") || m.contains("métro") { return 0 }
+        if m.contains("rer") { return 1 }
+        if m.contains("train") || m.contains("transilien") { return 2 }
+        if m.contains("tram") { return 3 }
+        if m.contains("bus") { return 4 }
+        return 5
+    }
+
+    private func compareLineLabels(_ a: String, _ b: String) -> Bool {
+        if let numA = Int(a), let numB = Int(b) {
+            return numA < numB
+        }
+        if Int(a) != nil { return true }
+        if Int(b) != nil { return false }
+        return a.localizedStandardCompare(b) == .orderedAscending
     }
 
     private func getAvailableModes(from departures: [Departure]) -> [String] {

@@ -1,0 +1,111 @@
+# Reference.pdf
+
+## Page 1
+
+This document describes constants defined in the Core Media framework not defined elsewhere 
+this reference.
+var COREMEDIA_DECLARE_BRIDGED_TYPES: Bool
+var COREMEDIA_DECLARE_NULLABILITY: Bool
+var COREMEDIA_DECLARE_NULLABILITY_BEGIN_END: Bool
+var COREMEDIA_DECLARE_RETURNS_NOT_RETAINED_ON_PARAMETERS: Bool
+var COREMEDIA_DECLARE_RETURNS_RETAINED: Bool
+var COREMEDIA_DECLARE_RETURNS_RETAINED_ON_PARAMETERS: Bool
+var COREMEDIA_USE_DERIVED_ENUMS_FOR_CONSTANTS: Bool
+var CMITEMCOUNT_MAX: Int
+var COREMEDIA_CMBASECLASS_VERSION_IS_POINTER_ALIGNED: Bool
+var COREMEDIA_DECLARE_RELEASES_ARGUMENT: Bool
+var COREMEDIA_FALSE: Bool
+var COREMEDIA_TRUE: Bool
+Overview
+Topics
+Constants
+Core Media / Core Media Constants
+API Collection
+Core Media Constants
+
+
+## Page 2
+
+var COREMEDIA_USE_ALIGNED_CMBASECLASS_VERSION: Bool
+var CMTIMEBASE_USE_SOURCE_TERMINOLOGY: Int32
+var COREMEDIA_DECLARE_RETURNS_RETAINED_BLOCK: Bool
+let kCMFormatDescriptionExtension_ProjectionKind: CFString
+let kCMFormatDescriptionExtension_ViewPackingKind: CFString
+let kCMFormatDescriptionLogTransferFunction_AppleLog: CFString
+let kCMFormatDescriptionProjectionKind_Rectilinear: CFString
+let kCMFormatDescriptionViewPackingKind_OverUnder: CFString
+let kCMFormatDescriptionViewPackingKind_SideBySide: CFString
+let kCMMetadataDataType_QuickTimeMetadataMilliLux: CFString
+let kCMMetadataDataType_QuickTimeMetadataUUID: CFString
+let kCMMetadataIdentifier_QuickTimeMetadataSceneIlluminance: CFString
+let kCMMetadataIdentifier_QuickTimeMetadataSegmentIdentifier: CFString
+let kCMSampleAttachmentKey_HDR10PlusPerFrameData: CFString
+let kCMTagProjectionTypeHalfEquirectangular: __CMTag
+let kCMTextMarkupAttribute_FontFamilyNameList: CFString
+let kCMFormatDescriptionExtension_ConvertedFromExternalSphericalTags:
+CFString
+let kCMFormatDescriptionProjectionKind_AppleImmersiveVideo: CFString
+let kCMFormatDescriptionProjectionKind_Equirectangular: CFString
+let kCMFormatDescriptionProjectionKind_HalfEquirectangular: CFString
+let kCMFormatDescriptionProjectionKind_ParametricImmersive: CFString
+let kCMMetadataBaseDataType_ExtendedRasterRectangleValue: CFString
+let kCMMetadataBaseDataType_RasterRectangleValue: CFString
+let kCMMetadataIdentifier_QuickTimeMetadataDisplayMaskRectangleMono:
+CFString
+let kCMMetadataIdentifier_QuickTimeMetadataDisplayMaskRectangleStereo
+Left: CFString
+
+
+## Page 3
+
+let kCMMetadataIdentifier_QuickTimeMetadataDisplayMaskRectangleStereo
+Right: CFString
+let kCMMetadataIdentifier_QuickTimeMetadataPresentationImmersiveMedia:
+CFString
+let kCMMetadataIdentifier_QuickTimeMetadataSpatialAudioMix: CFString
+Camera calibration
+Constants that identify camera calibration extensions.
+typealias CMBaseClassVersion
+typealias CMStructVersion
+Core Media Functions
+Core Media Type Aliases
+Type Aliases
+See Also
+Reference
+
+
+## Page 4
+
+func CMBufferQueueCopyHead(CMBufferQueue) -> CMBuffer?
+Core Media Constants
+Core Media Type Aliases
+Topics
+Functions
+See Also
+Reference
+Core Media / Core Media Functions
+API Collection
+Core Media Functions
+
+
+## Page 5
+
+typealias CMBufferCompareHandler
+typealias CMBufferGetBooleanHandler
+typealias CMBufferGetSizeHandler
+typealias CMBufferGetTimeHandler
+typealias CMTaggedBufferGroupFormatDescription
+A type for tagged buffer format descriptions.
+typealias CMTaggedBufferGroupFormatType
+A type for tagged buffer format information.
+Core Media Constants
+Core Media Functions
+Topics
+Type Aliases
+See Also
+Reference
+Core Media / Core Media Type Aliases
+API Collection
+Core Media Type Aliases
+
+

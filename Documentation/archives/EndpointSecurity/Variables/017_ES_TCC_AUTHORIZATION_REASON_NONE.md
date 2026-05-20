@@ -1,0 +1,12 @@
+# 017_ES_TCC_AUTHORIZATION_REASON_NONE.pdf
+
+## Page 1
+
+Endpoint Security / ES_TCC_AUTHORIZATION_REASON_NONE
+Global Variable
+ES_TCC_AUTHORIZATION_REASON
+_NONE
+Mac Catalyst
+macOS
+
+

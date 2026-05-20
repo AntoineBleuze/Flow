@@ -1,0 +1,13 @@
+# 018_ES_TCC_AUTHORIZATION_REASON_PREFLIGHT_UNKNOWN.pdf
+
+## Page 1
+
+Endpoint Security / ES_TCC_AUTHORIZATION_REASON_PREFLIGHT_UNKNOWN
+Global Variable
+ES_TCC_AUTHORIZATION_REASON
+_PREFLIGHT_UNKNOWN
+A system process changed the authorization right
+Mac Catalyst
+macOS
+
+

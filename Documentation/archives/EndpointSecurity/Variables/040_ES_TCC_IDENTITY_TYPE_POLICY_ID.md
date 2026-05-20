@@ -1,0 +1,11 @@
+# 040_ES_TCC_IDENTITY_TYPE_POLICY_ID.pdf
+
+## Page 1
+
+Endpoint Security / ES_TCC_IDENTITY_TYPE_POLICY_ID
+Global Variable
+ES_TCC_IDENTITY_TYPE_POLICY_ID
+Mac Catalyst
+macOS
+
+

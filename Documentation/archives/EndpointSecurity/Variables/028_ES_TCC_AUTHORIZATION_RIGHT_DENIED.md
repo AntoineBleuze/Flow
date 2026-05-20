@@ -1,0 +1,12 @@
+# 028_ES_TCC_AUTHORIZATION_RIGHT_DENIED.pdf
+
+## Page 1
+
+Endpoint Security / ES_TCC_AUTHORIZATION_RIGHT_DENIED
+Global Variable
+ES_TCC_AUTHORIZATION_RIGHT
+_DENIED
+Mac Catalyst
+macOS
+
+

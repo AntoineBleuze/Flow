@@ -52,6 +52,13 @@
 			);
 			target = 6E1327D92ED25FAD00A28845 /* FlowWidgetsExtension */;
 		};
+		6E1D9B262F5208B6003CF633 /* Exceptions for "Flow" folder in "FlowWidgetsExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				linesstops.json,
+			);
+			target = 6E1327D92ED25FAD00A28845 /* FlowWidgetsExtension */;
+		};
 		6E71765C2ED5D7AC003FAB2D /* Exceptions for "Flow" folder in "Flow" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -74,6 +81,7 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				6E71765C2ED5D7AC003FAB2D /* Exceptions for "Flow" folder in "Flow" target */,
+				6E1D9B262F5208B6003CF633 /* Exceptions for "Flow" folder in "FlowWidgetsExtension" target */,
 			);
 			path = Flow;
 			sourceTree = "<group>";

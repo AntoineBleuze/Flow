@@ -1,0 +1,11 @@
+# 007_ES_CS_VALIDATION_CATEGORY_OOPJIT.pdf
+
+## Page 1
+
+Endpoint Security / ES_CS_VALIDATION_CATEGORY_OOPJIT
+Global Variable
+ES_CS_VALIDATION_CATEGORY_OOPJIT
+Mac Catalyst
+macOS
+
+

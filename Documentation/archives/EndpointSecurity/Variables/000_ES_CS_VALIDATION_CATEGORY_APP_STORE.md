@@ -1,0 +1,12 @@
+# 000_ES_CS_VALIDATION_CATEGORY_APP_STORE.pdf
+
+## Page 1
+
+Endpoint Security / ES_CS_VALIDATION_CATEGORY_APP_STORE
+Global Variable
+ES_CS_VALIDATION_CATEGORY_APP
+_STORE
+Mac Catalyst
+macOS
+
+

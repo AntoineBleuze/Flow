@@ -1,0 +1,303 @@
+# Reference.pdf
+
+## Page 1
+
+struct IOUSBHostCIControllerState
+struct IOUSBHostCIDeviceSpeed
+struct IOUSBHostCIDeviceState
+struct IOUSBHostCIEndpointState
+struct IOUSBHostCIExceptionType
+struct IOUSBHostCILinkState
+struct IOUSBHostCIMessage
+struct IOUSBHostCIMessageStatus
+struct IOUSBHostCIMessageType
+struct IOUSBHostCIPortState
+struct IOUSBHostCIUserClientVersion
+struct IOUSBHostIsochronousTransaction
+struct IOUSBHostIsochronousTransactionOptions
+struct IOUSBHostIsochronousTransferOptions
+struct IOUSBHostObjectDestroyOptions
+Topics
+Structures
+IOUSBHost / IOUSBHost Structures
+API Collection
+IOUSBHost Structures
+
+
+## Page 2
+
+IOUSBHost Enumerations
+IOUSBHost Constants
+IOUSBHost Functions
+IOUSBHost Data Types
+See Also
+Reference
+
+
+## Page 3
+
+Anonymous
+Anonymous
+Anonymous
+Anonymous
+Anonymous
+Anonymous
+Anonymous
+Anonymous
+Anonymous
+Anonymous
+Anonymous
+Anonymous
+Anonymous
+Anonymous
+Anonymous
+Anonymous
+Anonymous
+Topics
+Enumerations
+IOUSBHost / IOUSBHost Enumerations
+API Collection
+IOUSBHost Enumerations
+
+
+## Page 4
+
+Anonymous
+Anonymous
+struct IOUSBHostCIControllerState
+struct IOUSBHostCIDeviceSpeed
+struct IOUSBHostCIDeviceState
+struct IOUSBHostCIEndpointState
+struct IOUSBHostCIExceptionType
+struct IOUSBHostCILinkState
+struct IOUSBHostCIMessageStatus
+struct IOUSBHostCIMessageType
+struct IOUSBHostCIPortState
+struct IOUSBHostCIUserClientVersion
+struct IOUSBHostIsochronousTransactionOptions
+struct IOUSBHostIsochronousTransferOptions
+IOUSBHost Structures
+IOUSBHost Constants
+IOUSBHost Functions
+IOUSBHost Data Types
+See Also
+Reference
+
+
+## Page 5
+
+var IOUSBHostCIControllerStateActive: IOUSBHostCIControllerState
+var IOUSBHostCIControllerStateOff: IOUSBHostCIControllerState
+var IOUSBHostCIControllerStatePaused: IOUSBHostCIControllerState
+var IOUSBHostCIDeviceSpeedFull: IOUSBHostCIDeviceSpeed
+var IOUSBHostCIDeviceSpeedHigh: IOUSBHostCIDeviceSpeed
+var IOUSBHostCIDeviceSpeedLow: IOUSBHostCIDeviceSpeed
+var IOUSBHostCIDeviceSpeedNone: IOUSBHostCIDeviceSpeed
+var IOUSBHostCIDeviceSpeedSuper: IOUSBHostCIDeviceSpeed
+var IOUSBHostCIDeviceSpeedSuperPlus: IOUSBHostCIDeviceSpeed
+var IOUSBHostCIDeviceSpeedSuperPlusBy2: IOUSBHostCIDeviceSpeed
+var IOUSBHostCIDeviceStateActive: IOUSBHostCIDeviceState
+var IOUSBHostCIDeviceStateDestroyed: IOUSBHostCIDeviceState
+var IOUSBHostCIDeviceStatePaused: IOUSBHostCIDeviceState
+var IOUSBHostCIEndpointStateActive: IOUSBHostCIEndpointState
+var IOUSBHostCIEndpointStateDestroyed: IOUSBHostCIEndpointState
+var IOUSBHostCIEndpointStateHalted: IOUSBHostCIEndpointState
+var IOUSBHostCIEndpointStatePaused: IOUSBHostCIEndpointState
+Topics
+Constants
+IOUSBHost / IOUSBHost Constants
+API Collection
+IOUSBHost Constants
+
+
+## Page 6
+
+var IOUSBHostCIExceptionTypeCapabilitiesInvalid: IOUSBHostCIException
+Type
+var IOUSBHostCIExceptionTypeCommandFailure: IOUSBHostCIExceptionType
+var IOUSBHostCIExceptionTypeCommandReadCollision: IOUSBHostCIException
+Type
+var IOUSBHostCIExceptionTypeCommandTimeout: IOUSBHostCIExceptionType
+var IOUSBHostCIExceptionTypeCommandWriteFailed: IOUSBHostCIExceptionTyp
+var IOUSBHostCIExceptionTypeDoorbellOverflow: IOUSBHostCIExceptionType
+var IOUSBHostCIExceptionTypeDoorbellReadCollision: IOUSBHostCIException
+Type
+var IOUSBHostCIExceptionTypeFrameUpdateError: IOUSBHostCIExceptionType
+var IOUSBHostCIExceptionTypeInterruptInvalid: IOUSBHostCIExceptionType
+var IOUSBHostCIExceptionTypeInterruptOverflow: IOUSBHostCIExceptionType
+var IOUSBHostCIExceptionTypeProtocolError: IOUSBHostCIExceptionType
+var IOUSBHostCIExceptionTypeTerminated: IOUSBHostCIExceptionType
+var IOUSBHostCIExceptionTypeUnknown: IOUSBHostCIExceptionType
+var IOUSBHostCILinkStateCompliance: IOUSBHostCILinkState
+var IOUSBHostCILinkStateDisabled: IOUSBHostCILinkState
+var IOUSBHostCILinkStateInactive: IOUSBHostCILinkState
+var IOUSBHostCILinkStatePolling: IOUSBHostCILinkState
+var IOUSBHostCILinkStateRecovery: IOUSBHostCILinkState
+var IOUSBHostCILinkStateReset: IOUSBHostCILinkState
+var IOUSBHostCILinkStateResume: IOUSBHostCILinkState
+var IOUSBHostCILinkStateRxDetect: IOUSBHostCILinkState
+var IOUSBHostCILinkStateTest: IOUSBHostCILinkState
+var IOUSBHostCILinkStateU0: IOUSBHostCILinkState
+var IOUSBHostCILinkStateU1: IOUSBHostCILinkState
+var IOUSBHostCILinkStateU2: IOUSBHostCILinkState
+var IOUSBHostCILinkStateU3: IOUSBHostCILinkState
+
+
+## Page 7
+
+var IOUSBHostCIMessageStatusBadArgument: IOUSBHostCIMessageStatus
+var IOUSBHostCIMessageStatusEndpointStopped: IOUSBHostCIMessageStatus
+var IOUSBHostCIMessageStatusError: IOUSBHostCIMessageStatus
+var IOUSBHostCIMessageStatusMissedServiceError: IOUSBHostCIMessageStatu
+var IOUSBHostCIMessageStatusNoResources: IOUSBHostCIMessageStatus
+var IOUSBHostCIMessageStatusNotPermitted: IOUSBHostCIMessageStatus
+var IOUSBHostCIMessageStatusOffline: IOUSBHostCIMessageStatus
+var IOUSBHostCIMessageStatusOverrunError: IOUSBHostCIMessageStatus
+var IOUSBHostCIMessageStatusProtocolError: IOUSBHostCIMessageStatus
+var IOUSBHostCIMessageStatusReserved: IOUSBHostCIMessageStatus
+var IOUSBHostCIMessageStatusStallError: IOUSBHostCIMessageStatus
+var IOUSBHostCIMessageStatusSuccess: IOUSBHostCIMessageStatus
+var IOUSBHostCIMessageStatusTimeout: IOUSBHostCIMessageStatus
+var IOUSBHostCIMessageStatusTransactionError: IOUSBHostCIMessageStatus
+var IOUSBHostCIMessageTypeCommandMax: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeCommandMin: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeControllerCapabilities: IOUSBHostCIMessageTyp
+var IOUSBHostCIMessageTypeControllerFrameNumber: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeControllerPause: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeControllerPowerOff: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeControllerPowerOn: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeControllerStart: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeDeviceCreate: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeDeviceDestroy: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeDevicePause: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeDeviceStart: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeDeviceUpdate: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeEndpointCreate: IOUSBHostCIMessageType
+
+
+## Page 8
+
+var IOUSBHostCIMessageTypeEndpointDestroy: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeEndpointPause: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeEndpointReset: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeEndpointSetNextTransfer: IOUSBHostCIMessage
+Type
+var IOUSBHostCIMessageTypeEndpointUpdate: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeEndpoint_reserved_: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeFrameNumberUpdate: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeFrameTimestampUpdate: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeIsochronousTransfer: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeLink: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeNormalTransfer: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypePortCapabilities: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypePortDisable: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypePortEvent: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypePortPowerOff: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypePortPowerOn: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypePortReset: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypePortResume: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypePortStatus: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypePortSuspend: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeSetupTransfer: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeStatusTransfer: IOUSBHostCIMessageType
+var IOUSBHostCIMessageTypeTransferComplete: IOUSBHostCIMessageType
+var IOUSBHostCIPortStateActive: IOUSBHostCIPortState
+var IOUSBHostCIPortStateOff: IOUSBHostCIPortState
+var IOUSBHostCIPortStatePowered: IOUSBHostCIPortState
+var IOUSBHostCIPortStateSuspended: IOUSBHostCIPortState
+
+
+## Page 9
+
+var IOUSBHostCIUserClientVersion100: IOUSBHostCIUserClientVersion
+IOUSBHost Structures
+IOUSBHost Enumerations
+IOUSBHost Functions
+IOUSBHost Data Types
+See Also
+Reference
+
+
+## Page 10
+
+func IOUSBGetEndpointBurstSize(UInt32, UnsafePointer<IOUSBEndpoint
+Descriptor>!, UnsafePointer<IOUSBSuperSpeedEndpointCompanionDescriptor
+>!, UnsafePointer<IOUSBSuperSpeedPlusIsochronousEndpointCompanion
+Descriptor>!) -> UInt32
+func IOUSBGetEndpointMult(UInt32, UnsafePointer<IOUSBEndpointDescriptor
+>!, UnsafePointer<IOUSBSuperSpeedEndpointCompanionDescriptor>!, Unsafe
+Pointer<IOUSBSuperSpeedPlusIsochronousEndpointCompanionDescriptor>!) ->
+UInt8
+func IOUSBGetEndpointSynchronizationType(UnsafePointer<IOUSBEndpoint
+Descriptor>!) -> UInt8
+func IOUSBGetEndpointUsageType(UnsafePointer<IOUSBEndpointDescriptor>!)
+-> UInt8
+func IOUSBGetPlatformCapabilityDescriptor(UnsafePointer<
+IOUSBBOSDescriptor>!) -> UnsafePointer<IOUSBPlatformCapabilityDescripto
+>!
+func IOUSBGetPlatformCapabilityDescriptorWithUUID(UnsafePointer<
+IOUSBBOSDescriptor>!, UnsafeMutablePointer<UInt8>!) -> UnsafePointer<
+IOUSBPlatformCapabilityDescriptor>!
+func IOUSBGetSuperSpeedPlusDeviceCapabilityDescriptor(UnsafePointer<
+IOUSBBOSDescriptor>!) -> UnsafePointer<IOUSBDeviceCapabilitySuperSpeed
+PlusUSB>!
+func IOUSBHostCIControllerStateToString(IOUSBHostCIControllerState) ->
+UnsafePointer<CChar>!
+Topics
+Functions
+IOUSBHost / IOUSBHost Functions
+API Collection
+IOUSBHost Functions
+
+
+## Page 11
+
+func IOUSBHostCIDeviceSpeedToString(IOUSBHostCIDeviceSpeed) -> Unsafe
+Pointer<CChar>!
+func IOUSBHostCIDeviceStateToString(IOUSBHostCIDeviceState) -> Unsafe
+Pointer<CChar>!
+func IOUSBHostCIEndpointStateToString(IOUSBHostCIEndpointState) ->
+UnsafePointer<CChar>!
+func IOUSBHostCIExceptionTypeToString(IOUSBHostCIExceptionType) ->
+UnsafePointer<CChar>!
+func IOUSBHostCILinkStateEnabled(IOUSBHostCILinkState) -> Bool
+func IOUSBHostCILinkStateToString(IOUSBHostCILinkState) -> UnsafePointe
+<CChar>!
+func IOUSBHostCIMessageStatusFromIOReturn(IOReturn) -> IOUSBHost
+CIMessageStatus
+func IOUSBHostCIMessageStatusToIOReturn(IOUSBHostCIMessageStatus) ->
+IOReturn
+func IOUSBHostCIMessageStatusToString(IOUSBHostCIMessageStatus) ->
+UnsafePointer<CChar>!
+func IOUSBHostCIMessageTypeToString(IOUSBHostCIMessageType) -> Unsafe
+Pointer<CChar>!
+func IOUSBHostCIPortStateToString(IOUSBHostCIPortState) -> UnsafePointe
+<CChar>!
+IOUSBHost Structures
+IOUSBHost Enumerations
+IOUSBHost Constants
+IOUSBHost Data Types
+See Also
+Reference
+
+
+## Page 12
+
+typealias IOUSBHostCIDoorbell
+typealias IOUSBHostCIPortStatus
+typealias IOUSBHostControllerInterfaceCommandHandler
+typealias IOUSBHostControllerInterfaceDoorbellHandler
+typealias IOUSBHostIsochronousTransactionCompletionHandler
+IOUSBHost Structures
+IOUSBHost Enumerations
+IOUSBHost Constants
+IOUSBHost Functions
+Topics
+Data Types
+See Also
+Reference
+IOUSBHost / IOUSBHost Data Types
+API Collection
+IOUSBHost Data Types
+
+

@@ -1,0 +1,597 @@
+// ============================================================
+// FlowServer — Backend proxy pour l'app Flow (IDFM/Navitia)
+// Avec WebSocket push + auto-refresh toutes les minutes
+// ============================================================
+
+require("dotenv").config();
+const express = require("express");
+const cors = require("cors");
+const http = require("http");
+const { WebSocketServer, WebSocket } = require("ws");
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+const IDFM_API_KEY = process.env.IDFM_API_KEY;
+const NAVITIA_BASE = "https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia";
+const REFRESH_INTERVAL_MS = 30 * 1000; // 30 secondes
+
+if (!IDFM_API_KEY) {
+  console.error("❌ IDFM_API_KEY manquante ! Configurez le fichier .env");
+  process.exit(1);
+}
+
+// ============================================================
+// Serveur HTTP + WebSocket
+// ============================================================
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server });
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// Logger simple
+app.use((req, res, next) => {
+  const timestamp = new Date().toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris" });
+  console.log(`[${timestamp}] ${req.method} ${req.path}`);
+  next();
+});
+
+// ============================================================
+// Cache mémoire global — mis à jour toutes les minutes
+// ============================================================
+const cache = {
+  traffic: { data: null, slimData: null, timestamp: 0 },
+  lastFullUpdate: null,
+  departures: {}, // stopId -> { data: [], timestamp: Date }
+};
+
+// ============================================================
+// Gestion des abonnements globaux
+// ============================================================
+const activeStopCounts = new Map(); // stopId -> count
+
+function addStopInterest(stopIds) {
+  stopIds.forEach((id) => {
+    const current = activeStopCounts.get(id) || 0;
+    activeStopCounts.set(id, current + 1);
+  });
+}
+
+function removeStopInterest(stopIds) {
+  if (!stopIds) return;
+  stopIds.forEach((id) => {
+    const current = activeStopCounts.get(id) || 0;
+    if (current > 1) {
+      activeStopCounts.set(id, current - 1);
+    } else {
+      activeStopCounts.delete(id);
+      delete cache.departures[id]; // Cleanup cache
+    }
+  });
+}
+
+// ============================================================
+// Queue de requêtes pour éviter le 429 (Rate Limit)
+// Navitia/IDFM limite le nombre d'appels simultanés.
+// ============================================================
+const navitiaQueue = [];
+let isProcessingQueue = false;
+
+async function processNavitiaQueue() {
+  if (isProcessingQueue || navitiaQueue.length === 0) return;
+  isProcessingQueue = true;
+
+  const { url, resolve, reject } = navitiaQueue.shift();
+
+  try {
+    const timestamp = new Date().toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris" });
+    const response = await fetch(url, {
+      headers: { apiKey: IDFM_API_KEY },
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      // Si on se prend un 429 quand même, on réinjecte au début de la queue avec un délai
+      if (response.status === 429) {
+        console.warn(`[${timestamp}] ⚠️ 429 détecté, attente prolongée...`);
+        navitiaQueue.unshift({ url, resolve, reject });
+        setTimeout(() => {
+          isProcessingQueue = false;
+          processNavitiaQueue();
+        }, 1000);
+        return;
+      }
+      throw new Error(`Navitia ${response.status}: ${text}`);
+    }
+
+    const data = await response.json();
+    resolve(data);
+  } catch (err) {
+    reject(err);
+  } finally {
+    // Petit délai entre chaque appel réussi pour ne pas saturer (100ms)
+    setTimeout(() => {
+      isProcessingQueue = false;
+      processNavitiaQueue();
+    }, 100);
+  }
+}
+
+function navitiaFetch(url) {
+  return new Promise((resolve, reject) => {
+    navitiaQueue.push({ url, resolve, reject });
+    processNavitiaQueue();
+  });
+}
+
+// ============================================================
+// Helper : pagination automatique pour les line_reports
+// ============================================================
+async function fetchAllPages(initialUrl, maxPages = 20) {
+  let url = initialUrl;
+  let allDisruptions = [];
+  let page = 0;
+
+  while (url && page < maxPages) {
+    const data = await navitiaFetch(url);
+
+    if (data.disruptions) {
+      allDisruptions = allDisruptions.concat(data.disruptions);
+    }
+
+    // Chercher le lien "next"
+    url = null;
+    if (data.links) {
+      const nextLink = data.links.find((l) => l.rel === "next");
+      if (nextLink) url = nextLink.href;
+    }
+    page++;
+  }
+
+  return allDisruptions;
+}
+
+// ============================================================
+// Helper : alléger les disruptions pour le WebSocket
+// Garde uniquement les champs utilisés par l'app (id, status,
+// cause, category, severity, premier message, impacted_objects)
+// Réduit ~10MB → ~500KB
+// ============================================================
+function slimDisruptions(disruptions) {
+  return disruptions.map((d) => ({
+    id: d.id,
+    status: d.status,
+    cause: d.cause,
+    category: d.category,
+    severity: d.severity
+      ? {
+        effect: d.severity.effect,
+        color: d.severity.color,
+        priority: d.severity.priority,
+        name: d.severity.name,
+      }
+      : null,
+    // Garder uniquement le premier message texte
+    messages: d.messages?.slice(0, 1).map((m) => ({
+      text: m.text,
+      channel: m.channel ? { name: m.channel.name, content_type: m.channel.content_type } : null,
+    })),
+    application_periods: d.application_periods,
+    updated_at: d.updated_at,
+    // Alléger les impacted_objects
+    impacted_objects: d.impacted_objects?.map((obj) => ({
+      pt_object: obj.pt_object
+        ? {
+          id: obj.pt_object.id,
+          name: obj.pt_object.name,
+          line: obj.pt_object.line
+            ? {
+              id: obj.pt_object.line.id,
+              code: obj.pt_object.line.code,
+              name: obj.pt_object.line.name,
+              commercial_mode: obj.pt_object.line.commercial_mode,
+            }
+            : null,
+        }
+        : null,
+      impacted_stops: obj.impacted_stops?.map((s) => ({
+        stop_point: s.stop_point ? { name: s.stop_point.name } : null,
+      })),
+      impacted_section: obj.impacted_section
+        ? {
+          from: obj.impacted_section.from ? { name: obj.impacted_section.from.name } : null,
+          to: obj.impacted_section.to ? { name: obj.impacted_section.to.name } : null,
+        }
+        : null,
+    })),
+  }));
+}
+
+// ============================================================
+// Récupération globale du trafic (appelée toutes les minutes)
+// ============================================================
+async function fetchAllTrafficData() {
+  const modes = [
+    "physical_mode:Metro",
+    "physical_mode:RapidTransit",
+    "physical_mode:Tramway",
+    "physical_mode:LocalTrain",
+  ];
+
+  // Filtrer depuis 24h
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  // Construire la date au format Europe/Paris
+  const parisDate = new Date(since.toLocaleString("en-US", { timeZone: "Europe/Paris" }));
+  const formattedSince = `${parisDate.getFullYear()}${pad(parisDate.getMonth() + 1)}${pad(parisDate.getDate())}T${pad(parisDate.getHours())}${pad(parisDate.getMinutes())}${pad(parisDate.getSeconds())}`;
+
+  let allDisruptions = [];
+
+  for (const mode of modes) {
+    const url = `${NAVITIA_BASE}/line_reports/physical_modes/${mode}/line_reports?count=500&since=${formattedSince}`;
+    try {
+      const disruptions = await fetchAllPages(url);
+      allDisruptions = allDisruptions.concat(disruptions);
+    } catch (err) {
+      console.error(`   ⚠️ Erreur sur ${mode}: ${err.message}`);
+    }
+  }
+
+  return { disruptions: allDisruptions };
+}
+
+// ============================================================
+// Boucle de mise à jour automatique (toutes les minutes)
+// ============================================================
+async function autoRefresh() {
+  const timestamp = new Date().toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris" });
+  console.log(`\n🔄 [${timestamp}] Auto-refresh des données...`);
+
+  try {
+    const trafficData = await fetchAllTrafficData();
+    cache.traffic.data = trafficData;
+    cache.traffic.timestamp = Date.now();
+    cache.lastFullUpdate = new Date().toISOString();
+
+    // Préparer les données allégées pour le WebSocket
+    const slimData = { disruptions: slimDisruptions(trafficData.disruptions || []) };
+    cache.traffic.slimData = slimData;
+
+    const count = trafficData.disruptions?.length || 0;
+    console.log(`   ✅ ${count} perturbations récupérées`);
+
+    // Push les données allégées aux clients WebSocket
+    broadcastToClients({
+      type: "traffic_update",
+      timestamp: cache.lastFullUpdate,
+      data: slimData,
+    });
+
+    // 2. Refresh & Push Départs (Global Cache)
+    console.log(`   🔍 Mise à jour des départs globaux...`);
+    await refreshActiveDepartures();
+
+    console.log(`   📤 Diffusion aux abonnés...`);
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN && client.departureSubscription) {
+        pushCachedDepartures(client);
+      }
+    });
+  } catch (error) {
+    console.error(`   ❌ Erreur auto-refresh: ${error.message}`);
+  }
+}
+
+// ============================================================
+// WebSocket — gestion des clients connectés
+// ============================================================
+function broadcastToClients(message) {
+  const payload = JSON.stringify(message);
+  let sent = 0;
+
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(payload);
+      sent++;
+    }
+  });
+
+  if (sent > 0) {
+    console.log(`   📤 Push envoyé à ${sent} client(s) connecté(s)`);
+  }
+}
+
+wss.on("connection", (ws, req) => {
+  const clientIp = req.socket.remoteAddress;
+  const timestamp = new Date().toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris" });
+  console.log(`\n🔌 [${timestamp}] Nouveau client WebSocket: ${clientIp}`);
+  console.log(`   📊 Total clients: ${wss.clients.size}`);
+
+  // Envoyer immédiatement les dernières données allégées en cache
+  if (cache.traffic.slimData) {
+    ws.send(
+      JSON.stringify({
+        type: "traffic_update",
+        timestamp: cache.lastFullUpdate,
+        data: cache.traffic.slimData,
+      })
+    );
+    console.log(`   📤 Données allégées en cache envoyées au nouveau client`);
+  }
+
+  // Gestion des messages du client
+  ws.on("message", (message) => {
+    try {
+      const msg = JSON.parse(message);
+      console.log(`   📩 Message reçu: ${msg.type}`);
+
+      // Le client peut demander un refresh manuel
+      if (msg.type === "request_refresh") {
+        console.log(`   🔄 Refresh manuel demandé par le client`);
+        autoRefresh();
+      }
+
+      // Gestion de l'abonnement aux départs (Live Activity)
+      if (msg.type === "subscribe_departures") {
+        const { stopIds, line, direction } = msg.data;
+        if (stopIds && stopIds.length > 0) {
+          // Gérer le changement d'abonnement (désabonner l'ancien si existe)
+          if (ws.departureSubscription) {
+            removeStopInterest(ws.departureSubscription.stopIds);
+          }
+
+          console.log(
+            `   🔔 Abonnement départs: ${stopIds.length} arrets, Ligne ${line}, Dir ${direction}`
+          );
+          addStopInterest(stopIds);
+          ws.departureSubscription = { stopIds, line, direction };
+
+          // Tenter un push immédiat si données en cache, sinon fetch
+          // On peut lancer un refresh partiel ou juste check cache
+          pushCachedDepartures(ws);
+
+          // Si pas de données, on pourrait trigger un fetch spécifique, 
+          // mais pour l'instant on attend le prochain autoRefresh (recommandé pour "Global Loop")
+          // Optionnel: refreshActiveDepartures() si cache vide? Non, attendons 30s max.
+        }
+      }
+
+      if (msg.type === "unsubscribe_departures") {
+        console.log(`   🔕 Désabonnement départs`);
+        if (ws.departureSubscription) {
+          removeStopInterest(ws.departureSubscription.stopIds);
+          delete ws.departureSubscription;
+        }
+      }
+    } catch (e) {
+      // Message non-JSON ignoré
+    }
+  });
+
+  ws.on("close", () => {
+    const ts = new Date().toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris" });
+    console.log(`🔌 [${ts}] Client déconnecté. Restant: ${wss.clients.size}`);
+    if (ws.departureSubscription) {
+      removeStopInterest(ws.departureSubscription.stopIds);
+    }
+  });
+
+  ws.on("error", (error) => {
+    console.error(`   ❌ Erreur WebSocket: ${error.message}`);
+  });
+});
+
+// ============================================================
+// Helper : Fetch global des départs actifs
+// ============================================================
+async function refreshActiveDepartures() {
+  const uniqueStopIds = Array.from(activeStopCounts.keys());
+  if (uniqueStopIds.length === 0) return;
+
+  console.log(`   🌍 Fetching ${uniqueStopIds.length} active stops...`);
+
+  for (const stopId of uniqueStopIds) {
+    try {
+      let data;
+      // 1. Essai principal
+      try {
+        const endpoint = stopId.includes("stop_point") ? "stop_points" : "stop_areas";
+        const url = `${NAVITIA_BASE}/${endpoint}/${stopId}/departures?count=20`;
+        data = await navitiaFetch(url);
+      } catch (err) {
+        // 2. Retry automatique : si 404 sur stop_areas, on tente stop_points avec préfixe
+        if ((err.message.includes("404") || err.message.includes("unknown_object")) && !stopId.includes("stop_point")) {
+          const retryId = stopId.startsWith("stop_point:") ? stopId : `stop_point:${stopId}`;
+          const url = `${NAVITIA_BASE}/stop_points/${retryId}/departures?count=20`;
+          data = await navitiaFetch(url);
+        } else {
+          throw err;
+        }
+      }
+
+      if (data.departures) {
+        cache.departures[stopId] = {
+          data: data.departures,
+          timestamp: Date.now()
+        };
+      }
+      // Petit délai pour éviter de spammer l'API (50ms)
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } catch (e) {
+      console.error(`   ⚠️ Erreur fetch ${stopId}: ${e.message}`);
+    }
+  }
+}
+
+// ============================================================
+// Helper : Push depuis le cache vers un client
+// ============================================================
+function pushCachedDepartures(ws) {
+  if (!ws.departureSubscription) return;
+
+  const { stopIds, line, direction } = ws.departureSubscription;
+  let allDepartures = [];
+
+  // Récupérer depuis le cache
+  for (const stopId of stopIds) {
+    const cached = cache.departures[stopId];
+    if (cached && cached.data) {
+      allDepartures = allDepartures.concat(cached.data);
+    }
+  }
+
+  if (allDepartures.length === 0) return;
+
+  // Filtrer pour ne garder que la bonne ligne/direction
+  const filtered = allDepartures.filter((d) => {
+    // Check line match (label or code)
+    const dLine = d.display_informations?.label || d.display_informations?.code;
+    const dDir = d.display_informations?.direction;
+
+    // Simple verification
+    if (dLine !== line) return false;
+    // Direction match (contains or equals)
+    if (!dDir.includes(direction) && !direction.includes(dDir)) return false;
+
+    return true;
+  });
+
+  // Trier par heure de départ
+  filtered.sort((a, b) => {
+    const tA = a.stop_date_time?.departure_date_time || "";
+    const tB = b.stop_date_time?.departure_date_time || "";
+    return tA.localeCompare(tB);
+  });
+
+  // Envoyer au client
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(
+      JSON.stringify({
+        type: "departure_update",
+        timestamp: new Date().toISOString(),
+        data: { departures: filtered },
+      })
+    );
+    // Log réduit
+  }
+}
+
+// ============================================================
+// REST Endpoints (toujours disponibles)
+// ============================================================
+
+// GET /api/health — Santé du serveur
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    connectedClients: wss.clients.size,
+    lastUpdate: cache.lastFullUpdate || "pas encore",
+    cacheAge: cache.traffic.timestamp
+      ? Math.round((Date.now() - cache.traffic.timestamp) / 1000) + "s"
+      : "empty",
+    refreshInterval: REFRESH_INTERVAL_MS / 1000 + "s",
+  });
+});
+
+// GET /api/departures/:stationId — Prochains départs
+app.get("/api/departures/:stationId", async (req, res) => {
+  try {
+    let stationId = decodeURIComponent(req.params.stationId);
+
+    // Normalisation ID
+    if (stationId.includes("stop_area")) {
+      if (!stationId.startsWith("stop_area:")) stationId = `stop_area:${stationId}`;
+    } else {
+      if (!stationId.startsWith("stop_point:")) stationId = `stop_point:${stationId}`;
+    }
+
+    // 1. Vérifier le cache global d'abord (si frais < 30s)
+    const cached = cache.departures[stationId];
+    if (cached && (Date.now() - cached.timestamp < 30000)) {
+      console.log(`   💾 Départs pour ${stationId} servis depuis le cache`);
+      return res.json({ departures: cached.data });
+    }
+
+    // 2. Sinon, fetch via la queue
+    let endpoint = stationId.includes("stop_area") ? "stop_areas" : "stop_points";
+    const encodedId = encodeURIComponent(stationId);
+    const url = `${NAVITIA_BASE}/${endpoint}/${encodedId}/departures`;
+
+    const data = await navitiaFetch(url);
+
+    // Mettre à jour le cache
+    if (data.departures) {
+      cache.departures[stationId] = {
+        data: data.departures,
+        timestamp: Date.now()
+      };
+    }
+
+    res.json(data);
+  } catch (error) {
+    console.error("❌ Departures error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/traffic — Infos trafic (depuis le cache)
+app.get("/api/traffic", (req, res) => {
+  if (cache.traffic.data) {
+    console.log("   💾 Trafic servi depuis le cache");
+    return res.json(cache.traffic.data);
+  }
+  res.status(503).json({ error: "Données pas encore disponibles, premier refresh en cours..." });
+});
+
+// GET /api/itinerary — Recherche d'itinéraire
+app.get("/api/itinerary", async (req, res) => {
+  try {
+    const { from, to, datetime, datetime_represents, count, depth } = req.query;
+
+    if (!from || !to) {
+      return res.status(400).json({ error: "Paramètres 'from' et 'to' requis" });
+    }
+
+    const params = new URLSearchParams();
+    params.set("from", from);
+    params.set("to", to);
+    if (datetime) params.set("datetime", datetime);
+    if (datetime_represents) params.set("datetime_represents", datetime_represents);
+    params.set("count", count || "5");
+    params.set("depth", depth || "3");
+
+    const url = `${NAVITIA_BASE}/journeys?${params.toString()}`;
+
+    const data = await navitiaFetch(url);
+    res.json(data);
+  } catch (error) {
+    console.error("❌ Itinerary error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================================
+// Démarrage
+// ============================================================
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`\n🚀 FlowServer démarré !`);
+  console.log(`   🌐 Local:    http://localhost:${PORT}`);
+  console.log(`   📱 Réseau:   http://10.5.16.29:${PORT}`);
+  console.log(`   🔌 WebSocket: ws://10.5.16.29:${PORT}`);
+  console.log(`   ⏱  Refresh:  toutes les ${REFRESH_INTERVAL_MS / 1000}s`);
+  console.log(`   📡 Endpoints REST:`);
+  console.log(`      GET /api/health`);
+  console.log(`      GET /api/departures/:stationId`);
+  console.log(`      GET /api/traffic`);
+  console.log(`      GET /api/itinerary?from=...&to=...`);
+  console.log(`   🔑 API Key: ${IDFM_API_KEY.slice(0, 6)}...${IDFM_API_KEY.slice(-4)}\n`);
+
+  // Premier fetch immédiat au démarrage
+  console.log(`🔄 Premier fetch des données...`);
+  autoRefresh();
+
+  // Puis toutes les minutes
+  setInterval(autoRefresh, REFRESH_INTERVAL_MS);
+});

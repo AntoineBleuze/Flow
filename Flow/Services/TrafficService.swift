@@ -13,6 +13,26 @@ class TrafficService: ObservableObject {
         self.lines = self.getAllLines()
         // Charger les infos trafic
         self.fetchTrafficInfo()
+
+        // Écouter les mises à jour push depuis le WebSocket
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handlePushTrafficUpdate(_:)),
+            name: .flowServerTrafficUpdate,
+            object: nil
+        )
+    }
+
+    /// Gérer une mise à jour push reçue via WebSocket
+    @objc private func handlePushTrafficUpdate(_ notification: Notification) {
+        guard let disruptions = notification.userInfo?["disruptions"] as? [Disruption] else {
+            return
+        }
+        print("📥 [Push] Mise à jour trafic reçue: \(disruptions.count) perturbations")
+
+        // updateLines() réinitialise déjà depuis getAllLines(), pas besoin de le faire ici
+        self.updateLines(with: disruptions)
+        self.lastUpdateTime = Date()
     }
 
     /// Rafraîchir manuellement les informations de trafic
@@ -20,14 +40,41 @@ class TrafficService: ObservableObject {
         guard !isRefreshing else { return }
         isRefreshing = true
 
-        // Réinitialiser toutes les lignes à normal
-        self.lines = self.getAllLines()
-
-        // Recharger les données
+        // Recharger les données (updateLines() réinitialisera les lignes)
         self.fetchTrafficInfo()
     }
 
     func fetchTrafficInfo() {
+        // Mode serveur : passer par FlowServer si activé
+        if FlowServerService.shared.isEnabled {
+            print("📡 [Server Mode] Traffic via FlowServer")
+            FlowServerService.shared.fetchTrafficInfo()
+                .sink(
+                    receiveCompletion: { [weak self] completion in
+                        if case .failure(let error) = completion {
+                            print("❌ [Server] Erreur trafic: \(error.localizedDescription)")
+                            print("🔄 Fallback sur appel direct API...")
+                            // Fallback : utiliser l'appel direct
+                            self?.fetchTrafficInfoDirect()
+                        }
+                    },
+                    receiveValue: { [weak self] disruptions in
+                        print("📦 [Server] \(disruptions.count) perturbations reçues")
+                        self?.updateLines(with: disruptions)
+                        self?.isRefreshing = false
+                        self?.lastUpdateTime = Date()
+                    }
+                )
+                .store(in: &cancellables)
+            return
+        }
+
+        // Mode direct
+        fetchTrafficInfoDirect()
+    }
+
+    /// Appel direct à l'API IDFM (sans passer par le serveur)
+    private func fetchTrafficInfoDirect() {
         let apiKey = IDFMService.shared.apiKey
         print("🔑 API Key présente: \(!apiKey.isEmpty)")
         guard !apiKey.isEmpty else {
@@ -134,14 +181,10 @@ class TrafficService: ObservableObject {
     }
 
     private func updateLines(with disruptions: [Disruption]) {
-        print("\n🔄 === DÉBUT DE LA MISE À JOUR DES LIGNES ===")
-        print("📊 Total de perturbations reçues: \(disruptions.count)")
-
         // Remettre tout le monde à normal d'abord
         var updatedLines = self.getAllLines()
         let now = Date()
 
-        print("⏰ Date actuelle: \(now)")
 
         var processedCount = 0
         var activeCount = 0
@@ -176,6 +219,11 @@ class TrafficService: ObservableObject {
                         line: line, code: finalLineCode, modeName: finalCommercialModeName)
                 }) {
                     matchedCount += 1
+                    
+                    // Capturer le navitiaId s'il n'est pas encore présent
+                    if updatedLines[lineIndex].navitiaId == nil {
+                        updatedLines[lineIndex].navitiaId = object.ptObject?.line?.id
+                    }
 
                     // --- NOUVELLE LOGIQUE DE CATÉGORISATION ---
                     let effect = disruption.severity?.effect ?? "UNKNOWN"
@@ -211,9 +259,6 @@ class TrafficService: ObservableObject {
                     if isCurrentlyActive {
                         if newStatus < updatedLines[lineIndex].status {
                             updatedLines[lineIndex].status = newStatus
-                            print(
-                                "      🚨 Ligne \(updatedLines[lineIndex].lineId): Nouveau statut prioritaire \(newStatus)"
-                            )
                         }
                     }
 
@@ -258,12 +303,6 @@ class TrafficService: ObservableObject {
         }
 
         self.lines = updatedLines
-        let linesWithIncidents = updatedLines.filter { $0.status != .normal }.count
-
-        print("\n📊 === RÉSUMÉ ===")
-        print("   Perturbations traitées: \(processedCount)")
-        print("   Lignes impactées: \(linesWithIncidents)")
-        print("=== FIN DE LA MISE À JOUR ===\n")
     }
 
     /// Vérifie si une perturbation est active à un moment donné
@@ -292,9 +331,7 @@ class TrafficService: ObservableObject {
             return isActiveStatus
         }
 
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyyMMdd'T'HHmmss"
-        dateFormatter.timeZone = TimeZone(identifier: "Europe/Paris")
+        let dateFormatter = DateFormat.navitiaParisTimezone
 
         for period in applicationPeriods {
             if let beginDate = dateFormatter.date(from: period.begin),
@@ -336,55 +373,71 @@ class TrafficService: ObservableObject {
     /// Nettoie le HTML et formate intelligemment le message
     private func smartFormatMessage(_ html: String) -> String {
         // 1. Nettoyage HTML de base
-        var text = html
-        if let data = html.data(using: .utf8) {
-            let options: [NSAttributedString.DocumentReadingOptionKey: Any] = [
-                .documentType: NSAttributedString.DocumentType.html,
-                .characterEncoding: String.Encoding.utf8.rawValue,
-            ]
-            if let attributedString = try? NSAttributedString(
-                data: data, options: options, documentAttributes: nil)
-            {
-                text = attributedString.string
-            }
-        }
+        // 1. Nettoyage HTML de base (Regex simple pour éviter les crashs NSAttributedString)
+        // NSAttributedString peut crasher sur certains threads ou avec des données malformées
+        var text = html.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression, range: nil)
+        
+        // Décoder les entités HTML courantes manuellement si besoin (ou juste ignorer pour l'instant pour la stabilité)
+        text = text.replacingOccurrences(of: "&nbsp;", with: " ")
+        text = text.replacingOccurrences(of: "&amp;", with: "&")
+        text = text.replacingOccurrences(of: "&quot;", with: "\"")
+        text = text.replacingOccurrences(of: "&lt;", with: "<")
+        text = text.replacingOccurrences(of: "&gt;", with: ">")
+        text = text.replacingOccurrences(of: "&#233;", with: "é")
+        text = text.replacingOccurrences(of: "&#224;", with: "à")
+        text = text.replacingOccurrences(of: "&#232;", with: "è")
+        text = text.replacingOccurrences(of: "&#234;", with: "ê")
+        text = text.replacingOccurrences(of: "&#244;", with: "ô")
+        text = text.replacingOccurrences(of: "&#238;", with: "î")
+        text = text.replacingOccurrences(of: "&#251;", with: "û")
+        text = text.replacingOccurrences(of: "&#231;", with: "ç")
+        text = text.replacingOccurrences(of: "&rsquo;", with: "'")
+        text = text.replacingOccurrences(of: "&laquo;", with: "«")
+        text = text.replacingOccurrences(of: "&raquo;", with: "»")
 
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // 2. Formatage intelligent (Markdown pour SwiftUI)
-        // Mettre en gras les clés communes
-        let keysToBold = ["Période :", "Dates :", "Motif :", "Sauf :", "Pour :"]
+        // Mettre en gras les clés communes et ajouter des retours à la ligne pour la lisibilité
+        let keysToBold = ["Période :", "Dates :", "Motif :", "Sauf :", "Pour :", "Impact :"]
+        
         for key in keysToBold {
-            text = text.replacingOccurrences(of: key, with: "**\(key)**")
+            // Ajouter un double retour à la ligne avant la clé si elle n'est pas au début, pour aérer
+            // Et s'assurer qu'il y a un espace après la clé
+            text = text.replacingOccurrences(of: " \(key)", with: "\n\n\(key)")
+            text = text.replacingOccurrences(of: key, with: "**\(key)** ")
         }
+        
+        // Nettoyer les espaces en trop créés par le formatage ci-dessus
+        text = text.replacingOccurrences(of: "** ", with: "**")
+        text = text.replacingOccurrences(of: "  ", with: " ")
+        
+        // S'assurer que les listes à puces (souvent avec - ou •) commencent sur une nouvelle ligne
+        text = text.replacingOccurrences(of: ":-", with: ":\n-")
+        text = text.replacingOccurrences(of: ":•", with: ":\n•")
 
-        // Ajouter des sauts de ligne si nécessaire pour aérer
-        // Par exemple, si on a "Dates : ... Motif :", on veut un saut de ligne avant Motif
-        // Mais attention à ne pas casser le texte existant.
-        // On peut remplacer " Motif :" par "\n\n**Motif :**" si ce n'est pas déjà en début de ligne
-
-        return text
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func getAllLines() -> [TransportLine] {
         return [
             // MÉTROS
-            TransportLine(type: .metro, lineId: "1", status: .normal),
-            TransportLine(type: .metro, lineId: "2", status: .normal),
-            TransportLine(type: .metro, lineId: "3", status: .normal),
-            TransportLine(type: .metro, lineId: "3bis", status: .normal),
-            TransportLine(type: .metro, lineId: "4", status: .normal),
-            TransportLine(type: .metro, lineId: "5", status: .normal),
-            TransportLine(type: .metro, lineId: "6", status: .normal),
-            TransportLine(type: .metro, lineId: "7", status: .normal),
-            TransportLine(type: .metro, lineId: "7bis", status: .normal),
-            TransportLine(type: .metro, lineId: "8", status: .normal),
-            TransportLine(type: .metro, lineId: "9", status: .normal),
-            TransportLine(type: .metro, lineId: "10", status: .normal),
-            TransportLine(type: .metro, lineId: "11", status: .normal),
-            TransportLine(type: .metro, lineId: "12", status: .normal),
-            TransportLine(type: .metro, lineId: "13", status: .normal),
-            TransportLine(type: .metro, lineId: "14", status: .normal),
+            TransportLine(type: .metro, lineId: "1", navitiaId: "line:IDFM:C01371", status: .normal),
+            TransportLine(type: .metro, lineId: "2", navitiaId: "line:IDFM:C01372", status: .normal),
+            TransportLine(type: .metro, lineId: "3", navitiaId: "line:IDFM:C01373", status: .normal),
+            TransportLine(type: .metro, lineId: "3bis", navitiaId: "line:IDFM:C01384", status: .normal),
+            TransportLine(type: .metro, lineId: "4", navitiaId: "line:IDFM:C01374", status: .normal),
+            TransportLine(type: .metro, lineId: "5", navitiaId: "line:IDFM:C01375", status: .normal),
+            TransportLine(type: .metro, lineId: "6", navitiaId: "line:IDFM:C01376", status: .normal),
+            TransportLine(type: .metro, lineId: "7", navitiaId: "line:IDFM:C01377", status: .normal),
+            TransportLine(type: .metro, lineId: "7bis", navitiaId: "line:IDFM:C01385", status: .normal),
+            TransportLine(type: .metro, lineId: "8", navitiaId: "line:IDFM:C01378", status: .normal),
+            TransportLine(type: .metro, lineId: "9", navitiaId: "line:IDFM:C01379", status: .normal),
+            TransportLine(type: .metro, lineId: "10", navitiaId: "line:IDFM:C01380", status: .normal),
+            TransportLine(type: .metro, lineId: "11", navitiaId: "line:IDFM:C01381", status: .normal),
+            TransportLine(type: .metro, lineId: "12", navitiaId: "line:IDFM:C01382", status: .normal),
+            TransportLine(type: .metro, lineId: "13", navitiaId: "line:IDFM:C01383", status: .normal),
+            TransportLine(type: .metro, lineId: "14", navitiaId: "line:IDFM:C01386", status: .normal),
 
             // RER
             TransportLine(type: .rer, lineId: "A", status: .normal),
