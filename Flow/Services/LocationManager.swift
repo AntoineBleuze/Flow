@@ -45,14 +45,24 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         self.authorizationStatus = manager.authorizationStatus
-        if manager.authorizationStatus == .authorizedWhenInUse
-            || manager.authorizationStatus == .authorizedAlways
-        {
+        #if os(macOS)
+        let isAuthorized = manager.authorizationStatus == .authorized || manager.authorizationStatus == .authorizedAlways
+        #else
+        let isAuthorized = manager.authorizationStatus == .authorizedWhenInUse || manager.authorizationStatus == .authorizedAlways
+        #endif
+        if isAuthorized {
             manager.startUpdatingLocation()
         }
     }
 
+    var isSimulating = false
+
+    func simulateLocation(latitude: Double, longitude: Double) {
+        self.userLocation = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard !isSimulating else { return }
         guard let location = locations.last else { return }
         self.userLocation = location.coordinate
         // We can stop updating if we only need it once, but for navigation/itinerary it might be better to keep it or update significantly

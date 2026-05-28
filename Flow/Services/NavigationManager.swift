@@ -1,4 +1,6 @@
+#if os(iOS)
 import ActivityKit
+#endif
 import Combine
 import CoreLocation
 import Foundation
@@ -19,7 +21,9 @@ class NavigationManager: ObservableObject {
     @Published var currentLegIndex: Int = 0 // Index of the leg *within* the section (index in stop_date_times)
     @Published var showBoardingPrompt: Bool = false
     
+#if os(iOS)
     private var currentActivity: Activity<NavigationActivityAttributes>?
+#endif
 
     private var cancellables = Set<AnyCancellable>()
     private var updateTimer: Timer?
@@ -82,6 +86,7 @@ class NavigationManager: ObservableObject {
 
     func stopNavigation() {
         print("🛑 Stopping navigation")
+        stopSimulation()
         isNavigating = false
         state = .idle
         currentJourney = nil
@@ -446,6 +451,7 @@ class NavigationManager: ObservableObject {
 
     // MARK: - Activity
 
+#if os(iOS)
     private func startActivity() {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
 
@@ -493,5 +499,114 @@ class NavigationManager: ObservableObject {
             await currentActivity?.end(nil, dismissalPolicy: .immediate)
             currentActivity = nil
         }
+    }
+#else
+    private func startActivity() {}
+    private func updateActivity(
+        instruction: String, nextDepartures: [String], lineName: String? = nil,
+        direction: String? = nil, lineColor: String? = nil, textColor: String? = nil
+    ) {}
+    private func endActivity() {}
+#endif
+
+    // MARK: - Simulation Mode
+    
+    @Published var isSimulating = false
+    private var simulationPoints: [CLLocationCoordinate2D] = []
+    private var simulationIndex = 0
+    private var simulationTimer: Timer?
+    
+    func startSimulation() {
+        guard let journey = currentJourney else { return }
+        print("🎮 Starting in-app journey simulation")
+        
+        // Stop any active real tracking in LocationManager
+        LocationManager.shared.isSimulating = true
+        self.isSimulating = true
+        
+        // Extract all coordinates from sections
+        var points: [CLLocationCoordinate2D] = []
+        
+        if let sections = journey.sections {
+            for section in sections {
+                // If section has geojson coordinates, use them
+                if let geojson = section.geojson, let coords = geojson.coordinates {
+                    for coord in coords {
+                        if coord.count >= 2 {
+                            points.append(CLLocationCoordinate2D(latitude: coord[1], longitude: coord[0]))
+                        }
+                    }
+                } else {
+                    // Otherwise, just use from and to coordinates
+                    if let from = section.from, let fromCoord = from.coord,
+                       let latStr = fromCoord.lat, let lonStr = fromCoord.lon,
+                       let lat = Double(latStr), let lon = Double(lonStr) {
+                        points.append(CLLocationCoordinate2D(latitude: lat, longitude: lon))
+                    }
+                    if let to = section.to, let toCoord = to.coord,
+                       let latStr = toCoord.lat, let lonStr = toCoord.lon,
+                       let lat = Double(latStr), let lon = Double(lonStr) {
+                        points.append(CLLocationCoordinate2D(latitude: lat, longitude: lon))
+                    }
+                }
+            }
+        }
+        
+        guard !points.isEmpty else {
+            print("⚠️ No coordinates found to simulate")
+            return
+        }
+        
+        // Filter out duplicate consecutive coordinates
+        var uniquePoints: [CLLocationCoordinate2D] = []
+        for p in points {
+            if let last = uniquePoints.last {
+                let dist = CLLocation(latitude: p.latitude, longitude: p.longitude)
+                    .distance(from: CLLocation(latitude: last.latitude, longitude: last.longitude))
+                if dist > 5 { // Only add if it's > 5 meters away
+                    uniquePoints.append(p)
+                }
+            } else {
+                uniquePoints.append(p)
+            }
+        }
+        
+        self.simulationPoints = uniquePoints
+        self.simulationIndex = 0
+        
+        // Start the timer
+        simulationTimer?.invalidate()
+        simulationTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            self?.tickSimulation()
+        }
+    }
+    
+    private func tickSimulation() {
+        guard isSimulating, simulationIndex < simulationPoints.count else {
+            stopSimulation()
+            return
+        }
+        
+        let coord = simulationPoints[simulationIndex]
+        print("🎮 Simulation Tick: \(simulationIndex)/\(simulationPoints.count) - Coord: \(coord.latitude), \(coord.longitude)")
+        
+        // Update user location in LocationManager
+        LocationManager.shared.simulateLocation(latitude: coord.latitude, longitude: coord.longitude)
+        
+        simulationIndex += 1
+        
+        // Auto-board if we are waiting at a station during simulation
+        if case .waitingAtStation = state {
+            print("🎮 Auto-boarding during simulation")
+            confirmBoarding()
+        }
+    }
+    
+    func stopSimulation() {
+        print("🎮 Stopping simulation")
+        simulationTimer?.invalidate()
+        simulationTimer = nil
+        isSimulating = false
+        LocationManager.shared.isSimulating = false
     }
 }

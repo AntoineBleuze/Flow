@@ -2,6 +2,7 @@ import CoreData
 import CoreLocation
 import SwiftUI
 import Combine
+import MapKit
 
 struct SearchTabContent: View {
     @Binding var searchText: String
@@ -9,6 +10,7 @@ struct SearchTabContent: View {
     @State private var selectedStation: MapStation?
 
     @EnvironmentObject var coordinator: NavigationCoordinator
+    @Environment(\.colorScheme) var colorScheme
     @ObservedObject var historyManager = SearchHistoryManager.shared
     @ObservedObject var favoritesService = FavoritesService.shared
     @ObservedObject var mapData = MapDataService.shared
@@ -26,6 +28,10 @@ struct SearchTabContent: View {
     @State private var selectedJourney: Journey?
     @State private var itineraryPanelState: ItineraryPanelState = .expanded
     
+    // Live Map and Focus Interaction State
+    @State private var userTrackingMode: MKUserTrackingMode = .none
+    @State private var focusedSectionId: String? = nil
+    
     enum SearchMode: String, CaseIterable {
         case station = "Stations"
         case itinerary = "Itinéraire"
@@ -41,21 +47,44 @@ struct SearchTabContent: View {
                 }
                 .pickerStyle(.segmented)
                 .padding()
-                .background(.ultraThinMaterial.opacity(0.5))
+                .background(.ultraThinMaterial)
                 .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 12))
                 .padding(.horizontal)
-                .padding(.top, 8)
-                
+                .padding(.bottom, 8)
+
                 if searchMode == .station {
                     stationSearchView
                 } else {
+                    Spacer() // Pushes ItinerarySearchPanel to the bottom
                     itinerarySearchView
                 }
             }
             .background {
-                AdaptiveMapBackground()
+                if searchMode == .itinerary {
+                    MapViewControllerBridge(
+                        data: mapData,
+                        selectedStation: .constant(nil),
+                        userTrackingMode: $userTrackingMode,
+                        journey: selectedJourney,
+                        focusedSectionId: focusedSectionId,
+                        useMainMap: false,
+                        showAnnotations: true
+                    )
+                    .ignoresSafeArea()
+                } else {
+                    ZStack {
+                        ShaderAnimationView(isLoading: true)
+                        (colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.15))
+                            .glassEffect(.ultraThin)
+                    }
+                    .ignoresSafeArea()
+                }
             }
-            .navigationTitle("Recherche")
+            .onChange(of: selectedJourney?.id) { _, _ in
+                focusedSectionId = nil
+            }
+            .navigationTitle(searchMode == .station ? "Recherche" : "Itinéraires")
+            .navigationBarTitleDisplayMode(searchMode == .station ? .large : .inline)
         }
     }
     
@@ -153,6 +182,7 @@ struct SearchTabContent: View {
                 }
             }
             .padding(.top, 8)
+            .padding(.bottom, 160)
         }
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always))
         .onChange(of: searchText) { _, newValue in
@@ -168,41 +198,47 @@ struct SearchTabContent: View {
     
     // MARK: - Itinerary Search View
     var itinerarySearchView: some View {
-        VStack {
-            ItinerarySearchPanel(
-                startStation: $startStation,
-                endStation: $endStation,
-                departureDate: $departureDate,
-                isArrivalTime: $isArrivalTime,
-                journeys: $itineraryResults,
-                selectedJourney: $selectedJourney,
-                panelState: $itineraryPanelState,
-                onSearch: performItinerarySearch,
-                onSwap: {
-                    let temp = startStation
-                    startStation = endStation
-                    endStation = temp
-                },
-                onCurrentLocation: {
-                   if let coord = LocationManager.shared.userLocation {
-                       startStation = MapStation(id: "user-location", name: "Ma position", coordinate: coord, platforms: [], isHub: false, mainType: .bus, lines: [])
-                   }
-                },
-                onStartNavigation: {
-                    print("🔘 Start Navigation Button Tapped")
-                    if let journey = selectedJourney {
-                        print("🚀 Launching Journey: \(journey.id)")
-                        // 1. Direct Start
-                        NavigationManager.shared.startNavigation(journey: journey)
-                        // 2. Direct Switch
-                        coordinator.switchToExplore()
-                    } else {
-                        print("⚠️ No selected journey to start")
-                    }
+        ItinerarySearchPanel(
+            startStation: $startStation,
+            endStation: $endStation,
+            departureDate: $departureDate,
+            isArrivalTime: $isArrivalTime,
+            journeys: $itineraryResults,
+            selectedJourney: $selectedJourney,
+            focusedSectionId: $focusedSectionId,
+            panelState: $itineraryPanelState,
+            onSearch: performItinerarySearch,
+            onSwap: {
+                let temp = startStation
+                startStation = endStation
+                endStation = temp
+            },
+            onCurrentLocation: {
+               if let coord = LocationManager.shared.userLocation {
+                   startStation = MapStation(id: "user-location", name: "Ma position", coordinate: coord, platforms: [], isHub: false, mainType: .bus, lines: [])
+               }
+            },
+            onStartNavigation: {
+                print("🔘 Start Navigation Button Tapped")
+                if let journey = selectedJourney {
+                    print("🚀 Launching Journey: \(journey.id)")
+                    // 1. Direct Start
+                    NavigationManager.shared.startNavigation(journey: journey)
+                    // 2. Direct Switch
+                    coordinator.switchToExplore()
+                    
+                    // 3. Clear/Reset itinerary search state
+                    startStation = nil
+                    endStation = nil
+                    itineraryResults = []
+                    selectedJourney = nil
+                    itineraryPanelState = .expanded
+                    searchMode = .station
+                } else {
+                    print("⚠️ No selected journey to start")
                 }
-            )
-            Spacer()
-        }
+            }
+        )
     }
     
     func performItinerarySearch() {
@@ -324,7 +360,8 @@ struct SearchTabContent: View {
                     platforms: platforms,
                     isHub: false,
                     mainType: type,
-                    lines: sortedLines
+                    lines: sortedLines,
+                    city: first.city
                 )
             }
 
@@ -363,16 +400,36 @@ struct StationRow: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            // Icon with soft glass circle
-            ZStack {
-                Circle()
-                    .fill((isMultiModal ? .blue : color(for: station.mainType)).opacity(0.15))
-                    .frame(width: 40, height: 40)
-                    .glassEffect(.standard, in: Circle())
-                
-                Image(systemName: isMultiModal ? "train.side.front.car" : iconName(for: station.mainType))
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(isMultiModal ? .blue : color(for: station.mainType))
+            if !station.lines.isEmpty {
+                HStack(spacing: 4) {
+                    let displayedLines = station.lines.prefix(3)
+                    ForEach(displayedLines, id: \.name) { line in
+                        LineIcon(type: line.type, lineId: line.name, size: 24)
+                    }
+                    
+                    if station.lines.count > 3 {
+                        Text("+\(station.lines.count - 3)")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.15))
+                            .cornerRadius(4)
+                    }
+                }
+                .frame(width: 80, alignment: .leading)
+            } else {
+                ZStack {
+                    Circle()
+                        .fill((isMultiModal ? .blue : color(for: station.mainType)).opacity(0.15))
+                        .frame(width: 36, height: 36)
+                        .glassEffect(.standard, in: Circle())
+                    
+                    Image(systemName: isMultiModal ? "train.side.front.car" : iconName(for: station.mainType))
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(isMultiModal ? .blue : color(for: station.mainType))
+                }
+                .frame(width: 80, alignment: .leading)
             }
             
             VStack(alignment: .leading, spacing: 2) {
@@ -380,9 +437,15 @@ struct StationRow: View {
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundColor(.primary)
                 
-                Text(modesString)
-                    .font(.system(size: 13))
-                    .foregroundColor(.secondary)
+                if let city = station.city, !city.isEmpty {
+                    Text(city)
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                } else {
+                    Text(modesString)
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                }
             }
             
             Spacer()

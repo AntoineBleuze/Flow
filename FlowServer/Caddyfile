@@ -1,0 +1,16 @@
+apiflow.hd.free.fr {
+    # Reverse proxy vers le serveur Node.js (HTTP interne)
+    reverse_proxy flow-server:3001 {
+        # Supporte les WebSockets
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # Logs
+    log {
+        output stderr
+        format console
+    }
+}

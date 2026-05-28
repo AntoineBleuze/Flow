@@ -2,109 +2,190 @@ import Combine
 import CoreLocation
 import SwiftUI
 
+enum StationTab: String, CaseIterable, Identifiable {
+    case nearby = "À proximité"
+    case favorites = "Favoris"
+    
+    var id: String { self.rawValue }
+}
+
 struct NearbyStationsView: View {
     @StateObject private var viewModel = NearbyStationsViewModel()
+    @ObservedObject private var favoritesService = FavoritesService.shared
+    @ObservedObject private var mapData = MapDataService.shared
+    @State private var selectedTab: StationTab = .nearby
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
         NavigationStack {
-            Group {
-                if viewModel.permissionDenied {
-                    VStack(spacing: 20) {
-                        Image(systemName: "location.slash.fill")
-                            .font(.system(size: 50))
-                            .foregroundColor(.orange)
-                        Text("Localisation désactivée")
-                            .font(.headline)
-                        Text(
-                            "Veuillez activer la localisation dans les réglages pour voir les stations à proximité."
-                        )
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-                        .foregroundColor(.secondary)
+            VStack(spacing: 0) {
+                // Segmented picker stylisé Liquid Glass
+                Picker("Mode", selection: $selectedTab) {
+                    ForEach(StationTab.allCases) { tab in
+                        Text(tab.rawValue).tag(tab)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if viewModel.userLocation == nil {
-                    VStack(spacing: 20) {
-                        Image(systemName: "location.circle.fill")
-                            .font(.system(size: 50))
-                            .foregroundColor(.blue)
-                        Text("Localisation nécessaire")
-                            .font(.headline)
-                        Text(
-                            "Autorisez l'accès à votre position pour trouver les stations autour de vous."
-                        )
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-                        .foregroundColor(.secondary)
+                }
+                .pickerStyle(.segmented)
+                .padding(8)
+                .background(.ultraThinMaterial)
+                .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal)
+                .padding(.vertical, 8)
 
-                        Button(action: {
-                            viewModel.requestLocation()
-                        }) {
-                            Text("Autoriser la localisation")
-                                .fontWeight(.bold)
-                                .padding()
-                                .frame(maxWidth: .infinity)
-                                .foregroundColor(.primary)
-                        }
-                        .buttonStyle(.glass)
-                        .padding(.horizontal, 40)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if viewModel.nearbyStations.isEmpty {
-                    VStack(spacing: 20) {
-                        RadiusSelector(viewModel: viewModel)
-
-                        if viewModel.isLoading {
-                            ProgressView("Recherche des stations...")
-                        } else {
-                            VStack(spacing: 20) {
-                                Image(systemName: "tram.fill")
-                                    .font(.system(size: 50))
-                                    .foregroundColor(.gray)
-                                Text("Aucune station trouvée")
-                                    .font(.headline)
-                                Text(
-                                    "Aucune station dans un rayon de \(Int(viewModel.selectedRadius))m."
-                                )
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal)
-                                .foregroundColor(.secondary)
-                            }
-                        }
-                        Spacer()
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.top)
-                } else {
-                    VStack(spacing: 0) {
-                        RadiusSelector(viewModel: viewModel)
-                            .padding(.vertical, 8)
-
-                        List {
-                            ForEach(viewModel.nearbyStations) { station in
-                                NavigationLink(
-                                    destination: StationDetailScreen(station: station)
-                                ) {
-                                    NearbyStationRow(station: station)
-                                }
-                                .buttonStyle(.glass)
-                                .listRowSeparator(.hidden)
-                                .listRowBackground(Color.clear)
-                            }
-                        }
-                        .listStyle(.plain)
-                        .scrollContentBackground(.hidden)
-                        .frame(maxWidth: horizontalSizeClass == .regular ? 700 : .infinity)
-                        .frame(maxWidth: .infinity) // center within parent
+                Group {
+                    switch selectedTab {
+                    case .nearby:
+                        nearbyStationsContent
+                    case .favorites:
+                        favoriteStationsContent
                     }
                 }
             }
             .background {
-                AdaptiveMapBackground()
+                ZStack {
+                    ShaderAnimationView(isLoading: true)
+                    (colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.15))
+                        .glassEffect(.ultraThin)
+                }
+                .ignoresSafeArea()
             }
-            .navigationTitle("À Proximité")
+            .navigationTitle(selectedTab == .nearby ? "À Proximité" : "Favoris")
             .navigationBarTitleDisplayMode(.large)
+        }
+    }
+
+    @ViewBuilder
+    private var nearbyStationsContent: some View {
+        if viewModel.permissionDenied {
+            VStack(spacing: 20) {
+                Image(systemName: "location.slash.fill")
+                    .font(.system(size: 50))
+                    .foregroundColor(.orange)
+                Text("Localisation désactivée")
+                    .font(.headline)
+                Text(
+                    "Veuillez activer la localisation dans les réglages pour voir les stations à proximité."
+                )
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+                .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if viewModel.userLocation == nil {
+            VStack(spacing: 20) {
+                Image(systemName: "location.circle.fill")
+                    .font(.system(size: 50))
+                    .foregroundColor(.blue)
+                Text("Localisation nécessaire")
+                    .font(.headline)
+                Text(
+                    "Autorisez l'accès à votre position pour trouver les stations autour de vous."
+                )
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+                .foregroundColor(.secondary)
+
+                Button(action: {
+                    viewModel.requestLocation()
+                }) {
+                    Text("Autoriser la localisation")
+                        .fontWeight(.bold)
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                        .foregroundColor(.primary)
+                }
+                .buttonStyle(.glass)
+                .padding(.horizontal, 40)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if viewModel.nearbyStations.isEmpty {
+            VStack(spacing: 20) {
+                RadiusSelector(viewModel: viewModel)
+
+                if viewModel.isLoading {
+                    ProgressView("Recherche des stations...")
+                } else {
+                    VStack(spacing: 20) {
+                        Image(systemName: "tram.fill")
+                            .font(.system(size: 50))
+                            .foregroundColor(.gray)
+                        Text("Aucune station trouvée")
+                            .font(.headline)
+                        Text(
+                            "Aucune station dans un rayon de \(Int(viewModel.selectedRadius))m."
+                        )
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                        .foregroundColor(.secondary)
+                    }
+                }
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.top)
+        } else {
+            VStack(spacing: 0) {
+                RadiusSelector(viewModel: viewModel)
+                    .padding(.vertical, 8)
+
+                List {
+                    ForEach(viewModel.nearbyStations) { station in
+                        NavigationLink(
+                            destination: StationDetailScreen(station: station)
+                        ) {
+                            NearbyStationRow(station: station)
+                        }
+                        .buttonStyle(.glass)
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .frame(maxWidth: horizontalSizeClass == .regular ? 700 : .infinity)
+                .frame(maxWidth: .infinity) // center within parent
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var favoriteStationsContent: some View {
+        let favoriteStations = favoritesService.favoriteStations
+        
+        if favoriteStations.isEmpty {
+            VStack(spacing: 20) {
+                Image(systemName: "star.slash.fill")
+                    .font(.system(size: 50))
+                    .foregroundColor(.gray)
+                Text("Aucun favori")
+                    .font(.headline)
+                Text(
+                    "Ajoutez des stations à vos favoris en appuyant sur l'icône de cœur dans l'écran de détails d'une station."
+                )
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+                .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.horizontal, 20)
+        } else {
+            List {
+                ForEach(favoriteStations) { station in
+                    NavigationLink(
+                        destination: StationDetailScreen(station: station)
+                    ) {
+                        NearbyStationRow(station: station)
+                    }
+                    .buttonStyle(.glass)
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                }
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .frame(maxWidth: horizontalSizeClass == .regular ? 700 : .infinity)
+            .frame(maxWidth: .infinity) // center within parent
         }
     }
 }

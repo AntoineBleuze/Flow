@@ -2,14 +2,9 @@ import Combine
 import MapKit
 import SwiftUI
 
-// Helper for resizing images
-private func resizedImage(named name: String, to size: CGSize) -> UIImage? {
-    guard let image = UIImage(named: name) else { return nil }
-    let renderer = UIGraphicsImageRenderer(size: size)
-    return renderer.image { _ in
-        image.draw(in: CGRect(origin: .zero, size: size))
-    }
-}
+#if !canImport(UIKit)
+import AppKit
+#endif
 
 class SharedMapView {
     static let main = SharedMapView()
@@ -23,7 +18,7 @@ class SharedMapView {
 
         // Register custom annotation view
         mapView.register(
-            StationAnnotationView.self,
+            StationSwiftUIAnnotationView.self,
             forAnnotationViewWithReuseIdentifier: MKMapViewDefaultAnnotationViewReuseIdentifier)
         mapView.register(
             MKMarkerAnnotationView.self,
@@ -47,10 +42,47 @@ struct MapViewControllerBridge: UIViewRepresentable {
     @Binding var selectedStation: MapStation?
     @Binding var userTrackingMode: MKUserTrackingMode
     var journey: Journey?  // Optional journey to display
+    var focusedSectionId: String? = nil  // Optional section to focus on
     var useMainMap: Bool = false  // Default to background map if not specified
     var showAnnotations: Bool = true  // If false, skip annotations and overlays (for background mode)
 
+    init(
+        data: MapDataService,
+        selectedStation: Binding<MapStation?>,
+        userTrackingMode: Binding<MKUserTrackingMode>,
+        journey: Journey? = nil,
+        focusedSectionId: String? = nil,
+        useMainMap: Bool = false,
+        showAnnotations: Bool = true
+    ) {
+        self._data = ObservedObject(wrappedValue: data)
+        self._selectedStation = selectedStation
+        self._userTrackingMode = userTrackingMode
+        self.journey = journey
+        self.focusedSectionId = focusedSectionId
+        self.useMainMap = useMainMap
+        self.showAnnotations = showAnnotations
+    }
+
+    #if canImport(UIKit)
     func makeUIView(context: Context) -> MKMapView {
+        return makeMapView(context: context)
+    }
+
+    func updateUIView(_ mapView: MKMapView, context: Context) {
+        updateMapView(mapView, context: context)
+    }
+    #else
+    func makeNSView(context: Context) -> MKMapView {
+        return makeMapView(context: context)
+    }
+
+    func updateNSView(_ mapView: MKMapView, context: Context) {
+        updateMapView(mapView, context: context)
+    }
+    #endif
+
+    private func makeMapView(context: Context) -> MKMapView {
         let mapView = useMainMap ? SharedMapView.main.mapView : SharedMapView.background.mapView
         mapView.delegate = context.coordinator
 
@@ -60,13 +92,15 @@ struct MapViewControllerBridge: UIViewRepresentable {
         return mapView
     }
 
-    func updateUIView(_ mapView: MKMapView, context: Context) {
+    private func updateMapView(_ mapView: MKMapView, context: Context) {
         context.coordinator.parent = self
 
         // Handle Tracking Mode
+        #if canImport(UIKit)
         if mapView.userTrackingMode != userTrackingMode {
             mapView.setUserTrackingMode(userTrackingMode, animated: true)
         }
+        #endif
 
         // If showAnnotations is false, clear everything and skip updates (background mode)
         if !showAnnotations {
@@ -82,6 +116,15 @@ struct MapViewControllerBridge: UIViewRepresentable {
             mapView.removeAnnotations(mapView.annotations.filter { !($0 is MKUserLocation) })
 
             drawJourney(journey, on: mapView)
+
+            // Zoom/pan to focused section or entire journey
+            if let focusedSectionId = focusedSectionId,
+               let sections = journey.sections,
+               let section = sections.first(where: { $0.id == focusedSectionId }) {
+                zoomToSection(section, on: mapView)
+            } else {
+                zoomToJourney(journey, on: mapView)
+            }
         } else {
             // Standard behavior: Show all lines
             updateStandardOverlays(mapView, data: data)
@@ -114,6 +157,7 @@ struct MapViewControllerBridge: UIViewRepresentable {
                 let polyline = ColoredPolyline(
                     coordinates: routeCoordinates, count: routeCoordinates.count)
                 polyline.color = color
+                polyline.lineName = display.label ?? ""
                 mapView.addOverlay(polyline)
                 allCoordinates.append(contentsOf: routeCoordinates)
             }
@@ -148,8 +192,7 @@ struct MapViewControllerBridge: UIViewRepresentable {
                 let polyline = ColoredPolyline(
                     coordinates: routeCoordinates, count: routeCoordinates.count)
                 polyline.color = .lightGray
-                // Dashed line style is handled in renderer, but ColoredPolyline doesn't support it yet.
-                // We'll just use light gray for now.
+                polyline.isDashed = true
                 mapView.addOverlay(polyline)
                 allCoordinates.append(contentsOf: routeCoordinates)
             }
@@ -158,6 +201,55 @@ struct MapViewControllerBridge: UIViewRepresentable {
         // If this is the first time drawing this journey (or we want to re-center), we could.
         // But maybe we shouldn't force re-center on every update if user is panning.
         // For now, let's not force re-center here, rely on "followUserLocation" or initial setup.
+    }
+
+    private func zoomToJourney(_ journey: Journey, on mapView: MKMapView) {
+        guard let sections = journey.sections else { return }
+        var allCoordinates: [CLLocationCoordinate2D] = []
+
+        for section in sections {
+            if let geojson = section.geojson, let coordinates = geojson.coordinates {
+                for coord in coordinates where coord.count >= 2 {
+                    allCoordinates.append(CLLocationCoordinate2D(latitude: coord[1], longitude: coord[0]))
+                }
+            }
+            if let from = section.from, let fromCoord = from.coordinate {
+                allCoordinates.append(fromCoord)
+            }
+            if let to = section.to, let toCoord = to.coordinate {
+                allCoordinates.append(toCoord)
+            }
+        }
+
+        if !allCoordinates.isEmpty {
+            let boundingRect = MKMapRect(coordinates: allCoordinates)
+            // Apply bottom padding (350pt) to keep the route in the top portion above the bottom panel
+            let padding = UIEdgeInsets(top: 80, left: 40, bottom: 350, right: 40)
+            mapView.setVisibleMapRect(boundingRect, edgePadding: padding, animated: true)
+        }
+    }
+
+    private func zoomToSection(_ section: ItinerarySection, on mapView: MKMapView) {
+        var sectionCoordinates: [CLLocationCoordinate2D] = []
+
+        if let geojson = section.geojson, let coordinates = geojson.coordinates {
+            for coord in coordinates where coord.count >= 2 {
+                sectionCoordinates.append(CLLocationCoordinate2D(latitude: coord[1], longitude: coord[0]))
+            }
+        }
+        if let from = section.from, let fromCoord = from.coordinate {
+            sectionCoordinates.append(fromCoord)
+        }
+        if let to = section.to, let toCoord = to.coordinate {
+            sectionCoordinates.append(toCoord)
+        }
+
+        if !sectionCoordinates.isEmpty {
+            let boundingRect = MKMapRect(coordinates: sectionCoordinates)
+            // Apply bottom padding (350pt) to keep the focused section visible above the bottom panel
+            let padding = UIEdgeInsets(top: 100, left: 60, bottom: 350, right: 60)
+            mapView.setVisibleMapRect(boundingRect, edgePadding: padding, animated: true)
+        }
     }
 
     private func updateStandardOverlays(_ mapView: MKMapView, data: MapDataService) {
@@ -369,10 +461,18 @@ struct MapViewControllerBridge: UIViewRepresentable {
                 view.displayPriority = .defaultHigh
                 
                 // Add a soft shadow to match our markers
+                #if canImport(UIKit)
                 view.layer.shadowColor = UIColor.black.cgColor
                 view.layer.shadowOpacity = 0.2
                 view.layer.shadowOffset = CGSize(width: 0, height: 2)
                 view.layer.shadowRadius = 4
+                #else
+                view.wantsLayer = true
+                view.layer?.shadowColor = NSColor.black.cgColor
+                view.layer?.shadowOpacity = 0.2
+                view.layer?.shadowOffset = CGSize(width: 0, height: -2)
+                view.layer?.shadowRadius = 4
+                #endif
                 
                 return view
             }
@@ -394,6 +494,14 @@ struct MapViewControllerBridge: UIViewRepresentable {
                 renderer.shouldRasterize = false  // Keep vector rendering for smoothness
                 renderer.alpha = 0.85  // Slight transparency helps with overlapping
 
+                if ["15", "16", "17", "18"].contains(coloredPolyline.lineName) {
+                    renderer.lineDashPattern = [10, 8] as [NSNumber]
+                    renderer.lineWidth = 4.0
+                } else if coloredPolyline.isDashed {
+                    renderer.lineDashPattern = [6, 6] as [NSNumber]
+                    renderer.lineWidth = 3.0
+                }
+
                 return renderer
             }
             return MKOverlayRenderer(overlay: overlay)
@@ -402,7 +510,7 @@ struct MapViewControllerBridge: UIViewRepresentable {
         func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
             if let stationAnnotation = view.annotation as? StationAnnotation {
                 stationAnnotation.isSelected = true
-                (view as? StationAnnotationView)?.annotation = stationAnnotation // Trigger update
+                (view as? StationSwiftUIAnnotationView)?.annotation = stationAnnotation // Trigger update
                 
                 parent.selectedStation = stationAnnotation.station
             }
@@ -411,7 +519,7 @@ struct MapViewControllerBridge: UIViewRepresentable {
         func mapView(_ mapView: MKMapView, didDeselect view: MKAnnotationView) {
             if let stationAnnotation = view.annotation as? StationAnnotation {
                 stationAnnotation.isSelected = false
-                (view as? StationAnnotationView)?.annotation = stationAnnotation // Trigger update
+                (view as? StationSwiftUIAnnotationView)?.annotation = stationAnnotation // Trigger update
                 
                 if parent.selectedStation?.id == stationAnnotation.station.id {
                     // Defer state modification to avoid "Modifying state during view update"
@@ -487,84 +595,54 @@ class StationAnnotation: NSObject, MKAnnotation {
 }
 
 // Custom Annotation View hosting SwiftUI
-class StationAnnotationView: MKMarkerAnnotationView {
+class StationSwiftUIAnnotationView: MKAnnotationView {
+    private var hostingController: UIHostingController<StationBadgeView>?
 
     override var annotation: MKAnnotation? {
-        didSet { configure() }
+        didSet {
+            setupView()
+        }
     }
 
     override init(annotation: MKAnnotation?, reuseIdentifier: String?) {
         super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
-        configure()
+        #if canImport(UIKit)
+        self.backgroundColor = .clear
+        #endif
+        setupView()
     }
 
     required init?(coder aDecoder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    private func configure() {
+    private func setupView() {
         guard let stationAnnotation = annotation as? StationAnnotation else { return }
         let station = stationAnnotation.station
 
-        self.canShowCallout = false
-        
-        // Title behavior
-        self.titleVisibility = .adaptive
-        self.subtitleVisibility = .hidden
-        
-        // Remove old hub icon subview if exists
-        self.subviews.forEach { if $0.tag == 999 { $0.removeFromSuperview() } }
-        
-        if station.lines.count > 1 {
-            // HUB: Multiple lines -> White marker with mode-specific logo
-            self.markerTintColor = .white
-            self.glyphTintColor = .black // Contrast for white marker if using SF Symbol
-            self.glyphText = nil
-            
-            // User requested "train/station symbols" for hubs.
-            // We can use a standard SF Symbol representing a station/interchange.
-            // "tram.fill" is often used for generic transit, or "building.columns.fill" for a grand station.
-            // But if the user specifically asked "remettre les symboles de train/gare", they might mean
-            // the specific icon associated with the main type (e.g. RER logo if it's an RER hub).
-            
-            // Let's stick to the mainType logo logic but simplified, or use a generic "station" icon if that's what was implied.
-            // Given "symboles de train/gare", "tram.fill" (which looks like a train front) or "train.side.front.car" is good.
-            // Let's try to be smart: if it's a major hub (RER/Train), use a train icon.
-            
-            let systemIconName: String
-            switch station.mainType {
-            case .train, .transilien, .rer:
-                systemIconName = "train.side.front.car"
-            case .metro:
-                systemIconName = "tram.fill" // Metro icon often looks like this in SF Symbols
-            case .tram:
-                systemIconName = "tram"
-            case .bus:
-                systemIconName = "bus.fill"
-            case .cable:
-                systemIconName = "cablecar.fill"
-            default:
-                systemIconName = "building.columns.fill"
-            }
-            
-            self.glyphImage = UIImage(systemName: systemIconName)
-            self.glyphTintColor = .black
-            
-        } else if let firstLine = station.lines.first {
-            // SINGLE LINE: Use official color and line name/number
-            let markerColor = resolveColor(for: firstLine.name, type: firstLine.type)
-            self.markerTintColor = markerColor
-            
-            self.glyphText = firstLine.name
-            self.glyphTintColor = .white
-            self.glyphImage = nil
-        } else {
-            self.markerTintColor = UIColor.systemGray
-            self.glyphImage = UIImage(systemName: "circle.fill")
-            self.glyphText = nil
-        }
+        // Remove old view
+        hostingController?.view.removeFromSuperview()
+        hostingController = nil
 
-        // Handle selection state visually
+        // Create SwiftUI view
+        let badgeView = StationBadgeView(station: station, isSelected: stationAnnotation.isSelected)
+        let hc = UIHostingController(rootView: badgeView)
+        #if canImport(UIKit)
+        hc.view.backgroundColor = .clear
+        let size = hc.view.sizeThatFits(CGSize(width: 300, height: 100))
+        #else
+        let size = hc.view.fittingSize
+        #endif
+        self.bounds = CGRect(origin: .zero, size: size)
+        hc.view.frame = self.bounds
+        
+        addSubview(hc.view)
+        self.hostingController = hc
+        
+        // Centrer l'ancre au milieu de la vue de l'annotation
+        self.centerOffset = CGPoint.zero
+        
+        // Set display priority
         if stationAnnotation.isSelected {
             self.displayPriority = .required
             self.zPriority = .max
@@ -573,44 +651,11 @@ class StationAnnotationView: MKMarkerAnnotationView {
             self.zPriority = MKAnnotationViewZPriority(rawValue: 0)
         }
     }
-
-    private func resolveColor(for lineName: String, type: TransportType) -> UIColor {
-        let normalized = lineName.uppercased()
-            .replacingOccurrences(of: "TRAM", with: "")
-            .replacingOccurrences(of: "METRO", with: "")
-            .replacingOccurrences(of: "RER", with: "")
-            .replacingOccurrences(of: "T", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            
-        // 1. Hardcoded official colors (PRIORITY)
-        // Correct IDF Mobile colors
-        let officialColors: [String: String] = [
-            "1": "FFCD00", "2": "003CA6", "3": "837902", "3bis": "6EC4E8", "4": "CF009E",
-            "5": "FF7E2E", "6": "6ECA97", "7": "FA9ABA", "7bis": "6ECA97", "8": "E19BDF",
-            "9": "B6BD00", "10": "C9910D", "11": "704B1C", "12": "007852", "13": "6EC4E8",
-            "14": "62259D", "15": "A81232", "16": "E47881", "17": "AEC802", "18": "0099C4",
-            "A": "E3051C", "B": "5291CE", "C": "FFCE00", "D": "00643C",
-            "E": "B2559C", "H": "8D5E2A", "J": "B58800", "K": "B58800", "L": "CECECE",
-            "N": "00B092", "P": "F28E42", "R": "E4B4D1", "U": "DE4086", "3A": "F28E42",
-            "3B": "00AC8C", "T3A": "F28E42", "T3B": "00AC8C", "T1": "003CA6", "T2": "CF009E",
-            "T4": "E69622", "T5": "662483", "T6": "E8391A", "T7": "A4662F", "T8": "7D7F7E",
-            "T9": "4092C5", "T10": "D8BC59", "T11": "F1634B", "T12": "AF172B", "T13": "6E5031"
-        ]
-        
-        if let hex = officialColors[lineName.uppercased()] ?? officialColors[normalized] {
-            return UIColor(hex: hex) ?? UIColor(type.accentColor)
-        }
-        
-        // 2. Try match from MapDataService cache (Secondary)
-        if let color = MapDataService.shared.lineColorCache[lineName] {
-            return UIColor(color)
-        }
-        if let color = MapDataService.shared.lineColorCache[normalized] {
-            return UIColor(color)
-        }
-        
-        // 3. Final fallback
-        return UIColor(type.accentColor)
+    
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        hostingController?.view.removeFromSuperview()
+        hostingController = nil
     }
 }
 

@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flow — Serveur de transport</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0a0d14;
+      --bg2: #111520;
+      --card: rgba(255,255,255,0.04);
+      --card-border: rgba(255,255,255,0.08);
+      --accent: #6366f1;
+      --accent2: #818cf8;
+      --green: #34d399;
+      --yellow: #fbbf24;
+      --red: #f87171;
+      --text: #e2e8f0;
+      --muted: #64748b;
+      --radius: 16px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Background animated gradient ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 20% 10%, rgba(99,102,241,0.12) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 80% 90%, rgba(52,211,153,0.07) 0%, transparent 50%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .container {
+      position: relative;
+      z-index: 1;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 24px 80px;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 48px;
+    }
+
+    .logo {
+      width: 52px;
+      height: 52px;
+      background: linear-gradient(135deg, var(--accent), #a855f7);
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 26px;
+      box-shadow: 0 0 30px rgba(99,102,241,0.35);
+      flex-shrink: 0;
+    }
+
+    header h1 {
+      font-size: 1.8rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+    }
+
+    header p {
+      font-size: 0.875rem;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    /* ── Status bar ── */
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 50px;
+      padding: 10px 20px;
+      width: fit-content;
+      margin-bottom: 40px;
+      backdrop-filter: blur(12px);
+    }
+
+    .status-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+
+    .status-dot.offline { background: var(--red); box-shadow: 0 0 8px var(--red); animation: none; }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(0.85); }
+    }
+
+    .status-text { font-size: 0.85rem; font-weight: 500; }
+
+    /* ── Grid ── */
+    .grid { display: grid; gap: 20px; }
+    .grid-3 { grid-template-columns: repeat(3, 1fr); }
+    .grid-2 { grid-template-columns: repeat(2, 1fr); }
+
+    @media (max-width: 768px) {
+      .grid-3, .grid-2 { grid-template-columns: 1fr; }
+    }
+    @media (min-width: 769px) and (max-width: 900px) {
+      .grid-3 { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    /* ── Card ── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 24px;
+      backdrop-filter: blur(12px);
+      transition: border-color 0.2s, transform 0.2s;
+    }
+
+    .card:hover { border-color: rgba(255,255,255,0.14); transform: translateY(-2px); }
+
+    .card-label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      margin-bottom: 10px;
+      font-weight: 600;
+    }
+
+    .card-value {
+      font-size: 2.2rem;
+      font-weight: 700;
+      letter-spacing: -0.04em;
+      line-height: 1;
+    }
+
+    .card-sub {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+
+    /* ── Section title ── */
+    .section-title {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .section-title span { font-size: 1.1rem; }
+
+    /* ── Traffic list ── */
+    #traffic-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-height: 480px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    #traffic-list::-webkit-scrollbar { width: 4px; }
+    #traffic-list::-webkit-scrollbar-track { background: transparent; }
+    #traffic-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+
+    .disruption-item {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px;
+      padding: 14px 16px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      transition: background 0.15s;
+    }
+
+    .disruption-item:hover { background: rgba(255,255,255,0.05); }
+
+    .line-badge {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: 700;
+      flex-shrink: 0;
+      color: #fff;
+    }
+
+    .disruption-content { flex: 1; min-width: 0; }
+
+    .disruption-name {
+      font-size: 0.875rem;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .disruption-msg {
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-top: 3px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .severity-pill {
+      font-size: 0.68rem;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 20px;
+      white-space: nowrap;
+      flex-shrink: 0;
+      align-self: center;
+    }
+
+    .sev-blocking { background: rgba(248,113,113,0.15); color: var(--red); }
+    .sev-reduced { background: rgba(251,191,36,0.15); color: var(--yellow); }
+    .sev-info { background: rgba(99,102,241,0.15); color: var(--accent2); }
+
+    /* ── Endpoints card ── */
+    .endpoint-list { display: flex; flex-direction: column; gap: 8px; }
+
+    .endpoint-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(0,0,0,0.2);
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.78rem;
+      color: var(--text);
+    }
+
+    .method-pill {
+      font-size: 0.65rem;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 6px;
+      background: rgba(99,102,241,0.2);
+      color: var(--accent2);
+      letter-spacing: 0.05em;
+      flex-shrink: 0;
+    }
+
+    .ws-pill {
+      background: rgba(52,211,153,0.15);
+      color: var(--green);
+    }
+
+    /* ── Clients list ── */
+    #ws-status { font-size: 0.82rem; color: var(--muted); margin-top: 8px; }
+
+    /* ── Last update ── */
+    #last-update {
+      font-size: 0.78rem;
+      color: var(--muted);
+      text-align: center;
+      margin-top: 40px;
+    }
+
+    /* ── Skeleton loader ── */
+    .skeleton {
+      background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: 8px;
+      height: 60px;
+    }
+
+    @keyframes shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <header>
+      <div class="logo">🚇</div>
+      <div>
+        <h1>Flow Server</h1>
+        <p>Proxy temps réel — Île-de-France Mobilités</p>
+      </div>
+    </header>
+
+    <div class="status-bar">
+      <div class="status-dot" id="status-dot"></div>
+      <span class="status-text" id="status-text">Connexion…</span>
+    </div>
+
+    <!-- Stats cards -->
+    <div class="grid grid-3" style="margin-bottom: 20px;">
+      <div class="card">
+        <div class="card-label">Perturbations actives</div>
+        <div class="card-value" id="stat-disruptions">—</div>
+        <div class="card-sub">sur le réseau IDFM</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Clients connectés</div>
+        <div class="card-value" id="stat-clients">—</div>
+        <div class="card-sub">via WebSocket</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Fraîcheur du cache</div>
+        <div class="card-value" id="stat-cache">—</div>
+        <div class="card-sub" id="stat-last-update">dernier refresh</div>
+      </div>
+    </div>
+
+    <div class="grid grid-2" style="margin-bottom: 20px;">
+
+      <!-- Traffic disruptions -->
+      <div class="card" style="grid-column: 1;">
+        <div class="section-title"><span>⚠️</span> Perturbations en cours</div>
+        <div id="traffic-list">
+          <div class="skeleton"></div>
+          <div class="skeleton"></div>
+          <div class="skeleton"></div>
+        </div>
+      </div>
+
+      <!-- Right column -->
+      <div style="display: flex; flex-direction: column; gap: 20px;">
+
+        <!-- Endpoints -->
+        <div class="card">
+          <div class="section-title"><span>🔌</span> Endpoints disponibles</div>
+          <div class="endpoint-list">
+            <div class="endpoint-item"><span class="method-pill">GET</span>/api/health</div>
+            <div class="endpoint-item"><span class="method-pill">GET</span>/api/traffic</div>
+            <div class="endpoint-item"><span class="method-pill">GET</span>/api/departures/:id</div>
+            <div class="endpoint-item"><span class="method-pill">GET</span>/api/itinerary?from=…&to=…</div>
+            <div class="endpoint-item"><span class="method-pill ws-pill">WS</span>ws://[host]:[port]</div>
+          </div>
+        </div>
+
+        <!-- WebSocket live -->
+        <div class="card">
+          <div class="section-title"><span>📡</span> WebSocket live</div>
+          <div style="font-size:0.82rem; color: var(--muted); line-height: 1.6;">
+            Le serveur pousse les données trafic <strong style="color:var(--text)">toutes les 30s</strong> aux clients connectés sans qu'ils aient besoin de poller.<br><br>
+            Messages supportés&nbsp;:<br>
+            <code style="color:var(--accent2)">traffic_update</code> · <code style="color:var(--accent2)">departure_update</code><br>
+            <code style="color:var(--green)">subscribe_departures</code> · <code style="color:var(--red)">unsubscribe_departures</code>
+          </div>
+          <div id="ws-status">⏳ En attente…</div>
+        </div>
+
+      </div>
+    </div>
+
+    <p id="last-update">—</p>
+
+  </div>
+
+  <script>
+    // ── Palette couleurs lignes IDFM ──
+    const LINE_COLORS = {
+      "1":"FFCD00","2":"003CA6","3":"837902","3bis":"6EC4E8","4":"CF009E",
+      "5":"FF7E2E","6":"6ECA97","7":"FA9ABA","7bis":"6ECA97","8":"E19BDF",
+      "9":"B6BD00","10":"C9910D","11":"704B1C","12":"007852","13":"6EC4E8",
+      "14":"62259D","15":"A81232","16":"E47881","17":"AEC802","18":"0099C4",
+      "A":"E3051C","B":"5291CE","C":"FFCE00","D":"00643C","E":"B2559C",
+      "H":"8D5E2A","J":"B58800","K":"B58800","L":"CECECE","N":"00B092",
+      "P":"F28E42","R":"E4B4D1","U":"DE4086","V":"9F9825",
+      "T1":"003CA6","T2":"CF009E","T3A":"F28E42","T3B":"00AC8C",
+      "T4":"E69622","T5":"662483","T6":"E8391A","T7":"A4662F",
+      "T8":"7D7F7E","T9":"4092C5","T10":"D8BC59","T11":"F1634B",
+      "T12":"AF172B","T13":"6E5031"
+    };
+
+    function lineColor(code) {
+      if (!code) return "444";
+      const c = (LINE_COLORS[code] || LINE_COLORS[code.replace(/^M/i,"").trim()] || "555");
+      return "#" + c;
+    }
+
+    function isLight(hex) {
+      const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+      return (r*299 + g*587 + b*114) / 1000 > 140;
+    }
+
+    // ── Severity helpers ──
+    function severityClass(d) {
+      const effect = d.severity?.effect || "";
+      if (effect.includes("NO_SERVICE") || effect.includes("SIGNIFICANT")) return "sev-blocking";
+      if (effect.includes("REDUCED") || effect.includes("DETOUR")) return "sev-reduced";
+      return "sev-info";
+    }
+
+    function severityLabel(d) {
+      const effect = d.severity?.effect || "";
+      if (effect.includes("NO_SERVICE")) return "Arrêt de service";
+      if (effect.includes("SIGNIFICANT")) return "Fortement perturbé";
+      if (effect.includes("REDUCED")) return "Service réduit";
+      if (effect.includes("DETOUR")) return "Déviation";
+      return d.severity?.name || "Info";
+    }
+
+    // ── Render disruptions ──
+    function renderTraffic(disruptions) {
+      const list = document.getElementById("traffic-list");
+      if (!disruptions || disruptions.length === 0) {
+        list.innerHTML = `<div style="color:var(--muted);font-size:0.85rem;padding:12px 0;">✅ Aucune perturbation majeure en ce moment.</div>`;
+        document.getElementById("stat-disruptions").textContent = "0";
+        return;
+      }
+
+      document.getElementById("stat-disruptions").textContent = disruptions.length;
+
+      // Déduplique par ligne
+      const seen = new Set();
+      const uniq = disruptions.filter(d => {
+        const line = d.impacted_objects?.[0]?.pt_object?.line;
+        const key = line?.code || d.id;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      list.innerHTML = uniq.map(d => {
+        const line = d.impacted_objects?.[0]?.pt_object?.line;
+        const code = line?.code || "?";
+        const name = line?.name || d.impacted_objects?.[0]?.pt_object?.name || "Ligne inconnue";
+        const msg = d.messages?.[0]?.text || "";
+        const color = lineColor(code);
+        const textColor = isLight(color) ? "#000" : "#fff";
+        const sevCls = severityClass(d);
+        const sevLbl = severityLabel(d);
+
+        return `
+          <div class="disruption-item">
+            <div class="line-badge" style="background:${color};color:${textColor}">${code}</div>
+            <div class="disruption-content">
+              <div class="disruption-name">${name}</div>
+              ${msg ? `<div class="disruption-msg">${msg}</div>` : ""}
+            </div>
+            <span class="severity-pill ${sevCls}">${sevLbl}</span>
+          </div>
+        `;
+      }).join("");
+    }
+
+    // ── Fetch health ──
+    async function fetchHealth() {
+      try {
+        const res = await fetch("/api/health");
+        if (!res.ok) throw new Error();
+        const h = await res.json();
+
+        document.getElementById("status-dot").className = "status-dot";
+        document.getElementById("status-text").textContent = "Serveur opérationnel";
+        document.getElementById("stat-clients").textContent = h.connectedClients ?? "—";
+        document.getElementById("stat-cache").textContent = h.cacheAge || "—";
+
+        if (h.lastUpdate && h.lastUpdate !== "pas encore") {
+          const d = new Date(h.lastUpdate);
+          document.getElementById("stat-last-update").textContent =
+            "mis à jour à " + d.toLocaleTimeString("fr-FR", { hour:"2-digit", minute:"2-digit", second:"2-digit" });
+        }
+      } catch {
+        document.getElementById("status-dot").className = "status-dot offline";
+        document.getElementById("status-text").textContent = "Serveur inaccessible";
+      }
+    }
+
+    // ── Fetch traffic ──
+    async function fetchTraffic() {
+      try {
+        const res = await fetch("/api/traffic");
+        if (!res.ok) {
+          document.getElementById("traffic-list").innerHTML =
+            `<div style="color:var(--muted);font-size:0.85rem;padding:12px 0;">⏳ Données en cours de chargement…</div>`;
+          return;
+        }
+        const data = await res.json();
+        renderTraffic(data.disruptions || []);
+      } catch {
+        document.getElementById("traffic-list").innerHTML =
+          `<div style="color:var(--red);font-size:0.85rem;padding:12px 0;">❌ Impossible de charger les données.</div>`;
+      }
+    }
+
+    // ── WebSocket (écoute passive pour savoir si le serveur pousse) ──
+    function connectWS() {
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${proto}//${location.host}`);
+      const wsStatus = document.getElementById("ws-status");
+
+      ws.addEventListener("open", () => {
+        wsStatus.innerHTML = `<span style="color:var(--green)">● Connecté</span> — en écoute des mises à jour en direct`;
+      });
+
+      ws.addEventListener("message", (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type === "traffic_update" && msg.data?.disruptions) {
+            renderTraffic(msg.data.disruptions);
+            const now = new Date().toLocaleTimeString("fr-FR", { hour:"2-digit", minute:"2-digit", second:"2-digit" });
+            document.getElementById("last-update").textContent = `Dernière mise à jour via WebSocket : ${now}`;
+          }
+        } catch {}
+        fetchHealth();
+      });
+
+      ws.addEventListener("close", () => {
+        wsStatus.innerHTML = `<span style="color:var(--yellow)">⚠ Déconnecté</span> — tentative de reconnexion…`;
+        setTimeout(connectWS, 5000);
+      });
+
+      ws.addEventListener("error", () => {
+        wsStatus.innerHTML = `<span style="color:var(--red)">✗ Erreur WebSocket</span>`;
+      });
+    }
+
+    // ── Init ──
+    async function init() {
+      await fetchHealth();
+      await fetchTraffic();
+      connectWS();
+      setInterval(fetchHealth, 10000);
+      setInterval(fetchTraffic, 30000);
+      const now = new Date().toLocaleTimeString("fr-FR", { hour:"2-digit", minute:"2-digit", second:"2-digit" });
+      document.getElementById("last-update").textContent = `Page chargée à ${now}`;
+    }
+
+    init();
+  </script>
+</body>
+</html>

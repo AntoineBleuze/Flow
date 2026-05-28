@@ -16,6 +16,7 @@ struct StationDetailSheet: View {
     @ObservedObject var liveActivityManager = LiveActivityManager.shared
 
     @Environment(\.dismiss) var dismiss
+    @Environment(\.colorScheme) var colorScheme
 
     // Structures pour le regroupement
     struct LineGroup: Identifiable {
@@ -26,6 +27,7 @@ struct StationDetailSheet: View {
         let network: String?
         let mode: String?
         var directions: [DirectionGroup]
+        var resumeTime: String? = nil  // nil = service actif, sinon "HH:mm" du premier train
     }
 
     struct DirectionGroup: Identifiable {
@@ -36,9 +38,14 @@ struct StationDetailSheet: View {
 
     @ViewBuilder
     private var sheetContent: some View {
-        if isLoading {
+        let gpeLines = station.lines.filter { ["15", "16", "17", "18"].contains($0.name) }
+        let hasActiveLines = station.lines.contains { !["15", "16", "17", "18"].contains($0.name) }
+
+        if isLoading && hasActiveLines {
             ProgressView("Chargement des horaires...")
-        } else if let error = errorMessage {
+                .tint(.white)
+                .foregroundColor(.white)
+        } else if let error = errorMessage, hasActiveLines {
             VStack {
                 Text("Erreur: \(error)")
                     .foregroundColor(.red)
@@ -50,7 +57,7 @@ struct StationDetailSheet: View {
                         .foregroundColor(.gray)
                 }
             }
-        } else if departures.isEmpty {
+        } else if departures.isEmpty && !hasActiveLines && gpeLines.isEmpty {
             Text("Aucun départ trouvé.")
                 .foregroundColor(.secondary)
         } else {
@@ -61,12 +68,21 @@ struct StationDetailSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
+                ShaderAnimationView(isLoading: isLoading, station: station)
+                
+                (colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.15))
+                    .glassEffect(.ultraThin)
+                    .ignoresSafeArea()
+                
+                // Sheet content constrained within safe area boundaries
                 sheetContent
             }
-            .glassEffect().edgesIgnoringSafeArea(.all)
             .toolbar(.hidden, for: .navigationBar)
             .onAppear {
-                loadDepartures()
+                let hasActiveLines = station.lines.contains { !["15", "16", "17", "18"].contains($0.name) }
+                if hasActiveLines {
+                    loadDepartures()
+                }
             }
             .background(
                 NavigationLink(
@@ -125,13 +141,16 @@ struct StationDetailSheet: View {
                 Spacer()
 
                 // Action buttons — individual glass circles
-                Button(action: { loadDepartures() }) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.body)
-                        .fontWeight(.medium)
-                        .frame(width: 36, height: 36)
+                let hasActiveLines = station.lines.contains { !["15", "16", "17", "18"].contains($0.name) }
+                if hasActiveLines {
+                    Button(action: { loadDepartures() }) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.body)
+                            .fontWeight(.medium)
+                            .frame(width: 36, height: 36)
+                    }
+                    .buttonStyle(.glass)
                 }
-                .buttonStyle(.glass)
 
                 Button(action: {
                     FavoritesService.shared.toggleFavorite(stationId: station.id)
@@ -172,125 +191,114 @@ struct StationDetailSheet: View {
                         return group.mode?.lowercased().contains(selectedMode.lowercased()) ?? false
                             || (group.mode == nil && selectedMode == "Autre")
                     }
+                    let gpeLines = station.lines.filter { ["15", "16", "17", "18"].contains($0.name) }
 
-                    ForEach(filteredGroups) { group in
-                        VStack(alignment: .leading, spacing: 8) {
-                            // En-tête de ligne (Icone + Réseau)
-                            HStack(spacing: 10) {
-                                // Icone Ligne
-                                let assetName = TransportType.getAssetName(
-                                    mode: group.mode, label: group.label)
-                                if UIImage(named: assetName) != nil {
-                                    Image(assetName)
-                                        .resizable()
-                                        .scaledToFit()
-                                        .frame(width: 36, height: 36)
-                                } else {
-                                    ZStack {
-                                        if group.mode == "RER" || group.mode == "Train" {
-                                            RoundedRectangle(cornerRadius: 6)
-                                                .fill(Color(hex: group.color))
+                    if filteredGroups.isEmpty && gpeLines.isEmpty {
+                        VStack(spacing: 16) {
+                            Spacer().frame(height: 20)
+                            Image(systemName: "clock.badge.exclamationmark")
+                                .font(.system(size: 40))
+                                .foregroundColor(.secondary)
+                            Text("Aucun départ trouvé")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+                            Text("Veuillez réactualiser ou réessayer plus tard.")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
+                        }
+                        .padding(.top, 20)
+                    } else {
+                        ForEach(filteredGroups) { group in
+                            LineGroupRowSheet(
+                                group: group,
+                                liveActivityManager: liveActivityManager,
+                                onLiveActivity: { lineName, direction, times, color, textColor in
+                                    startLiveActivity(
+                                        lineName: lineName,
+                                        direction: direction,
+                                        nextDepartures: times,
+                                        lineColor: color,
+                                        textColor: textColor
+                                    )
+                                }
+                            )
+                        }
+                    }
+
+                    // Grand Paris Express lines (Estimated delivery dates)
+                    if !gpeLines.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Grand Paris Express (En construction)")
+                                .font(.headline)
+                                .foregroundColor(.primary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal)
+                                .padding(.top, filteredGroups.isEmpty ? 0 : 8)
+
+                            ForEach(gpeLines) { gpeLine in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack(spacing: 10) {
+                                        // GPE Line Logo using SVG vector
+                                        if UIImage(named: gpeLine.assetName) != nil {
+                                            Image(gpeLine.assetName)
+                                                .resizable()
+                                                .scaledToFit()
                                                 .frame(width: 36, height: 36)
                                         } else {
                                             Circle()
-                                                .fill(Color(hex: group.color))
+                                                .fill(resolveLineColor(gpeLine.name, type: .metro))
                                                 .frame(width: 30, height: 30)
+                                                .overlay(
+                                                    Text(gpeLine.name)
+                                                        .font(.subheadline)
+                                                        .bold()
+                                                        .foregroundColor(.white)
+                                                )
                                         }
-
-                                        Text(group.label)
-                                            .font(.subheadline)
-                                            .bold()
-                                            .foregroundColor(
-                                                Color(hex: group.text_color ?? "FFFFFF"))
-                                    }
-                                }
-
-                                if let network = group.network {
-                                    Text(network)
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-
-                                Spacer()
-                            }
-                            .padding(.horizontal)
-
-                            // Carte des directions
-                            VStack(spacing: 0) {
-                                ForEach(Array(group.directions.enumerated()), id: \.element.id) {
-                                    index, direction in
-                                    HStack {
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text(direction.direction)
+                                        
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("Métro Ligne \(gpeLine.name)")
                                                 .font(.subheadline)
-                                                .foregroundColor(.primary)
-                                                .lineLimit(2)
-
-                                            // Liste des temps
-                                            HStack(spacing: 0) {
-                                                ForEach(
-                                                    Array(direction.times.enumerated()),
-                                                    id: \.offset
-                                                ) { tIndex, time in
-                                                    Text(
-                                                        time
-                                                            + (tIndex < direction.times.count - 1
-                                                                ? ", " : "")
-                                                    )
-                                                    .font(.subheadline)
-                                                    .bold()
-                                                    .foregroundColor(.green)
-                                                }
-
-                                                Image(systemName: "wifi")
-                                                    .font(.caption2)
-                                                    .foregroundColor(.green)
-                                                    .padding(.leading, 4)
-                                            }
+                                                .fontWeight(.semibold)
+                                            Text("Société des Grands Projets")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
                                         }
 
                                         Spacer()
+                                    }
+                                    .padding(.horizontal)
 
-                                        // Bouton Live Activity pour cette direction
-                                        let isActive = liveActivityManager.isActivityActive(
-                                            line: group.label, direction: direction.direction)
-
-                                        Button(action: {
-                                            if isActive {
-                                                liveActivityManager.endLiveActivity()
-                                            } else {
-                                                startLiveActivity(
-                                                    lineName: group.label,
-                                                    direction: direction.direction,
-                                                    nextDepartures: direction.times,
-                                                    lineColor: group.color,
-                                                    textColor: group.text_color ?? "FFFFFF"
-                                                )
-                                            }
-                                        }) {
-                                            Image(systemName: "bolt.fill")
-                                                .font(.body)
-                                                .foregroundColor(isActive ? .green : .pink)
-                                                .frame(width: 34, height: 34)
+                                    // Delivery Date Box
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text("Date de livraison estimée")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                            
+                                            Text(getGPEDeliveryDate(lineName: gpeLine.name, stationName: station.name))
+                                                .font(.subheadline)
+                                                .bold()
+                                                .foregroundColor(.blue)
                                         }
-                                        .buttonStyle(.glass)
+                                        Spacer()
+                                        Image(systemName: "calendar")
+                                            .font(.title3)
+                                            .foregroundColor(.blue)
                                     }
                                     .padding(.horizontal, 14)
                                     .padding(.vertical, 12)
-
-                                    if index < group.directions.count - 1 {
-                                        Divider()
-                                            .padding(.leading, 14)
-                                    }
+                                    .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 16))
                                 }
+                                .padding(.horizontal)
                             }
-                            .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 16))
                         }
-                        .padding(.horizontal)
                     }
                 }
                 .padding(.top, 12)
-                .padding(.bottom, 30)
+                .padding(.bottom, 100)
             }
             .scrollContentBackground(.hidden)
         }
@@ -298,15 +306,14 @@ struct StationDetailSheet: View {
 
     private func groupDepartures(_ departures: [Departure]) -> [LineGroup] {
         var groups: [String: LineGroup] = [:]
+        var firstFutureDates: [String: Date] = [:]
 
         for dep in departures {
             let info = dep.displayInformations
-            // Unwrap label safely
             guard let lineKey = info.label, !lineKey.isEmpty else { continue }
+            guard let date = DateFormat.navitia.date(from: dep.stopDateTime.departureDateTime) else { continue }
 
-            // Calcul du temps
-            let timeStr = timeRemaining(dep.stopDateTime.departureDateTime)
-            if timeStr.isEmpty { continue }
+            let minutesAway = Int(date.timeIntervalSinceNow / 60)
 
             if groups[lineKey] == nil {
                 groups[lineKey] = LineGroup(
@@ -320,16 +327,26 @@ struct StationDetailSheet: View {
                 )
             }
 
-            // Gestion des directions
-            let dirName = info.direction ?? "Inconnue"
+            // Mémoriser le prochain départ futur (même très loin)
+            if date > Date() {
+                if let existing = firstFutureDates[lineKey] {
+                    if date < existing { firstFutureDates[lineKey] = date }
+                } else {
+                    firstFutureDates[lineKey] = date
+                }
+            }
 
+            // N'afficher que les départs dans les 120 prochaines minutes
+            guard minutesAway >= 0 && minutesAway < 120 else { continue }
+            let timeStr = "\(minutesAway) min"
+
+            let dirName = info.direction ?? "Inconnue"
             if var group = groups[lineKey],
                 let dirIndex = group.directions.firstIndex(where: { $0.direction == dirName })
             {
-                // Limite à 2 horaires pour ne pas surcharger
                 if group.directions[dirIndex].times.count < 2 {
                     group.directions[dirIndex].times.append(timeStr)
-                    groups[lineKey] = group  // Mise à jour de la struct (value type)
+                    groups[lineKey] = group
                 }
             } else {
                 groups[lineKey]?.directions.append(
@@ -337,7 +354,14 @@ struct StationDetailSheet: View {
             }
         }
 
-        // Tri: Par mode (Métro → RER → Transilien → Tram → autre) puis numérique/alpha
+        // Marquer les lignes hors service avec l'heure de reprise
+        for (lineKey, firstDate) in firstFutureDates {
+            if var group = groups[lineKey], group.directions.isEmpty {
+                group.resumeTime = DateFormat.shortTime.string(from: firstDate)
+                groups[lineKey] = group
+            }
+        }
+
         return groups.values.sorted { a, b in
             let priorityA = modePriority(a.mode)
             let priorityB = modePriority(b.mode)
@@ -500,4 +524,180 @@ struct StationDetailSheet: View {
         // On peut normaliser les noms si besoin (ex: "Metro" -> "Métro")
         return Array(modes).sorted()
     }
+
+    private func getGPEDeliveryDate(lineName: String, stationName: String) -> String {
+        switch lineName {
+        case "15":
+            let sudStations = [
+                "Pont de Sèvres", "Issy", "Clamart", "Châtillon", "Bagneux", "Arcueil", 
+                "Villejuif", "Vitry", "Ardoines", "Vert de Maisons", "Créteil", 
+                "Saint-Maur", "Champigny", "Bry", "Noisy"
+            ]
+            if sudStations.contains(where: { stationName.contains($0) }) {
+                return "Avril 2027 (Ligne 15 Sud)"
+            } else {
+                return "Horizon 2031 (Ligne 15 Est/Ouest)"
+            }
+        case "16":
+            let lateStations = ["Chelles", "Noisy"]
+            if lateStations.contains(where: { stationName.contains($0) }) {
+                return "Horizon 2028"
+            } else {
+                return "Horizon 2027"
+            }
+        case "17":
+            if stationName.contains("Mesnil") {
+                return "Horizon 2030"
+            } else if stationName.contains("Expositions") || stationName.contains("Roissy") || stationName.contains("Charles de Gaulle") {
+                return "Horizon 2028"
+            } else {
+                return "Horizon 2027"
+            }
+        case "18":
+            if stationName.contains("Versailles") || stationName.contains("Saint-Quentin") || stationName.contains("Guyancourt") || stationName.contains("Satory") {
+                return "Horizon 2030"
+            } else if stationName.contains("Orly") || stationName.contains("Antonypole") {
+                return "Horizon 2027"
+            } else {
+                return "Octobre 2026"
+            }
+        default:
+            return "Mise en service prochaine"
+        }
+    }
 }
+// MARK: - Sub-view extraite pour éviter les timeouts du compilateur Swift
+private struct LineGroupRowSheet: View {
+    // Types locaux miroirs de StationDetailSheet
+    typealias LineGroup = StationDetailSheet.LineGroup
+
+    let group: LineGroup
+    let liveActivityManager: LiveActivityManager
+    let onLiveActivity: (String, String, [String], String, String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // En-tête : badge ligne + réseau
+            lineHeader
+
+            // Contenu
+            if let resume = group.resumeTime {
+                nightServiceView(resume: resume)
+            } else {
+                directionsView
+            }
+        }
+        .padding(.horizontal)
+    }
+
+    private var lineHeader: some View {
+        HStack(spacing: 10) {
+            let assetName = TransportType.getAssetName(mode: group.mode, label: group.label)
+            if UIImage(named: assetName) != nil {
+                Image(assetName)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 36, height: 36)
+            } else {
+                ZStack {
+                    if group.mode == "RER" || group.mode == "Train" {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color(hex: group.color))
+                            .frame(width: 36, height: 36)
+                    } else {
+                        Circle()
+                            .fill(Color(hex: group.color))
+                            .frame(width: 30, height: 30)
+                    }
+                    Text(group.label)
+                        .font(.subheadline).bold()
+                        .foregroundColor(Color(hex: group.text_color ?? "FFFFFF"))
+                }
+            }
+            if let network = group.network {
+                Text(network).font(.caption).foregroundColor(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.horizontal)
+    }
+
+    @ViewBuilder
+    private func nightServiceView(resume: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "moon.zzz.fill")
+                .font(.body)
+                .foregroundColor(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Hors service")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                Text("Reprise du service à \(resume)")
+                    .font(.subheadline).bold()
+                    .foregroundColor(.primary)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var directionsView: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(group.directions.enumerated()), id: \.element.id) { index, direction in
+                directionRow(direction: direction, index: index)
+            }
+        }
+        .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func directionRow(direction: StationDetailSheet.DirectionGroup, index: Int) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(direction.direction)
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+                        .lineLimit(2)
+                    HStack(spacing: 0) {
+                        ForEach(Array(direction.times.enumerated()), id: \.offset) { tIndex, time in
+                            Text(verbatim: time + (tIndex < direction.times.count - 1 ? ", " : ""))
+                                .font(.subheadline).bold()
+                                .foregroundColor(.green)
+                        }
+                        Image(systemName: "wifi")
+                            .font(.caption2)
+                            .foregroundColor(.green)
+                            .padding(.leading, 4)
+                    }
+                }
+                Spacer()
+                let isActive = liveActivityManager.isActivityActive(
+                    line: group.label, direction: direction.direction)
+                Button(action: {
+                    if isActive {
+                        liveActivityManager.endLiveActivity()
+                    } else {
+                        onLiveActivity(
+                            group.label, direction.direction, direction.times,
+                            group.color, group.text_color ?? "FFFFFF"
+                        )
+                    }
+                }) {
+                    Image(systemName: "bolt.fill")
+                        .font(.body)
+                        .foregroundColor(isActive ? .green : .pink)
+                        .frame(width: 34, height: 34)
+                }
+                .buttonStyle(.glass)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            if index < group.directions.count - 1 {
+                Divider().padding(.leading, 14)
+            }
+        }
+    }
+}
+

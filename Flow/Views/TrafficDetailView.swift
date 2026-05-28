@@ -4,6 +4,7 @@ struct TrafficDetailView: View {
     let line: TransportLine
     
     @AppStorage("isTrafficSummaryEnabled") private var isTrafficSummaryEnabled = false
+    @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
         ScrollView {
@@ -66,7 +67,19 @@ struct TrafficDetailView: View {
             .padding()
         }
         .background {
-            AdaptiveMapBackground()
+            ZStack {
+                let lineColor: Color = {
+                    if let hex = line.colorHex {
+                        return Color(hex: hex)
+                    } else {
+                        return resolveLineColor(line.lineId, type: line.type)
+                    }
+                }()
+                ShaderAnimationView(isLoading: false, customColors: [lineColor])
+                (colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.15))
+                    .glassEffect(.ultraThin)
+            }
+            .ignoresSafeArea()
         }
         .navigationTitle("Info Trafic")
         .navigationBarTitleDisplayMode(.inline)

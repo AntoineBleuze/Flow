@@ -23,40 +23,77 @@ struct ImmersiveNavigationView: View {
     }
     
     var body: some View {
-        ZStack {
-            // MAIN CONTENT LAYER
-            VStack {
-                // Top Bar (ETA & Exit)
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Arrivée à \(formatTime(journey.arrival_date_time ?? ""))")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                        Text(formatDuration(journey.duration ?? 0))
-                            .font(.subheadline)
-                            .foregroundColor(.white.opacity(0.8))
-                    }
-                    .padding()
-                    .background(.regularMaterial)
-                    .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 16))
-                    
-                    Spacer()
-                    
-                    Button(action: {
-                        withAnimation {
-                            NavigationManager.shared.stopNavigation()
+        GeometryReader { geometry in
+            ZStack {
+                // MAIN CONTENT LAYER
+                VStack {
+                    // Top Bar (ETA & Exit)
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Arrivée à \(formatTime(journey.arrival_date_time ?? ""))")
+                                .font(.headline)
+                                .foregroundColor(.primary)
+                            Text(formatDuration(journey.duration ?? 0))
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
                         }
-                    }) {
-                        Text("Quitter")
-                            .fontWeight(.bold)
-                            .foregroundColor(.red)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 10)
+                        .padding()
+                        .background(.regularMaterial)
+                        .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 16))
+                        
+                        Spacer()
+                        
+                        HStack(spacing: 8) {
+                            if navigationManager.isSimulating {
+                                Button(action: {
+                                    withAnimation {
+                                        navigationManager.stopSimulation()
+                                    }
+                                }) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "stop.fill")
+                                        Text("Arrêter")
+                                    }
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.orange)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 10)
+                                }
+                                .buttonStyle(.glass)
+                            } else {
+                                Button(action: {
+                                    withAnimation {
+                                        navigationManager.startSimulation()
+                                    }
+                                }) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "play.fill")
+                                        Text("Simuler")
+                                    }
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.green)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 10)
+                                }
+                                .buttonStyle(.glass)
+                            }
+                            
+                            Button(action: {
+                                withAnimation {
+                                    NavigationManager.shared.stopNavigation()
+                                }
+                            }) {
+                                Text("Quitter")
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.red)
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 10)
+                            }
+                            .buttonStyle(.glass)
+                        }
                     }
-                    .buttonStyle(.glass)
-                }
-                .padding(.horizontal)
-                .padding(.top, 60)
+                    .padding(.horizontal)
+                    .padding(.top, max(16, geometry.safeAreaInsets.top))
                 
                 Spacer()
                 
@@ -92,7 +129,7 @@ struct ImmersiveNavigationView: View {
                 }
                 .padding(.bottom, 100)
             }
-            .edgesIgnoringSafeArea(.bottom)
+            .ignoresSafeArea(edges: .bottom)
             
             // SIDEBAR SCHEMATIC VIEW (Floating Left)
              if let step = currentSection, 
@@ -126,7 +163,7 @@ struct ImmersiveNavigationView: View {
                     Text("Êtes-vous monté dans le transport ?")
                         .font(.title3)
                         .fontWeight(.bold)
-                        .foregroundColor(.white)
+                        .foregroundColor(.primary)
                         .multilineTextAlignment(.center)
                     
                     HStack(spacing: 0) {
@@ -168,6 +205,7 @@ struct ImmersiveNavigationView: View {
                 .zIndex(100)
             }
         }
+    }
     }
     
     // MARK: - Step Card
@@ -381,11 +419,12 @@ struct VerticalSchematicLineView: View {
                     ZStack(alignment: .topLeading) {
                         ForEach(Array(stops.enumerated()), id: \.offset) { index, stop in
                             Text(stop.stop_point.name ?? "")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.white)
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.primary)
                                 .lineLimit(1)
                                 .fixedSize()
                                 .rotationEffect(.degrees(50), anchor: .leading) // Angled downward
+                                .shadow(color: Color(UIColor.systemBackground).opacity(0.8), radius: 2)
                                 .offset(
                                     x: 18, // Increased from 8 to prevent overlap with pill
                                     y: 10 + 17 + (nodeSize / 2) + CGFloat(index) * stopHeight - 5

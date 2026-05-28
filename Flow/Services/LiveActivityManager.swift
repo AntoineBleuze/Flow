@@ -1,3 +1,4 @@
+#if os(iOS)
 import ActivityKit
 import Combine
 import Foundation
@@ -251,8 +252,32 @@ class LiveActivityManager: ObservableObject {
         }
     }
 
-    // Helper to calculate time remaining
     private func timeRemaining(_ dateString: String) -> String {
         return DateFormat.timeRemaining(from: dateString)
     }
 }
+#else
+import Foundation
+import Combine
+
+class LiveActivityManager: ObservableObject {
+    static let shared = LiveActivityManager()
+
+    @Published var activeActivityID: String? = nil
+
+    private init() {}
+
+    func startLiveActivity(
+        stationName: String, lineName: String, direction: String, nextDepartures: [String],
+        stopIds: [String], lineColor: String, textColor: String
+    ) {}
+
+    func updateLiveActivity(nextDepartures: [String], lineName: String, direction: String) {}
+
+    func endLiveActivity() {}
+
+    func isActivityActive(line: String, direction: String) -> Bool {
+        return false
+    }
+}
+#endif

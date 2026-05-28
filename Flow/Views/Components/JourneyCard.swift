@@ -68,11 +68,7 @@ struct JourneyCard: View {
             }
         }
         .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(.regularMaterial)
-                .shadow(color: .black.opacity(0.05), radius: 5, y: 2)
-        )
+        .glassEffect(isSelected ? .standard.interactive() : .standard, in: RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
                 .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 2)

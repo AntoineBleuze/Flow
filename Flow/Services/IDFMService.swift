@@ -11,8 +11,8 @@ class IDFMService {
     private let baseURL = "https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia"
 
     func fetchDepartures(for stationId: String) -> AnyPublisher<[Departure], Error> {
-        // Mode serveur : passer par FlowServer si activé
-        if FlowServerService.shared.isEnabled {
+        // Mode serveur : passer par FlowServer si activé et connecté
+        if FlowServerService.shared.isEnabled && FlowServerService.shared.isConnected {
             print("📡 [Server Mode] Departures via FlowServer")
             return FlowServerService.shared.fetchDepartures(for: stationId)
         }
@@ -53,6 +53,11 @@ class IDFMService {
             .map { $0.data }
             .decode(type: DepartureResponse.self, decoder: JSONDecoder())
             .map { $0.departures }
+            .handleEvents(receiveOutput: { departures in
+                Task { @MainActor in
+                    MapDataService.shared.cacheColors(from: departures)
+                }
+            })
             .receive(on: DispatchQueue.main)
             .eraseToAnyPublisher()
     }

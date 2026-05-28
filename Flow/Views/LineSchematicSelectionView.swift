@@ -4,6 +4,7 @@ struct LineSchematicSelectionView: View {
     @StateObject var service = TrafficService() // We reuse the same service to get the lines
     @State private var selectedType: TransportType? = .metro
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.colorScheme) var colorScheme
     
     var body: some View {
         ScrollView {
@@ -49,7 +50,12 @@ struct LineSchematicSelectionView: View {
             .padding(.vertical)
         }
         .background {
-            AdaptiveMapBackground()
+            ZStack {
+                ShaderAnimationView(isLoading: true)
+                (colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.15))
+                    .glassEffect(.ultraThin)
+            }
+            .ignoresSafeArea()
         }
         .navigationTitle("Plans")
     }

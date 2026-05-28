@@ -1,6 +1,10 @@
 import SwiftUI
 import MapKit
 
+#if !canImport(UIKit)
+import AppKit
+#endif
+
 struct ItineraryMapView: View {
     let journey: Journey
     
@@ -16,19 +20,37 @@ struct ItineraryMapView: View {
     }
 }
 
-// MARK: - UIViewRepresentable
+// MARK: - UIViewRepresentable / NSViewRepresentable
 
 struct ItineraryMapViewRepresentable: UIViewRepresentable {
     let journey: Journey
     @Binding var region: MKCoordinateRegion
     
+    #if canImport(UIKit)
     func makeUIView(context: Context) -> MKMapView {
+        return makeMapView(context: context)
+    }
+    
+    func updateUIView(_ mapView: MKMapView, context: Context) {
+        updateMapView(mapView, context: context)
+    }
+    #else
+    func makeNSView(context: Context) -> MKMapView {
+        return makeMapView(context: context)
+    }
+    
+    func updateNSView(_ mapView: MKMapView, context: Context) {
+        updateMapView(mapView, context: context)
+    }
+    #endif
+    
+    private func makeMapView(context: Context) -> MKMapView {
         let mapView = MKMapView()
         mapView.delegate = context.coordinator
         return mapView
     }
     
-    func updateUIView(_ mapView: MKMapView, context: Context) {
+    private func updateMapView(_ mapView: MKMapView, context: Context) {
         // Clear existing overlays and annotations
         mapView.removeOverlays(mapView.overlays)
         mapView.removeAnnotations(mapView.annotations)
@@ -48,7 +70,6 @@ struct ItineraryMapViewRepresentable: UIViewRepresentable {
             let color = UIColor(hex: hexColor) ?? .blue
             
             // Convert GeoJSON coordinates to CLLocationCoordinate2D
-            // GeoJSON format is [longitude, latitude]
             var routeCoordinates: [CLLocationCoordinate2D] = []
             for coord in coordinates {
                 if coord.count >= 2 {
@@ -146,23 +167,43 @@ struct ItineraryMapViewRepresentable: UIViewRepresentable {
             switch markerAnnotation.markerType {
             case .start:
                 view?.markerTintColor = .white
+                #if canImport(UIKit)
                 view?.glyphImage = UIImage(systemName: "figure.walk")
+                #else
+                view?.glyphImage = NSImage(systemSymbolName: "figure.walk", accessibilityDescription: nil)
+                #endif
                 view?.glyphTintColor = .systemBlue
             case .end:
                 view?.markerTintColor = .systemRed
+                #if canImport(UIKit)
                 view?.glyphImage = UIImage(systemName: "mappin.and.ellipse")
+                #else
+                view?.glyphImage = NSImage(systemSymbolName: "mappin.and.ellipse", accessibilityDescription: nil)
+                #endif
                 view?.glyphTintColor = .white
             case .transfer:
                 view?.markerTintColor = .systemOrange
+                #if canImport(UIKit)
                 view?.glyphImage = UIImage(systemName: "arrow.triangle.2.circlepath")
+                #else
+                view?.glyphImage = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: nil)
+                #endif
                 view?.glyphTintColor = .white
             }
             
             // Soft shadow
+            #if canImport(UIKit)
             view?.layer.shadowColor = UIColor.black.cgColor
             view?.layer.shadowOpacity = 0.2
             view?.layer.shadowOffset = CGSize(width: 0, height: 2)
             view?.layer.shadowRadius = 4
+            #else
+            view?.wantsLayer = true
+            view?.layer?.shadowColor = NSColor.black.cgColor
+            view?.layer?.shadowOpacity = 0.2
+            view?.layer?.shadowOffset = CGSize(width: 0, height: -2)
+            view?.layer?.shadowRadius = 4
+            #endif
             
             return view
         }

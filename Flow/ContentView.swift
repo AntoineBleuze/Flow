@@ -4,45 +4,65 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var coordinator = NavigationCoordinator()
     @ObservedObject private var navigationManager = NavigationManager.shared
+    @ObservedObject private var mapData = MapDataService.shared
     @State private var searchText = ""
+    @State private var showLoading = true
 
     var body: some View {
-        TabView(selection: $coordinator.selectedTab) {
-            Tab("Explore", systemImage: "map", value: "Explore") {
-                AppMapView(showControls: true)
-                    .ignoresSafeArea(edges: .top)
-            }
+        ZStack {
+            TabView(selection: $coordinator.selectedTab) {
+                Tab("Explore", systemImage: "map", value: "Explore") {
+                    AppMapView(showControls: true)
+                        .ignoresSafeArea(edges: .top)
+                }
 
-            Tab("À Proximité", systemImage: "location.circle.fill", value: "Nearby") {
-                NavigationStack {
-                    NearbyStationsView()
+                Tab("À Proximité", systemImage: "location.circle.fill", value: "Nearby") {
+                    NavigationStack {
+                        NearbyStationsView()
+                    }
+                }
+
+                Tab("Trafic", systemImage: "tram.fill", value: "Trafic") {
+                    NavigationStack {
+                        TrafficViewContent()
+                            .navigationTitle("Trafic")
+                    }
+                }
+
+                Tab("Plans", systemImage: "map.fill", value: "Plans") {
+                    NavigationStack {
+                        LineSchematicSelectionView()
+                    }
+                }
+
+                Tab(value: "Search", role: .search) {
+                    SearchTabContent(searchText: $searchText)
+                }
+            }
+            .accentColor(.blue)
+            .environmentObject(coordinator)
+            // Auto-switch to Explore when navigation starts
+            .onChange(of: navigationManager.shouldSwitchToMap) { _, shouldSwitch in
+                if shouldSwitch {
+                    coordinator.selectedTab = "Explore"
+                    navigationManager.shouldSwitchToMap = false
                 }
             }
 
-            Tab("Trafic", systemImage: "tram.fill", value: "Trafic") {
-                NavigationStack {
-                    TrafficViewContent()
-                        .navigationTitle("Trafic")
-                }
-            }
-
-            Tab("Plans", systemImage: "map.fill", value: "Plans") {
-                NavigationStack {
-                    LineSchematicSelectionView()
-                }
-            }
-
-            Tab(value: "Search", role: .search) {
-                SearchTabContent(searchText: $searchText)
+            if showLoading {
+                LoadingScreenView(isPresented: $showLoading)
+                    .transition(.opacity)
+                    .zIndex(999)
             }
         }
-        .accentColor(.blue)
-        .environmentObject(coordinator)
-        // Auto-switch to Explore when navigation starts
-        .onChange(of: navigationManager.shouldSwitchToMap) { _, shouldSwitch in
-            if shouldSwitch {
-                coordinator.selectedTab = "Explore"
-                navigationManager.shouldSwitchToMap = false
+        .onAppear {
+            // Safety timeout: dismiss loading screen after 5 seconds under any circumstance
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+                if showLoading {
+                    withAnimation(.easeInOut(duration: 0.6)) {
+                        showLoading = false
+                    }
+                }
             }
         }
     }
@@ -54,6 +74,7 @@ struct TrafficViewContent: View {
     @StateObject var service = TrafficService()
     @AppStorage("isTrafficSummaryEnabled") private var isTrafficSummaryEnabled = false
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.colorScheme) var colorScheme
 
     enum StatusFilter: String, CaseIterable, Identifiable {
         case all = "Tout"
@@ -110,7 +131,7 @@ struct TrafficViewContent: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
-                    .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 15))
+                    .glassEffect(Glass.standard.interactive(), in: RoundedRectangle(cornerRadius: 15))
                     .padding(.horizontal)
                 }
 
@@ -143,7 +164,7 @@ struct TrafficViewContent: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
-                    .glassEffect(.standard, in: Capsule())
+                    .glassEffect(Glass.standard.interactive(), in: Capsule())
                 }
                 .padding(.horizontal)
 
@@ -166,32 +187,7 @@ struct TrafficViewContent: View {
                                 ], spacing: isIPad ? 20 : 16
                             ) {
                                 ForEach(filteredLines) { line in
-                                    NavigationLink(destination: TrafficDetailView(line: line)) {
-                                        ZStack {
-                                            // Main Icon
-                                            LineIcon(line: line, size: isIPad ? 70 : 55)
-                                                .frame(width: isIPad ? 100 : 80, height: isIPad ? 100 : 80)
-
-                                            // Status Badge Overlay - positionné en bas à droite
-                                            if line.status != .normal {
-                                                Image(systemName: line.status.icon)
-                                                    .resizable()
-                                                    .scaledToFit()
-                                                    .frame(width: 16, height: 16)
-                                                    .padding(5)
-                                                    .foregroundColor(.white)
-                                                    .background(line.status.color)
-                                                    .clipShape(Circle())
-                                                    .overlay(
-                                                        Circle()
-                                                            .stroke(
-                                                                .regularMaterial, lineWidth: 2)
-                                                    )
-                                                    .offset(x: 28, y: 28)
-                                            }
-                                        }
-                                    }
-                                    .buttonStyle(.glass)
+                                    TrafficLineCell(line: line, isIPad: isIPad)
                                 }
                             }
                             .padding(.horizontal)
@@ -211,7 +207,12 @@ struct TrafficViewContent: View {
             }
         }
         .background {
-            AdaptiveMapBackground()
+            ZStack {
+                ShaderAnimationView(isLoading: true)
+                (colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.15))
+                    .glassEffect(.ultraThin)
+            }
+            .ignoresSafeArea()
         }
     }
 
@@ -226,9 +227,46 @@ struct TrafficViewContent: View {
     }
 }
 
+// Sous-vue extraite pour éviter "unable to type-check this expression in reasonable time"
+private struct TrafficLineCell: View {
+    let line: TransportLine
+    let isIPad: Bool
+
+    var body: some View {
+        NavigationLink(destination: TrafficDetailView(line: line)) {
+            LineIcon(line: line, size: isIPad ? 70 : 55)
+                .frame(width: isIPad ? 100 : 80, height: isIPad ? 100 : 80)
+                .overlay(alignment: .bottomTrailing) {
+                    statusBadge
+                }
+        }
+        .buttonStyle(.glass)
+    }
+
+    @ViewBuilder
+    private var statusBadge: some View {
+        if line.status != .normal {
+            Image(systemName: line.status.icon)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 16, height: 16)
+                .padding(5)
+                .foregroundColor(.white)
+                .background(line.status.color)
+                .clipShape(Circle())
+                .overlay(
+                    Circle()
+                        .stroke(.regularMaterial, lineWidth: 2)
+                )
+                .offset(x: 8, y: 8)
+        }
+    }
+}
+
 struct FavoritesViewContent: View {
     @ObservedObject var favoritesService = FavoritesService.shared
     @StateObject var mapData = MapDataService.shared
+    @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
         ScrollView {
@@ -273,7 +311,12 @@ struct FavoritesViewContent: View {
             }
         }
         .background {
-            AdaptiveMapBackground()
+            ZStack {
+                ShaderAnimationView(isLoading: true)
+                (colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.15))
+                    .glassEffect(.ultraThin)
+            }
+            .ignoresSafeArea()
         }
         .navigationTitle("Favoris")
         .navigationBarTitleDisplayMode(.large)

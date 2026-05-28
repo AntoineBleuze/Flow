@@ -1,3 +1,4 @@
+#if os(iOS)
 import ActivityKit
 import Foundation
 
@@ -14,3 +15,4 @@ struct StationActivityAttributes: ActivityAttributes {
     // Fixed non-changing properties about your activity go here!
     var stationName: String
 }
+#endif

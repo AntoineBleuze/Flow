@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-enum TransportType: String, CaseIterable, Identifiable {
+enum TransportType: String, CaseIterable, Identifiable, Codable {
     case metro = "Métro"
     case tram = "Tramway"
     case rer = "RER"
@@ -125,6 +125,10 @@ struct TransportLine: Identifiable {
     var navitiaId: String? = nil // ex: "line:IDFM:C01374"
     var status: LineStatus
     var trafficInfos: [TrafficInfo] = []
+    
+    // Custom colors (usually for bus lines)
+    var colorHex: String? = nil
+    var textColorHex: String? = nil
 
     // Computed properties for backward compatibility
     var message: String? { trafficInfos.first?.message }
@@ -277,12 +281,16 @@ struct PtObject: Codable {
         let code: String?
         let name: String?
         let commercialMode: CommercialMode?
+        let color: String?
+        let textColor: String?
 
         enum CodingKeys: String, CodingKey {
             case id
             case code
             case name
             case commercialMode = "commercial_mode"
+            case color
+            case textColor = "text_color"
         }
     }
 

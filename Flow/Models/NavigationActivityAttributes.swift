@@ -1,3 +1,4 @@
+#if os(iOS)
 import ActivityKit
 import Foundation
 
@@ -17,3 +18,4 @@ struct NavigationActivityAttributes: ActivityAttributes {
     // Fixed properties
     var destinationName: String
 }
+#endif

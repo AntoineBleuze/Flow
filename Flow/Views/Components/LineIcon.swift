@@ -8,19 +8,26 @@ struct LineIcon: View {
     let type: TransportType
     let lineId: String
     let size: CGFloat
+    let customColor: Color?
 
     // Init depuis un objet TransportLine complet
     init(line: TransportLine, size: CGFloat = 30) {
         self.type = line.type
         self.lineId = line.lineId
         self.size = size
+        if let hex = line.colorHex {
+            self.customColor = Color(hex: hex)
+        } else {
+            self.customColor = MapDataService.shared.lineColorCache[line.lineId]
+        }
     }
 
     // Init manuel
-    init(type: TransportType, lineId: String, size: CGFloat = 30) {
+    init(type: TransportType, lineId: String, size: CGFloat = 30, customColor: Color? = nil) {
         self.type = type
         self.lineId = lineId
         self.size = size
+        self.customColor = customColor ?? MapDataService.shared.lineColorCache[lineId]
     }
 
     var body: some View {
@@ -41,7 +48,7 @@ struct LineIcon: View {
                 .font(.system(size: size * 0.5, weight: .bold))
                 .padding(.horizontal, size * 0.25)
                 .padding(.vertical, size * 0.1)
-                .background(type.accentColor)
+                .background(customColor ?? type.accentColor)
                 .foregroundColor(.white)
                 .clipShape(Capsule())
                 // On s'assure qu'il a au moins la hauteur demandée si possible,

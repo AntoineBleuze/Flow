@@ -6,11 +6,17 @@ struct LineSchematicPlanView: View {
     @State private var lineData: LocalLineData?
     @State private var isLoading = true
     @State private var errorMessage: String? = nil
+    @Environment(\.colorScheme) var colorScheme
     
     var body: some View {
         ZStack {
-            AdaptiveMapBackground()
-                .ignoresSafeArea()
+            ZStack {
+                let lineColor = resolveLineColor(line.lineId, type: line.type)
+                ShaderAnimationView(isLoading: false, customColors: [lineColor])
+                (colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.15))
+                    .glassEffect(.ultraThin)
+            }
+            .ignoresSafeArea()
             
             if isLoading {
                 VStack {
@@ -23,50 +29,108 @@ struct LineSchematicPlanView: View {
                 }
             } else if let data = lineData {
                 let sections = data.schematicSections
-                let lineColor = Color(hex: data.couleur)
+                let lineColor = resolveLineColor(line.lineId, type: line.type)
                 
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 0) {
-                        // === Lead-in stations ===
-                        if !sections.leadIn.isEmpty {
-                            SchematicTrackSegment(
-                                stations: sections.leadIn,
-                                lineColor: lineColor,
-                                capTop: true,
-                                capBottom: false
-                            )
+                let maxBranches = max(sections.topBranches.count, sections.branches.count)
+                let hasBranches = maxBranches > 0
+                let branchWidth: CGFloat = 160
+                let contentWidth = hasBranches ? CGFloat(maxBranches) * branchWidth + 40 : 350
+                
+                Group {
+                    if hasBranches {
+                        ScrollView([.vertical, .horizontal], showsIndicators: true) {
+                            VStack(alignment: .leading, spacing: 0) {
+                                // === Top Branches (Merge) ===
+                                if !sections.topBranches.isEmpty {
+                                    SchematicMergeView(
+                                        branches: sections.topBranches,
+                                        lineColor: lineColor,
+                                        branchWidth: branchWidth,
+                                        contentWidth: contentWidth
+                                    )
+                                }
+                                
+                                // === Lead-in stations ===
+                                if !sections.leadIn.isEmpty {
+                                    SchematicTrackSegment(
+                                        stations: sections.leadIn,
+                                        lineColor: lineColor,
+                                        capTop: sections.topBranches.isEmpty,
+                                        capBottom: false
+                                    )
+                                }
+                                
+                                // === Trunk stations ===
+                                if !sections.trunk.isEmpty {
+                                    SchematicTrackSegment(
+                                        stations: sections.trunk,
+                                        lineColor: lineColor,
+                                        capTop: sections.leadIn.isEmpty && sections.topBranches.isEmpty,
+                                        capBottom: sections.branches.isEmpty && sections.leadOut.isEmpty
+                                    )
+                                }
+                                
+                                // === Fork & Branches ===
+                                if !sections.branches.isEmpty {
+                                    SchematicForkView(
+                                        branches: sections.branches,
+                                        lineColor: lineColor,
+                                        branchWidth: branchWidth,
+                                        contentWidth: contentWidth
+                                    )
+                                }
+                                
+                                // === Lead-out ===
+                                if !sections.leadOut.isEmpty {
+                                    SchematicTrackSegment(
+                                        stations: sections.leadOut,
+                                        lineColor: lineColor,
+                                        capTop: false,
+                                        capBottom: true
+                                    )
+                                }
+                            }
+                            .frame(width: contentWidth, alignment: .leading)
+                            .padding(.top, 110)
+                            .padding(.bottom, 160)
                         }
-                        
-                        // === Trunk stations ===
-                        if !sections.trunk.isEmpty {
-                            SchematicTrackSegment(
-                                stations: sections.trunk,
-                                lineColor: lineColor,
-                                capTop: sections.leadIn.isEmpty,
-                                capBottom: sections.branches.isEmpty && sections.leadOut.isEmpty
-                            )
-                        }
-                        
-                        // === Fork & Branches ===
-                        if !sections.branches.isEmpty {
-                            SchematicForkView(
-                                branches: sections.branches,
-                                lineColor: lineColor
-                            )
-                        }
-                        
-                        // === Lead-out ===
-                        if !sections.leadOut.isEmpty {
-                            SchematicTrackSegment(
-                                stations: sections.leadOut,
-                                lineColor: lineColor,
-                                capTop: false,
-                                capBottom: true
-                            )
+                    } else {
+                        ScrollView(.vertical, showsIndicators: false) {
+                            VStack(spacing: 0) {
+                                // === Lead-in stations ===
+                                if !sections.leadIn.isEmpty {
+                                    SchematicTrackSegment(
+                                        stations: sections.leadIn,
+                                        lineColor: lineColor,
+                                        capTop: true,
+                                        capBottom: false
+                                    )
+                                }
+                                
+                                // === Trunk stations ===
+                                if !sections.trunk.isEmpty {
+                                    SchematicTrackSegment(
+                                        stations: sections.trunk,
+                                        lineColor: lineColor,
+                                        capTop: sections.leadIn.isEmpty,
+                                        capBottom: sections.leadOut.isEmpty
+                                    )
+                                }
+                                
+                                // === Lead-out ===
+                                if !sections.leadOut.isEmpty {
+                                    SchematicTrackSegment(
+                                        stations: sections.leadOut,
+                                        lineColor: lineColor,
+                                        capTop: false,
+                                        capBottom: true
+                                    )
+                                }
+                            }
+                            .padding(.top, 110)
+                            .padding(.bottom, 160)
                         }
                     }
-                    .padding(.top, 20)
-                    .padding(.bottom, 60)
                 }
             } else {
                 VStack(spacing: 16) {
@@ -211,86 +275,192 @@ struct SchematicDot: View {
     }
 }
 
+// MARK: - Merge View (SNCF-style diagonal merge at the top)
+
+struct SchematicMergeView: View {
+    let branches: [LocalLineData.SchematicBranch]
+    let lineColor: Color
+    let branchWidth: CGFloat
+    let contentWidth: CGFloat
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // === Branch columns side by side ===
+            HStack(alignment: .bottom, spacing: 0) {
+                ForEach(Array(branches.enumerated()), id: \.element.name) { index, branch in
+                    VStack(alignment: .leading, spacing: 0) {
+                        // Branch stations
+                        ForEach(Array(branch.stations.enumerated()), id: \.element.nom) { sIndex, station in
+                            let isFirst = sIndex == 0
+                            let isLast = sIndex == branch.stations.count - 1
+                            
+                            HStack(alignment: .top, spacing: 6) {
+                                // Track & Dot
+                                ZStack(alignment: .top) {
+                                    // Track line (continuous)
+                                    VStack(spacing: 0) {
+                                        if isFirst {
+                                            Color.clear.frame(height: 12)
+                                        } else {
+                                            Rectangle()
+                                                .fill(lineColor)
+                                                .frame(height: 12)
+                                        }
+                                        Rectangle()
+                                            .fill(lineColor)
+                                            .frame(height: 52)
+                                    }
+                                    .frame(width: trackWidth)
+                                    
+                                    SchematicDot(lineColor: lineColor, isTerminus: isFirst)
+                                        .frame(height: 24)
+                                }
+                                .frame(width: 24, height: 64)
+                                
+                                // Angled Text & Transfers
+                                ZStack(alignment: .topLeading) {
+                                    Color.clear.frame(width: 2, height: 24)
+                                    
+                                    HStack(spacing: 6) {
+                                        Text(station.nom)
+                                            .font(.system(size: 12, weight: isFirst ? .bold : .medium))
+                                            .foregroundColor(.primary)
+                                            .fixedSize()
+                                        
+                                        ForEach(station.correspondances.prefix(4), id: \.self) { corr in
+                                            TransferIcon(label: corr)
+                                        }
+                                    }
+                                    .rotationEffect(.degrees(-35), anchor: .leading)
+                                    .offset(x: 0, y: 6)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .frame(width: branchWidth, alignment: .leading)
+                }
+            }
+            .frame(width: contentWidth, alignment: .leading)
+            .padding(.leading, 16)
+            
+            // === Merge connector (beautiful Bézier curves) ===
+            GeometryReader { geo in
+                Canvas { context, size in
+                    let centerX: CGFloat = 25
+                    
+                    for i in 0..<branches.count {
+                        let sourceX = CGFloat(i) * branchWidth + 12
+                        
+                        var path = Path()
+                        path.move(to: CGPoint(x: sourceX, y: 0))
+                        path.addCurve(
+                            to: CGPoint(x: centerX, y: size.height),
+                            control1: CGPoint(x: sourceX, y: size.height * 0.5),
+                            control2: CGPoint(x: centerX, y: size.height * 0.5)
+                        )
+                        
+                        context.stroke(path, with: .color(lineColor), style: StrokeStyle(lineWidth: trackWidth, lineCap: .round, lineJoin: .round))
+                    }
+                }
+            }
+            .frame(width: contentWidth, height: 60, alignment: .leading)
+            .padding(.leading, 16)
+        }
+    }
+}
+
 // MARK: - Fork View (SNCF-style diagonal split)
 
 struct SchematicForkView: View {
     let branches: [LocalLineData.SchematicBranch]
     let lineColor: Color
+    let branchWidth: CGFloat
+    let contentWidth: CGFloat
     
     var body: some View {
         VStack(spacing: 0) {
-            // === Fork connector (diagonal lines going outward) ===
+            // === Fork connector (beautiful Bézier curves) ===
             GeometryReader { geo in
                 Canvas { context, size in
-                    // Trunk track center = 16 (leading pad) + 25 (half of 50pt frame) = 41
-                    let centerX: CGFloat = 16 + 25
-                    let branchCount = CGFloat(branches.count)
-                    let totalWidth = size.width - 16 // 8px padding on each side of HStack
-                    let branchSpacing = totalWidth / branchCount
+                    let centerX: CGFloat = 25
                     
                     for i in 0..<branches.count {
-                        // Target = center of each branch column
-                        let targetX = 8 + branchSpacing * (CGFloat(i) + 0.5)
+                        let targetX = CGFloat(i) * branchWidth + 12
                         
                         var path = Path()
                         path.move(to: CGPoint(x: centerX, y: 0))
-                        path.addLine(to: CGPoint(x: targetX, y: size.height))
+                        path.addCurve(
+                            to: CGPoint(x: targetX, y: size.height),
+                            control1: CGPoint(x: centerX, y: size.height * 0.5),
+                            control2: CGPoint(x: targetX, y: size.height * 0.5)
+                        )
                         
-                        context.stroke(path, with: .color(lineColor), style: StrokeStyle(lineWidth: trackWidth, lineCap: .round))
+                        context.stroke(path, with: .color(lineColor), style: StrokeStyle(lineWidth: trackWidth, lineCap: .round, lineJoin: .round))
                     }
                 }
             }
-            .frame(height: 50)
+            .frame(width: contentWidth, height: 60, alignment: .leading)
+            .padding(.leading, 16)
             
             // === Branch columns side by side ===
             HStack(alignment: .top, spacing: 0) {
                 ForEach(Array(branches.enumerated()), id: \.element.name) { index, branch in
-                    VStack(spacing: 0) {
-                        // Branch label
-                        Text(branch.name.replacingOccurrences(of: "_", with: " "))
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(lineColor)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.6)
-                            .padding(.bottom, 6)
-                        
+                    VStack(alignment: .leading, spacing: 0) {
                         // Branch stations
                         ForEach(Array(branch.stations.enumerated()), id: \.element.nom) { sIndex, station in
                             let isLast = sIndex == branch.stations.count - 1
                             
-                            VStack(spacing: 0) {
-                                HStack(spacing: 3) {
-                                    // Dot
-                                    SchematicDot(lineColor: lineColor, isTerminus: isLast)
-                                    
-                                    // Name
-                                    Text(station.nom)
-                                        .font(.system(size: 11, weight: isLast ? .bold : .medium))
-                                        .foregroundColor(.primary)
-                                        .lineLimit(1)
-                                        .minimumScaleFactor(0.5)
-                                    
-                                    // Transfer icons for branch stations
-                                    ForEach(station.correspondances.prefix(4), id: \.self) { corr in
-                                        TransferIcon(label: corr)
+                            HStack(alignment: .top, spacing: 6) {
+                                // Track & Dot
+                                ZStack(alignment: .top) {
+                                    // Track line (continuous)
+                                    VStack(spacing: 0) {
+                                        Rectangle()
+                                            .fill(lineColor)
+                                            .frame(height: 12)
+                                        if isLast {
+                                            Color.clear.frame(height: 52)
+                                        } else {
+                                            Rectangle()
+                                                .fill(lineColor)
+                                                .frame(height: 52)
+                                        }
                                     }
+                                    .frame(width: trackWidth)
+                                    
+                                    SchematicDot(lineColor: lineColor, isTerminus: isLast)
+                                        .frame(height: 24)
                                 }
+                                .frame(width: 24, height: 64)
                                 
-                                // Track below
-                                if !isLast {
-                                    Rectangle()
-                                        .fill(lineColor)
-                                        .frame(width: trackWidth * 0.75, height: 20)
+                                // Angled Text & Transfers
+                                ZStack(alignment: .topLeading) {
+                                    Color.clear.frame(width: 2, height: 24)
+                                    
+                                    HStack(spacing: 6) {
+                                        Text(station.nom)
+                                            .font(.system(size: 12, weight: isLast ? .bold : .medium))
+                                            .foregroundColor(.primary)
+                                            .fixedSize()
+                                        
+                                        ForEach(station.correspondances.prefix(4), id: \.self) { corr in
+                                            TransferIcon(label: corr)
+                                        }
+                                    }
+                                    .rotationEffect(.degrees(-35), anchor: .leading)
+                                    .offset(x: 0, y: 6)
                                 }
                             }
-                            .frame(height: isLast ? 24 : 44)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 2)
+                    .frame(width: branchWidth, alignment: .leading)
                 }
             }
-            .padding(.horizontal, 8)
+            .frame(width: contentWidth, alignment: .leading)
+            .padding(.leading, 16)
+            .padding(.bottom, 40) // Add some extra space for the last rotated text
         }
     }
 }

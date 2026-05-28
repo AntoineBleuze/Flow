@@ -80,6 +80,9 @@ struct LocalLineData: Codable {
     var allStations: [LocalStation] {
         let sections = schematicSections
         var result = sections.leadIn
+        for branch in sections.topBranches {
+            result.append(contentsOf: branch.stations)
+        }
         result.append(contentsOf: sections.trunk)
         for branch in sections.branches {
             result.append(contentsOf: branch.stations)
@@ -90,6 +93,7 @@ struct LocalLineData: Codable {
     
     /// Structured data for the schematic view
     struct SchematicSections {
+        var topBranches: [SchematicBranch] = [] // Branches that merge into the trunk (e.g. CDG/Mitry on RER B)
         var leadIn: [LocalStation] = []   // Stations before the trunk (e.g. nord/ouest)
         var trunk: [LocalStation] = []     // Main trunk (tronc_commun / tronc_central)
         var branches: [SchematicBranch] = [] // Branches after the trunk
@@ -111,13 +115,15 @@ struct LocalLineData: Codable {
         
         // Complex lines (RER): directional sections + tronc_central
         if structure == "complex" {
-            // Lead-in: nord_ouest / ouest / nord
-            if let no = nord_ouest { sections.leadIn.append(contentsOf: no.allStations) }
-            if let o = ouest { sections.leadIn.append(contentsOf: o.allStations) }
-            if let n = nord { sections.leadIn.append(contentsOf: n.allStations) }
-            
             // Trunk
             if let tc = tronc_central { sections.trunk = tc }
+            
+            // Lead-in: nord_ouest / ouest / nord (if not using top branches)
+            if branches_nord == nil && branches_ouest == nil {
+                if let no = nord_ouest { sections.leadIn.append(contentsOf: no.allStations) }
+                if let o = ouest { sections.leadIn.append(contentsOf: o.allStations) }
+                if let n = nord { sections.leadIn.append(contentsOf: n.allStations) }
+            }
             
             // Branches at the end: sud / est can be branches
             if let s = sud {
@@ -136,15 +142,13 @@ struct LocalLineData: Codable {
             
             // Handle branches_ouest / branches_est / branches_nord / branches_sud
             if let bOuest = branches_ouest {
-                sections.leadIn = [] // Use branches instead
-                sections.branches.insert(contentsOf: bOuest.map { SchematicBranch(name: $0.id, stations: $0.stations) }, at: 0)
+                sections.topBranches = bOuest.map { SchematicBranch(name: $0.id, stations: $0.stations) }
+            }
+            if let bNord = branches_nord {
+                sections.topBranches = bNord.map { SchematicBranch(name: $0.id, stations: $0.stations) }
             }
             if let bEst = branches_est {
                 sections.branches.append(contentsOf: bEst.map { SchematicBranch(name: $0.id, stations: $0.stations) })
-            }
-            if let bNord = branches_nord {
-                sections.leadIn = []
-                sections.branches.insert(contentsOf: bNord.map { SchematicBranch(name: $0.id, stations: $0.stations) }, at: 0)
             }
             if let bSud = branches_sud {
                 sections.branches.append(contentsOf: bSud.map { SchematicBranch(name: $0.id, stations: $0.stations) })
@@ -212,6 +216,7 @@ class LocalDataService {
         // Fallback: try source directories (for simulator / preview)
         let projectPaths = [
             "/Users/antoinebleuze/Documents/projet xcode/Flow/Flow/linesstops.json",
+            "/Users/antoinebleuze/Documents/projet xcode/Flow/Flow/Data/linesstops.json",
             "/Users/antoinebleuze/Documents/projet xcode/Flow/linesstops.json"
         ]
         

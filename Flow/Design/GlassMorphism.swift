@@ -43,6 +43,8 @@ struct LiquidGlassStyle: ViewModifier {
 struct Glass {
     enum Style {
         case regular
+        case thin
+        case ultraThin
     }
     
     let style: Style
@@ -50,6 +52,14 @@ struct Glass {
     
     static var standard: Glass {
         Glass(style: .regular)
+    }
+    
+    static var thin: Glass {
+        Glass(style: .thin)
+    }
+    
+    static var ultraThin: Glass {
+        Glass(style: .ultraThin)
     }
     
     func interactive() -> Glass {
@@ -84,7 +94,16 @@ struct GlassEffectModifier<S: Shape>: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(
-                Material.regular // Adaptive material (blur)
+                Group {
+                    switch config.style {
+                    case .regular:
+                        Color.clear.background(.regularMaterial)
+                    case .thin:
+                        Color.clear.background(.thinMaterial)
+                    case .ultraThin:
+                        Color.clear.background(.ultraThinMaterial)
+                    }
+                }
             )
             .clipShape(shape)
             .shadow(

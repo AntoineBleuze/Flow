@@ -11,6 +11,7 @@ struct StationDetailScreen: View {
     @State private var cancellable: AnyCancellable?
     @State private var selectedMode: String = "Tout"
     @State private var showItinerary = false
+    @Environment(\.colorScheme) var colorScheme
     @ObservedObject var locationManager = LocationManager.shared
 
     // Structures pour le regroupement
@@ -22,6 +23,7 @@ struct StationDetailScreen: View {
         let network: String?
         let mode: String?
         var directions: [DirectionGroup]
+        var resumeTime: String? = nil  // nil = service actif, sinon "HH:mm" du premier train
     }
 
     struct DirectionGroup: Identifiable {
@@ -54,7 +56,12 @@ struct StationDetailScreen: View {
             }
         }
         .background {
-            AdaptiveMapBackground()
+            ZStack {
+                ShaderAnimationView(isLoading: isLoading, station: station)
+                (colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.15))
+                    .glassEffect(.ultraThin)
+            }
+            .ignoresSafeArea()
         }
         .navigationTitle(station.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -139,7 +146,7 @@ struct StationDetailScreen: View {
                     }
                 }
                 .padding(.top)
-                .padding(.bottom, 50)
+                .padding(.bottom, 160)
             }
         }
     }
@@ -150,14 +157,30 @@ struct StationDetailScreen: View {
 
         var body: some View {
             VStack(alignment: .leading, spacing: 10) {
-                // En-tête de ligne (Icone + Nom optionnel)
+                // En-tête de ligne (Icone + Réseau)
                 HStack {
-                    // Icone Ligne
-                    LineIcon(
-                        type: StationDetailScreen.determineType(mode: group.mode),
-                        lineId: group.label,
-                        size: 40
-                    )
+                    let assetName = TransportType.getAssetName(mode: group.mode, label: group.label)
+                    if UIImage(named: assetName) != nil {
+                        Image(assetName)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 40, height: 40)
+                    } else {
+                        ZStack {
+                            if group.mode == "RER" || group.mode == "Train" {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color(hex: group.color))
+                                    .frame(width: 40, height: 40)
+                            } else {
+                                Circle()
+                                    .fill(Color(hex: group.color))
+                                    .frame(width: 36, height: 36)
+                            }
+                            Text(group.label)
+                                .font(.system(size: 14, weight: .black))
+                                .foregroundColor(Color(hex: group.text_color ?? "FFFFFF"))
+                        }
+                    }
 
                     if let network = group.network {
                         Text(network)
@@ -169,69 +192,88 @@ struct StationDetailScreen: View {
                 }
                 .padding(.horizontal)
 
-                // Carte des directions
-                VStack(spacing: 0) {
-                    ForEach(Array(group.directions.enumerated()), id: \.element.id) {
-                        index, direction in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(direction.direction)
-                                    .font(.body)
-                                    .foregroundColor(.primary)
-                                    .lineLimit(2)
-
-                                // Liste des temps (ex: "1, 4 min")
-                                HStack(spacing: 0) {
-                                    ForEach(
-                                        Array(direction.times.enumerated()),
-                                        id: \.offset
-                                    ) { tIndex, time in
-                                        Text(
-                                            time
-                                                + (tIndex < direction.times.count - 1
-                                                    ? ", " : "")
-                                        )
-                                        .font(.body)
-                                        .bold()
-                                        .foregroundColor(.green)
-                                    }
-
-                                    Image(systemName: "wifi")  // Symbole temps réel
-                                        .font(.caption)
-                                        .foregroundColor(.green)
-                                        .padding(.leading, 4)
-                                }
-                            }
-
-                            Spacer()
-
-                            // Bouton Live Activity pour cette direction
-                            Button(action: {
-                                onLiveActivityStart(
-                                    group.label,
-                                    direction.direction,
-                                    direction.times,
-                                    group.color,
-                                    group.text_color ?? "FFFFFF"
-                                )
-                            }) {
-                                Image(systemName: "waveform.path.ecg")
-                                    .font(.title3)
-                                    .foregroundColor(.green)
-                                    .padding(8)
-                            }
-                            .buttonStyle(.glass)
+                // Contenu : hors service ou directions actives
+                if let resume = group.resumeTime {
+                    // Ligne hors service la nuit
+                    HStack(spacing: 10) {
+                        Image(systemName: "moon.zzz.fill")
+                            .font(.body)
+                            .foregroundColor(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Hors service")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            Text("Reprise du service à \(resume)")
+                                .font(.subheadline)
+                                .bold()
+                                .foregroundColor(.primary)
                         }
-                        .padding()
+                        Spacer()
+                    }
+                    .padding()
+                    .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 12))
+                } else {
+                    // Carte des directions actives
+                    VStack(spacing: 0) {
+                        ForEach(Array(group.directions.enumerated()), id: \.element.id) {
+                            index, direction in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(direction.direction)
+                                        .font(.body)
+                                        .foregroundColor(.primary)
+                                        .lineLimit(2)
 
-                        if index < group.directions.count - 1 {
-                            Divider()
-                                .padding(.leading)
+                                    HStack(spacing: 0) {
+                                        ForEach(
+                                            Array(direction.times.enumerated()),
+                                            id: \.offset
+                                        ) { tIndex, time in
+                                            Text(
+                                                time
+                                                    + (tIndex < direction.times.count - 1
+                                                        ? ", " : "")
+                                            )
+                                            .font(.body)
+                                            .bold()
+                                            .foregroundColor(.green)
+                                        }
+
+                                        Image(systemName: "wifi")
+                                            .font(.caption)
+                                            .foregroundColor(.green)
+                                            .padding(.leading, 4)
+                                    }
+                                }
+
+                                Spacer()
+
+                                Button(action: {
+                                    onLiveActivityStart(
+                                        group.label,
+                                        direction.direction,
+                                        direction.times,
+                                        group.color,
+                                        group.text_color ?? "FFFFFF"
+                                    )
+                                }) {
+                                    Image(systemName: "waveform.path.ecg")
+                                        .font(.title3)
+                                        .foregroundColor(.green)
+                                        .padding(8)
+                                }
+                                .buttonStyle(.glass)
+                            }
+                            .padding()
+
+                            if index < group.directions.count - 1 {
+                                Divider()
+                                    .padding(.leading)
+                            }
                         }
                     }
+                    .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 12))
                 }
-                // Utilisation de l'effet Glass pour la cohérence
-                .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 12))
             }
             .padding(.horizontal)
         }
@@ -251,16 +293,17 @@ struct StationDetailScreen: View {
 
     private func groupDepartures(_ departures: [Departure]) -> [LineGroup] {
         var groups: [String: LineGroup] = [:]
+        // Garde la date du prochain départ par ligne (même très lointain) pour le message "Reprise"
+        var firstFutureDates: [String: Date] = [:]
 
         for dep in departures {
             let info = dep.displayInformations
-            // Unwrap label safely
             guard let lineKey = info.label, !lineKey.isEmpty else { continue }
+            guard let date = DateFormat.navitia.date(from: dep.stopDateTime.departureDateTime) else { continue }
 
-            // Calcul du temps
-            let timeStr = timeRemaining(dep.stopDateTime.departureDateTime)
-            if timeStr.isEmpty { continue }
+            let minutesAway = Int(date.timeIntervalSinceNow / 60)
 
+            // Créer le groupe s'il n'existe pas encore
             if groups[lineKey] == nil {
                 groups[lineKey] = LineGroup(
                     id: lineKey,
@@ -273,16 +316,26 @@ struct StationDetailScreen: View {
                 )
             }
 
-            // Gestion des directions
-            let dirName = info.direction ?? "Inconnue"
+            // Mémoriser le prochain départ futur de cette ligne (même très loin)
+            if date > Date() {
+                if let existing = firstFutureDates[lineKey] {
+                    if date < existing { firstFutureDates[lineKey] = date }
+                } else {
+                    firstFutureDates[lineKey] = date
+                }
+            }
 
+            // N'ajouter au calendrier visible que les départs proches (< 120 min)
+            guard minutesAway >= 0 && minutesAway < 120 else { continue }
+            let timeStr = "\(minutesAway) min"
+
+            let dirName = info.direction ?? "Inconnue"
             if var group = groups[lineKey],
-                let dirIndex = group.directions.firstIndex(where: { $0.direction == dirName })
+               let dirIndex = group.directions.firstIndex(where: { $0.direction == dirName })
             {
-                // Limite à 2 horaires pour ne pas surcharger
                 if group.directions[dirIndex].times.count < 2 {
                     group.directions[dirIndex].times.append(timeStr)
-                    groups[lineKey] = group  // Mise à jour de la struct (value type)
+                    groups[lineKey] = group
                 }
             } else {
                 groups[lineKey]?.directions.append(
@@ -290,7 +343,15 @@ struct StationDetailScreen: View {
             }
         }
 
-        // Tri: Par mode (Métro → RER → Transilien → Tram → autre) puis numérique/alpha
+        // Marquer les lignes hors service (aucun départ < 120 min) avec l'heure de reprise
+        for (lineKey, firstDate) in firstFutureDates {
+            if var group = groups[lineKey], group.directions.isEmpty {
+                group.resumeTime = DateFormat.shortTime.string(from: firstDate)
+                groups[lineKey] = group
+            }
+        }
+
+        // Tri: Métro → RER → Transilien → Tram → Bus, puis numérique/alpha
         return groups.values.sorted { a, b in
             let priorityA = modePriority(a.mode)
             let priorityB = modePriority(b.mode)
@@ -307,23 +368,56 @@ struct StationDetailScreen: View {
         isLoading = true
         errorMessage = nil
 
-        // Récupérer tous les IDs uniques des quais de la station pour avoir toutes les lignes
-        let stopIds = Set(station.platforms.map { $0.id })
-
-        // Créer un tableau de publishers pour chaque arrêt
-        let publishers = stopIds.map { id in
-            IDFMService.shared.fetchDepartures(for: id)
+        // Récupérer les stopAreaIds uniques des quais (le vrai ID de zone d'arrêt pour l'API)
+        let stopAreaIds = Set(station.platforms.compactMap { platform -> String? in
+            let id = platform.stopAreaId
+            return id.isEmpty ? nil : id
+        })
+        
+        print("🏪 Station: \(station.name)")
+        print("📡 Unique stop_area IDs: \(stopAreaIds)")
+        
+        // Si pas de stopAreaId valide, fallback sur les stop_points individuels
+        if stopAreaIds.isEmpty {
+            print("⚠️ No valid stopAreaIds, falling back to stop_points")
+            let stopPointIds = Set(station.platforms.map { $0.id })
+            
+            // Limiter à 15 requêtes max pour économiser le quota mais avoir tout le hub
+            let limitedIds = Array(stopPointIds.prefix(15))
+            print("📡 Using \(limitedIds.count) stop_points (limited): \(limitedIds)")
+            
+            let publishers = limitedIds.map { id in
+                IDFMService.shared.fetchDepartures(for: id)
+                    .catch { _ in Just<[Departure]>([]) }
+            }
+            
+            cancellable = Publishers.MergeMany(publishers)
+                .collect()
+                .map { $0.flatMap { $0 } }
+                .receive(on: DispatchQueue.main)
+                .sink(
+                    receiveCompletion: { _ in self.isLoading = false },
+                    receiveValue: { deps in
+                        self.departures = deps.sorted { $0.stopDateTime.departureDateTime < $1.stopDateTime.departureDateTime }
+                        print("✅ Received \(deps.count) departures")
+                    })
+            return
+        }
+        
+        // Utiliser les stop_areas (1 requête par zone unique, généralement 1-2 max)
+        let publishers = stopAreaIds.map { id in
+            IDFMService.shared.fetchDepartures(for: "stop_area:\(id)")
                 .catch { error -> Just<[Departure]> in
-                    print("⚠️ Error fetching for \(id): \(error)")
-                    return Just([])  // Ignorer les erreurs individuelles
+                    print("⚠️ Error for stop_area \(id): \(error)")
+                    return Just([])
                 }
         }
-
-        // Combiner tous les résultats
+        
+        print("📡 Fetching \(stopAreaIds.count) stop_area(s)")
+        
         cancellable = Publishers.MergeMany(publishers)
             .collect()
             .map { results in
-                // Aplatir et trier par heure de départ
                 results.flatMap { $0 }.sorted {
                     $0.stopDateTime.departureDateTime < $1.stopDateTime.departureDateTime
                 }
@@ -331,16 +425,15 @@ struct StationDetailScreen: View {
             .receive(on: DispatchQueue.main)
             .sink(
                 receiveCompletion: { completion in
-                    isLoading = false
-                    switch completion {
-                    case .finished:
-                        break
-                    case .failure(let error):
+                    self.isLoading = false
+                    if case .failure(let error) = completion {
                         self.errorMessage = error.localizedDescription
+                        print("❌ Error: \(error)")
                     }
                 },
                 receiveValue: { allDepartures in
                     self.departures = allDepartures
+                    print("✅ Received \(allDepartures.count) departures")
                 })
     }
 
@@ -352,14 +445,40 @@ struct StationDetailScreen: View {
         lineName: String, direction: String, nextDepartures: [String], lineColor: String,
         textColor: String
     ) {
-        guard !nextDepartures.isEmpty else { return }
+        print("🚀 Starting Live Activity for \(lineName) → \(direction)")
+
+        guard !nextDepartures.isEmpty else {
+            print("⚠️ No departures available")
+            return
+        }
+
+        let departuresToUse = Array(nextDepartures.prefix(2))
+
+        // Optimisation :
+        // 1. Filtrer les quais qui correspondent à la ligne sélectionnée
+        // 2. Utiliser les stop_area_id si disponibles (1 requête au lieu de N)
+        // 3. Dédupliquer
+        let relevantPlatforms = station.platforms.filter { $0.lineName == lineName }
+        
+        let optimizedIds: Set<String> = Set(relevantPlatforms.compactMap { platform in
+            if !platform.stopAreaId.isEmpty {
+                return "stop_area:\(platform.stopAreaId)"
+            } else {
+                // Fallback sur stop_point
+                let id = platform.id
+                if !id.contains("stop_point") {
+                    return "stop_point:\(id)"
+                }
+                return id
+            }
+        })
 
         LiveActivityManager.shared.startLiveActivity(
             stationName: station.name,
             lineName: lineName,
             direction: direction,
-            nextDepartures: Array(nextDepartures.prefix(2)),
-            stopIds: station.platforms.map { $0.id },
+            nextDepartures: departuresToUse,
+            stopIds: Array(optimizedIds),
             lineColor: lineColor,
             textColor: textColor
         )

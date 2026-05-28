@@ -87,8 +87,7 @@ struct AppMapView: View {
                         }
                         .padding(.trailing, 16)
                     }
-                    // Adjust padding based on panel state to avoid overlap
-                    .padding(.bottom, itineraryPanelState == .compact ? 100 : 20)
+                    .padding(.bottom, 16)
                 }
             }
 

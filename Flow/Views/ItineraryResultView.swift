@@ -28,6 +28,7 @@ struct ItineraryResultView: View {
     @State private var journeys: [Journey] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @Environment(\.colorScheme) var colorScheme
 
     // Computed: max date = today + 7 days
     private var maxDate: Date {
@@ -44,6 +45,14 @@ struct ItineraryResultView: View {
         VStack(spacing: 0) {
             headerSection
             resultsSection
+        }
+        .background {
+            ZStack {
+                ShaderAnimationView(isLoading: isLoading, station: destination ?? startStation)
+                (colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.15))
+                    .glassEffect(.ultraThin)
+            }
+            .ignoresSafeArea()
         }
         .onAppear {
             setupInitialStations()
@@ -85,61 +94,55 @@ struct ItineraryResultView: View {
     }
 
     private var stationSelectionRow: some View {
-        HStack(alignment: .center, spacing: 8) {
-            // Left column: icons
-            VStack(spacing: 20) {
-                Image(systemName: "circle.fill")
-                    .font(.system(size: 8))
-                    .foregroundColor(.blue)
-                Image(systemName: "mappin.circle.fill")
-                    .foregroundColor(.red)
-            }
-
-            // Middle: text fields
-            VStack(spacing: 8) {
-                // Start Row — grouped in one glass container
+        HStack(spacing: 12) {
+            VStack(spacing: 0) {
+                // Start
                 HStack {
+                    Image(systemName: "circle.fill")
+                        .font(.system(size: 8))
+                        .foregroundColor(.blue)
+                        .frame(width: 24)
+                    
                     Button(action: { showStartPicker = true }) {
-                        HStack {
-                            Text(startStation?.name ?? "Choisir un départ")
-                                .foregroundColor(startStation == nil ? .gray : .primary)
-                                .lineLimit(1)
-                            Spacer()
-                        }
+                        Text(startStation?.name ?? "Choisir un départ")
+                            .foregroundColor(startStation == nil ? .blue : .primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-
-                    Divider()
-                        .frame(height: 20)
-
-                    // Quick "Ma Position" button
+                    .buttonStyle(.plain)
+                    
                     Button(action: { setCurrentLocationAsStart() }) {
                         Image(systemName: "location.fill")
-                            .font(.system(size: 14))
                             .foregroundColor(.blue)
                     }
+                    .buttonStyle(.plain)
                 }
-                .padding(10)
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 10))
-
-                // End Row
-                Button(action: { showEndPicker = true }) {
-                    HStack {
+                .padding()
+                
+                Divider().padding(.leading, 36)
+                
+                // End
+                HStack {
+                    Image(systemName: "mappin.circle.fill")
+                        .foregroundColor(.red)
+                        .frame(width: 24)
+                    
+                    Button(action: { showEndPicker = true }) {
                         Text(endStation?.name ?? "Choisir une destination")
                             .foregroundColor(endStation == nil ? .gray : .primary)
-                            .lineLimit(1)
-                        Spacer()
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .padding(10)
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.glass)
+                .padding()
             }
-
-            // Right: Swap button
-            Button(action: { swapStations() }) {
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12))
+            
+            // Swap Button
+            Button(action: swapStations) {
                 Image(systemName: "arrow.up.arrow.down")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.primary)
-                    .padding(12)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.blue)
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.glass)
         }
@@ -228,10 +231,14 @@ struct ItineraryResultView: View {
                 .padding()
             Spacer()
         } else {
-            List(filteredJourneys) { journey in
-                JourneyRow(journey: journey)
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    ForEach(filteredJourneys) { journey in
+                        JourneyRow(journey: journey)
+                    }
+                }
+                .padding(.vertical)
             }
-            .listStyle(PlainListStyle())
         }
     }
 
@@ -554,6 +561,7 @@ struct JourneyRow: View {
 struct SectionDetailView: View {
     let section: ItinerarySection
     let isLast: Bool
+    @State private var isStopsExpanded = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -596,7 +604,7 @@ struct SectionDetailView: View {
                                 .fontWeight(.semibold)
 
                                 if let direction = display.direction {
-                                    Text("→ \(direction)")
+                                    Text("direction \(direction)")
                                         .font(.caption)
                                         .foregroundColor(.secondary)
                                 }
@@ -604,14 +612,44 @@ struct SectionDetailView: View {
                         }
 
                         // Departure and arrival
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 6) {
                             if let from = section.from?.name {
                                 HStack {
                                     Text(formatTime(section.departure_date_time ?? ""))
                                         .font(.caption)
                                         .foregroundColor(.secondary)
                                     Text(from)
-                                        .font(.caption)
+                                        .font(.system(size: 13, weight: .semibold))
+                                }
+                            }
+
+                            // Intermediate stops section
+                            if let stops = section.stop_date_times, !stops.isEmpty {
+                                Button(action: {
+                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                        isStopsExpanded.toggle()
+                                    }
+                                }) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: isStopsExpanded ? "chevron.down" : "chevron.right")
+                                            .font(.caption2)
+                                        Text("\(stops.count) arrêt\(stops.count > 1 ? "s" : "") (\((section.duration ?? 0) / 60) min)")
+                                            .font(.caption)
+                                            .fontWeight(.medium)
+                                    }
+                                    .foregroundColor(.blue)
+                                    .padding(.vertical, 4)
+                                    .padding(.horizontal, 8)
+                                    .background(Color.blue.opacity(0.08))
+                                    .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.leading, 8)
+
+                                if isStopsExpanded {
+                                    VerticalItineraryStopsView(section: section)
+                                        .padding(.leading, 8)
+                                        .transition(.opacity.combined(with: .move(edge: .top)))
                                 }
                             }
 
@@ -621,7 +659,7 @@ struct SectionDetailView: View {
                                         .font(.caption)
                                         .foregroundColor(.secondary)
                                     Text(to)
-                                        .font(.caption)
+                                        .font(.system(size: 13, weight: .semibold))
                                 }
                             }
                         }

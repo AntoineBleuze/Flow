@@ -15,12 +15,15 @@ class FlowServerService: ObservableObject {
 
     // MARK: - Configuration
 
+    private let primaryHost = "apiflow.hd.free.fr"
+    private let fallbackIP = "192.168.1.190"
+    private let fallbackPort = "3001"
+
     /// URL de base du serveur FlowServer (REST)
-    /// Remplacer par l'URL de votre serveur déployé en production
-    var baseURL: String = "http://10.5.16.29:3001"
+    @Published var baseURL: String = "https://apiflow.hd.free.fr"
 
     /// URL WebSocket du serveur
-    var wsURL: String = "ws://10.5.16.29:3001"
+    var wsURL: String { baseURL.replacingOccurrences(of: "https://", with: "wss://").replacingOccurrences(of: "http://", with: "ws://") }
 
     /// Active ou désactive l'utilisation du serveur.
     /// Si `false`, les services existants utiliseront l'appel direct à l'API IDFM.
@@ -46,7 +49,32 @@ class FlowServerService: ObservableObject {
     private var reconnectTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
 
-    private init() {}
+    private init() {
+        determineBestURL()
+    }
+
+    private func determineBestURL() {
+        let urlString = "https://\(primaryHost)/api/health"
+        guard let url = URL(string: urlString) else { return }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 4.0
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                if error != nil {
+                    let fallback = self?.fallbackIP ?? "192.168.1.190"
+                    let port = self?.fallbackPort ?? "3001"
+                    print("⚠️ [FlowServer] URL principale injoignable. Basculement sur le fallback (\(fallback)).")
+                    self?.baseURL = "http://\(fallback):\(port)"
+                    if self?.isConnected == false && self?.isEnabled == true {
+                        self?.connectWebSocket()
+                    }
+                } else {
+                    print("✅ [FlowServer] URL principale joignable (HTTPS).")
+                }
+            }
+        }.resume()
+    }
 
     // MARK: - Session configurée
 
@@ -194,6 +222,9 @@ class FlowServerService: ObservableObject {
                         self.latestDisruptions = disruptions
                         self.lastPushUpdate = Date()
 
+                        // Mettre en cache les couleurs des lignes perturbées
+                        MapDataService.shared.cacheColorsFromDisruptions(disruptions)
+
                         // Notifier le TrafficService pour mettre à jour l'UI
                         NotificationCenter.default.post(
                             name: .flowServerTrafficUpdate,
@@ -206,6 +237,9 @@ class FlowServerService: ObservableObject {
                 if let departures = message.data?.departures {
                     print("📥 [WS] Push départs: \(departures.count) départs")
                     DispatchQueue.main.async {
+                        // Mettre en cache les couleurs des lignes des départs
+                        MapDataService.shared.cacheColors(from: departures)
+
                         NotificationCenter.default.post(
                             name: .flowServerDepartureUpdate,
                             object: nil,
@@ -277,6 +311,11 @@ class FlowServerService: ObservableObject {
             .map { $0.data }
             .decode(type: DepartureResponse.self, decoder: JSONDecoder())
             .map { $0.departures }
+            .handleEvents(receiveOutput: { departures in
+                Task { @MainActor in
+                    MapDataService.shared.cacheColors(from: departures)
+                }
+            })
             .receive(on: DispatchQueue.main)
             .eraseToAnyPublisher()
     }
@@ -308,6 +347,11 @@ class FlowServerService: ObservableObject {
             .map { (response: ServerResponse) -> [Disruption] in
                 return response.disruptions ?? []
             }
+            .handleEvents(receiveOutput: { disruptions in
+                Task { @MainActor in
+                    MapDataService.shared.cacheColorsFromDisruptions(disruptions)
+                }
+            })
             .receive(on: DispatchQueue.main)
             .eraseToAnyPublisher()
     }

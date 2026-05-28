@@ -30,6 +30,10 @@ const wss = new WebSocketServer({ server });
 app.use(cors());
 app.use(express.json());
 
+// Serve the web dashboard (for browser access)
+const path = require("path");
+app.use(express.static(path.join(__dirname, "public")));
+
 // Logger simple
 app.use((req, res, next) => {
   const timestamp = new Date().toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris" });
@@ -191,6 +195,8 @@ function slimDisruptions(disruptions) {
               code: obj.pt_object.line.code,
               name: obj.pt_object.line.name,
               commercial_mode: obj.pt_object.line.commercial_mode,
+              color: obj.pt_object.line.color,
+              text_color: obj.pt_object.line.text_color,
             }
             : null,
         }
@@ -217,6 +223,7 @@ async function fetchAllTrafficData() {
     "physical_mode:RapidTransit",
     "physical_mode:Tramway",
     "physical_mode:LocalTrain",
+    "physical_mode:Bus",
   ];
 
   // Filtrer depuis 24h
@@ -516,7 +523,7 @@ app.get("/api/departures/:stationId", async (req, res) => {
 
     // 2. Sinon, fetch via la queue
     let endpoint = stationId.includes("stop_area") ? "stop_areas" : "stop_points";
-    const encodedId = encodeURIComponent(stationId);
+    const encodedId = encodeURIComponent(stationId).replace(/%3A/g, ":");
     const url = `${NAVITIA_BASE}/${endpoint}/${encodedId}/departures`;
 
     const data = await navitiaFetch(url);
@@ -570,6 +577,13 @@ app.get("/api/itinerary", async (req, res) => {
     console.error("❌ Itinerary error:", error.message);
     res.status(500).json({ error: error.message });
   }
+});
+
+// ============================================================
+// Catch-all : renvoie le dashboard HTML pour toute route non-API
+// ============================================================
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
 // ============================================================

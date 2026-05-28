@@ -89,6 +89,7 @@ class TrafficService: ObservableObject {
             "physical_mode:RapidTransit",
             "physical_mode:Tramway",
             "physical_mode:LocalTrain",
+            "physical_mode:Bus",
         ]
 
         let group = DispatchGroup()
@@ -214,15 +215,37 @@ class TrafficService: ObservableObject {
                 else { continue }
 
                 // Trouver la ligne correspondante
-                if let lineIndex = updatedLines.firstIndex(where: { line in
+                var lineIndex = updatedLines.firstIndex(where: { line in
                     self.matchLine(
                         line: line, code: finalLineCode, modeName: finalCommercialModeName)
-                }) {
+                })
+
+                if lineIndex == nil && finalCommercialModeName.lowercased().contains("bus") {
+                    // Créer dynamiquement une ligne de bus perturbée
+                    var newLine = TransportLine(
+                        type: .bus,
+                        lineId: finalLineCode,
+                        navitiaId: object.ptObject?.line?.id,
+                        status: .normal
+                    )
+                    newLine.colorHex = object.ptObject?.line?.color
+                    newLine.textColorHex = object.ptObject?.line?.textColor
+                    updatedLines.append(newLine)
+                    lineIndex = updatedLines.count - 1
+                }
+
+                if let index = lineIndex {
                     matchedCount += 1
                     
                     // Capturer le navitiaId s'il n'est pas encore présent
-                    if updatedLines[lineIndex].navitiaId == nil {
-                        updatedLines[lineIndex].navitiaId = object.ptObject?.line?.id
+                    if updatedLines[index].navitiaId == nil {
+                        updatedLines[index].navitiaId = object.ptObject?.line?.id
+                    }
+                    if updatedLines[index].colorHex == nil {
+                        updatedLines[index].colorHex = object.ptObject?.line?.color
+                    }
+                    if updatedLines[index].textColorHex == nil {
+                        updatedLines[index].textColorHex = object.ptObject?.line?.textColor
                     }
 
                     // --- NOUVELLE LOGIQUE DE CATÉGORISATION ---
@@ -257,8 +280,8 @@ class TrafficService: ObservableObject {
 
                     // Mise à jour du statut global seulement si c'est actif maintenant
                     if isCurrentlyActive {
-                        if newStatus < updatedLines[lineIndex].status {
-                            updatedLines[lineIndex].status = newStatus
+                        if newStatus < updatedLines[index].status {
+                            updatedLines[index].status = newStatus
                         }
                     }
 
@@ -297,7 +320,7 @@ class TrafficService: ObservableObject {
                         impactedSection: impactedSection
                     )
 
-                    updatedLines[lineIndex].trafficInfos.append(info)
+                    updatedLines[index].trafficInfos.append(info)
                 }
             }
         }
@@ -365,6 +388,8 @@ class TrafficService: ObservableObject {
             // Match "cable", "funiculaire" or "suspended"
             return
                 (normalizedModeName.contains("cable") || normalizedModeName.contains("funiculaire"))
+        case .bus:
+            return normalizedModeName.contains("bus") && line.lineId == code
         default:
             return false
         }
