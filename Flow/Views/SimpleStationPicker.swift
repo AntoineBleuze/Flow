@@ -223,7 +223,7 @@ struct SimpleStationPicker: View {
         if folded.contains("rer") { return .rer }
         if folded.contains("metro") { return .metro }
         if folded.contains("tram") { return .tram }
-        if folded.contains("train") || folded.contains("transilien") { return .transilien }
+        if folded.contains("train") || folded.contains("transilien") || folded.contains("rail") { return .transilien }
         return .bus
     }
 

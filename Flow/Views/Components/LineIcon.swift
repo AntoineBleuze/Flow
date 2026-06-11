@@ -70,27 +70,35 @@ struct LineIcon: View {
 
     // Logique extraite de TransportModels pour être autonome
     private var assetName: String {
+        let cleanId = lineId.uppercased()
+            .replacingOccurrences(of: "RER ", with: "")
+            .replacingOccurrences(of: "METRO ", with: "")
+            .replacingOccurrences(of: "TRAMWAY ", with: "")
+            .replacingOccurrences(of: "TRAM ", with: "")
+            .replacingOccurrences(of: "TRANSILIEN ", with: "")
+            .replacingOccurrences(of: "TRAIN ", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
         switch type {
         case .metro:
-            var fixedId = lineId
-            if lineId == "3B" { fixedId = "3bis" } else if lineId == "7B" { fixedId = "7bis" }
-            return "metro\(fixedId)"
+            var fixedId = cleanId
+            if cleanId == "3B" { fixedId = "3bis" } else if cleanId == "7B" { fixedId = "7bis" }
+            return "metro\(fixedId.lowercased())"
         case .tram:
-            var fixedId = lineId
-            if fixedId.uppercased() == "T3A" {
-                fixedId = "T3a"
-            } else if fixedId.uppercased() == "T3B" {
-                fixedId = "T3b"
+            var fixedId = cleanId
+            if fixedId == "T3A" || fixedId == "3A" {
+                fixedId = "3a"
+            } else if fixedId == "T3B" || fixedId == "3B" {
+                fixedId = "3b"
             }
-
-            if fixedId.lowercased().starts(with: "t") { return fixedId }
-            return "T\(fixedId)"
+            let cleanNumber = fixedId.replacingOccurrences(of: "T", with: "", options: .caseInsensitive)
+            return "T\(cleanNumber)"
         case .rer:
-            return "rer\(lineId)"
+            return "rer\(cleanId)"
         case .transilien, .train:
-            return "transilien\(lineId)"
+            return "transilien\(cleanId)"
         case .bus:
-            return "bus\(lineId)"
+            return "bus\(cleanId)"
         case .cable:
             if lineId.contains("1") { return "Cable1" }
             return "Cable"

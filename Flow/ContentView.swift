@@ -356,14 +356,7 @@ struct FavoriteStationRow: View {
     }
 
     private func customPriority(_ type: TransportType) -> Int {
-        switch type {
-        case .metro: return 100
-        case .rer: return 90
-        case .tram: return 80
-        case .transilien, .train: return 70
-        case .cable: return 60
-        case .bus: return 50
-        }
+        type.priority
     }
 
     var body: some View {

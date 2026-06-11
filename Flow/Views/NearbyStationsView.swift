@@ -190,14 +190,7 @@ struct NearbyStationRow: View {
     }
 
     private func customPriority(_ type: TransportType) -> Int {
-        switch type {
-        case .metro: return 100
-        case .rer: return 90
-        case .tram: return 80
-        case .transilien, .train: return 70
-        case .cable: return 60
-        case .bus: return 50
-        }
+        type.priority
     }
 
     var body: some View {
@@ -411,7 +404,7 @@ struct NearbyStationRow: View {
         if mode.contains("rer") { return .rer }
         if mode.contains("metro") || mode.contains("métro") { return .metro }
         if mode.contains("tram") { return .tram }
-        if mode.contains("train") || mode.contains("transilien") { return .transilien }
+        if mode.contains("train") || mode.contains("transilien") || mode.contains("rail") { return .transilien }
         if mode.contains("cable") || mode.contains("funiculaire") { return .cable }
         return .bus
     }
