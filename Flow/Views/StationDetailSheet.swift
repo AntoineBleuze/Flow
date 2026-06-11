@@ -94,8 +94,21 @@ struct StationDetailSheet: View {
             .onAppear {
                 setupStation()
             }
+            .onDisappear {
+                if FlowServerService.shared.isEnabled {
+                    FlowServerService.shared.sendUnsubscribeStation()
+                }
+            }
             .onChange(of: station.id) { _, _ in
                 setupStation()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .flowServerStationUpdate)) { notification in
+                if let newDepartures = notification.userInfo?["departures"] as? [Departure] {
+                    // Update only if it's for our current station's IDs
+                    // Simplified: just accept the update since we only subscribe to one station at a time
+                    self.departures = newDepartures
+                    self.isLoading = false
+                }
             }
             .navigationDestination(isPresented: $showItinerary) {
                 ItineraryResultView(
@@ -698,6 +711,10 @@ struct StationDetailSheet: View {
         // Limiter à 15 requêtes max pour économiser le quota
         let limitedIds = Array(queryIds.prefix(15))
         print("📡 Fetching departures for \(limitedIds.count) IDs: \(limitedIds)")
+        
+        if FlowServerService.shared.isEnabled {
+            FlowServerService.shared.sendSubscribeStation(stopIds: limitedIds)
+        }
         
         let publishers = limitedIds.map { id in
             IDFMService.shared.fetchDepartures(for: id, force: force)

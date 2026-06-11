@@ -218,6 +218,42 @@ class FlowServerService: ObservableObject {
         }
     }
 
+    /// Abonnement complet à une station
+    func sendSubscribeStation(stopIds: [String]) {
+        guard let task = webSocketTask else { return }
+        let payload: [String: Any] = [
+            "type": "subscribe_station",
+            "data": [
+                "stopIds": stopIds
+            ]
+        ]
+        
+        if let jsonData = try? JSONSerialization.data(withJSONObject: payload),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            let message = URLSessionWebSocketTask.Message.string(jsonString)
+            task.send(message) { error in
+                if let error = error {
+                    print("❌ [WS] Erreur sub station: \(error.localizedDescription)")
+                } else {
+                    print("📤 [WS] Abonnement station envoyé (\(stopIds.count) arrets)")
+                }
+            }
+        }
+    }
+
+    /// Désabonnement de la station complète
+    func sendUnsubscribeStation() {
+        guard let task = webSocketTask else { return }
+        let message = URLSessionWebSocketTask.Message.string("{\"type\":\"unsubscribe_station\"}")
+        task.send(message) { error in
+            if let error = error {
+                print("❌ [WS] Erreur unsub station: \(error.localizedDescription)")
+            } else {
+                print("📤 [WS] Désabonnement station envoyé")
+            }
+        }
+    }
+
     // MARK: - Réception WebSocket
 
     private func receiveMessage() {
@@ -284,6 +320,19 @@ class FlowServerService: ObservableObject {
 
                         NotificationCenter.default.post(
                             name: .flowServerDepartureUpdate,
+                            object: nil,
+                            userInfo: ["departures": departures]
+                        )
+                    }
+                }
+            case "station_update":
+                if let departures = message.data?.departures {
+                    print("📥 [WS] Push station globale: \(departures.count) départs")
+                    DispatchQueue.main.async {
+                        MapDataService.shared.cacheColors(from: departures)
+
+                        NotificationCenter.default.post(
+                            name: .flowServerStationUpdate,
                             object: nil,
                             userInfo: ["departures": departures]
                         )
@@ -465,4 +514,5 @@ struct ServerResponse: Decodable {
 extension Notification.Name {
     static let flowServerTrafficUpdate = Notification.Name("flowServerTrafficUpdate")
     static let flowServerDepartureUpdate = Notification.Name("flowServerDepartureUpdate")
+    static let flowServerStationUpdate = Notification.Name("flowServerStationUpdate")
 }

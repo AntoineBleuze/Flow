@@ -102,6 +102,17 @@ struct StationDetailScreen: View {
             let merged = loadNearbyBusesAndMerge()
             loadDepartures(for: merged)
         }
+        .onDisappear {
+            if FlowServerService.shared.isEnabled {
+                FlowServerService.shared.sendUnsubscribeStation()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .flowServerStationUpdate)) { notification in
+            if let newDepartures = notification.userInfo?["departures"] as? [Departure] {
+                self.departures = newDepartures
+                self.isLoading = false
+            }
+        }
             .navigationDestination(isPresented: $showItinerary) {
                 ItineraryResultView(
                     destination: currentStation,
@@ -487,6 +498,11 @@ struct StationDetailScreen: View {
 
         // Limiter à 15 requêtes max pour économiser le quota
         let limitedIds = Array(queryIds.prefix(15))
+        
+        if FlowServerService.shared.isEnabled {
+            FlowServerService.shared.sendSubscribeStation(stopIds: limitedIds)
+        }
+        
         print("📡 Fetching departures for \(limitedIds.count) IDs: \(limitedIds)")
         
         let publishers = limitedIds.map { id in

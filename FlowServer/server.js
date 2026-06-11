@@ -420,6 +420,27 @@ wss.on("connection", (ws, req) => {
           delete ws.departureSubscription;
         }
       }
+      // Gestion de l'abonnement complet à une station (Toutes les lignes)
+      if (msg.type === "subscribe_station") {
+        const { stopIds } = msg.data;
+        if (stopIds && stopIds.length > 0) {
+          if (ws.stationSubscription) {
+            removeStopInterest(ws.stationSubscription.stopIds);
+          }
+          console.log(`   🚉 Abonnement station globale: ${stopIds.length} arrets`);
+          addStopInterest(stopIds);
+          ws.stationSubscription = { stopIds };
+          pushCachedDepartures(ws);
+        }
+      }
+
+      if (msg.type === "unsubscribe_station") {
+        console.log(`   📴 Désabonnement station globale`);
+        if (ws.stationSubscription) {
+          removeStopInterest(ws.stationSubscription.stopIds);
+          delete ws.stationSubscription;
+        }
+      }
     } catch (e) {
       // Message non-JSON ignoré
     }
@@ -430,6 +451,9 @@ wss.on("connection", (ws, req) => {
     console.log(`🔌 [${ts}] Client déconnecté. Restant: ${wss.clients.size}`);
     if (ws.departureSubscription) {
       removeStopInterest(ws.departureSubscription.stopIds);
+    }
+    if (ws.stationSubscription) {
+      removeStopInterest(ws.stationSubscription.stopIds);
     }
   });
 
@@ -531,7 +555,7 @@ async function refreshStop(stopId) {
   try {
     let data;
     const endpoint = stopId.includes("stop_point") ? "stop_points" : "stop_areas";
-    const url = `${NAVITIA_BASE}/${endpoint}/${stopId}/departures?count=20`;
+    const url = `${NAVITIA_BASE}/${endpoint}/${stopId}/departures?count=150`;
     
     data = await navitiaFetch(url);
     if (data && data.departures) {
@@ -545,7 +569,7 @@ async function refreshStop(stopId) {
     if ((err.message.includes("404") || err.message.includes("unknown_object")) && !stopId.includes("stop_point")) {
       try {
         const retryId = stopId.startsWith("stop_point:") ? stopId : `stop_point:${stopId}`;
-        const url = `${NAVITIA_BASE}/stop_points/${retryId}/departures?count=20`;
+        const url = `${NAVITIA_BASE}/stop_points/${retryId}/departures?count=150`;
         const data = await navitiaFetch(url);
         if (data && data.departures) {
           const isActive = activeStopCounts.has(stopId) || recentlyRequestedStops.has(stopId);
@@ -582,37 +606,44 @@ async function startPrefetchLoop() {
 // Helper : Push depuis le cache vers un client
 // ============================================================
 function pushCachedDepartures(ws) {
-  if (!ws.departureSubscription) return;
+  if (!ws.departureSubscription && !ws.stationSubscription) return;
 
-  const { stopIds, line, direction } = ws.departureSubscription;
   let allDepartures = [];
-
-  // Récupérer depuis le cache
-  for (const stopId of stopIds) {
-    const cached = cache.departures[stopId];
-    if (cached && cached.data) {
-      allDepartures = allDepartures.concat(cached.data);
+  
+  if (ws.departureSubscription) {
+    const { stopIds, line, direction } = ws.departureSubscription;
+    for (const stopId of stopIds) {
+      const cached = cache.departures[stopId];
+      if (cached && cached.data) {
+        allDepartures = allDepartures.concat(cached.data);
+      }
     }
+    
+    if (allDepartures.length > 0) {
+      // Filtrer pour ne garder que la bonne ligne/direction
+      allDepartures = allDepartures.filter((d) => {
+        const dLine = d.display_informations?.label || d.display_informations?.code;
+        const dDir = d.display_informations?.direction || "";
+        if (dLine !== line) return false;
+        if (!dDir.includes(direction) && !direction.includes(dDir)) return false;
+        return true;
+      });
+    }
+  } else if (ws.stationSubscription) {
+    const { stopIds } = ws.stationSubscription;
+    for (const stopId of stopIds) {
+      const cached = cache.departures[stopId];
+      if (cached && cached.data) {
+        allDepartures = allDepartures.concat(cached.data);
+      }
+    }
+    // Pas de filtrage par ligne/direction pour l'abonnement station complet
   }
 
   if (allDepartures.length === 0) return;
 
-  // Filtrer pour ne garder que la bonne ligne/direction
-  const filtered = allDepartures.filter((d) => {
-    // Check line match (label or code)
-    const dLine = d.display_informations?.label || d.display_informations?.code;
-    const dDir = d.display_informations?.direction;
-
-    // Simple verification
-    if (dLine !== line) return false;
-    // Direction match (contains or equals)
-    if (!dDir.includes(direction) && !direction.includes(dDir)) return false;
-
-    return true;
-  });
-
   // Trier par heure de départ
-  filtered.sort((a, b) => {
+  allDepartures.sort((a, b) => {
     const tA = a.stop_date_time?.departure_date_time || "";
     const tB = b.stop_date_time?.departure_date_time || "";
     return tA.localeCompare(tB);
@@ -622,12 +653,11 @@ function pushCachedDepartures(ws) {
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(
       JSON.stringify({
-        type: "departure_update",
+        type: ws.stationSubscription ? "station_update" : "departure_update",
         timestamp: new Date().toISOString(),
-        data: { departures: filtered },
+        data: { departures: allDepartures },
       })
     );
-    // Log réduit
   }
 }
 
