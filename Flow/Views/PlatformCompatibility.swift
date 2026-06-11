@@ -22,6 +22,12 @@ typealias UIEdgeInsets = NSEdgeInsets
 
 class UIHostingController<Content: View>: NSHostingController<Content> {}
 
+extension NSImage {
+    convenience init?(systemName: String) {
+        self.init(systemSymbolName: systemName, accessibilityDescription: nil)
+    }
+}
+
 // MARK: - System Color Compatibility
 
 extension NSColor {

@@ -80,7 +80,7 @@ struct VerticalItineraryStopsView: View {
 
     private var lineColor: Color {
         if let colorHex = section.display_informations?.color {
-            return Color(hex: colorHex) ?? .blue
+            return Color(hex: colorHex)
         }
         return .blue
     }
@@ -106,3 +106,13 @@ struct VerticalItineraryStopsView: View {
         return ""
     }
 }
+
+#Preview {
+    if let section = PreviewMockData.mockJourney.sections?.first {
+        VerticalItineraryStopsView(section: section)
+            .padding()
+    } else {
+        Text("No mock section")
+    }
+}
+

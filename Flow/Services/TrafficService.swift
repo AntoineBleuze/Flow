@@ -3,6 +3,8 @@ import Foundation
 import SwiftUI
 
 class TrafficService: ObservableObject {
+    static let shared = TrafficService()
+
     @Published var lines: [TransportLine] = []
     @Published var isRefreshing: Bool = false
     @Published var lastUpdateTime: Date?
@@ -53,10 +55,8 @@ class TrafficService: ObservableObject {
                     receiveCompletion: { [weak self] completion in
                         if case .failure(let error) = completion {
                             print("❌ [Server] Erreur trafic: \(error.localizedDescription)")
-                            print("🔄 Fallback sur appel direct API...")
-                            // Fallback : utiliser l'appel direct
-                            self?.fetchTrafficInfoDirect()
                         }
+                        self?.isRefreshing = false
                     },
                     receiveValue: { [weak self] disruptions in
                         print("📦 [Server] \(disruptions.count) perturbations reçues")
@@ -69,8 +69,8 @@ class TrafficService: ObservableObject {
             return
         }
 
-        // Mode direct
-        fetchTrafficInfoDirect()
+        // Mode direct désactivé car l'utilisateur veut forcer le mode serveur
+        self.isRefreshing = false
     }
 
     /// Appel direct à l'API IDFM (sans passer par le serveur)
@@ -463,6 +463,10 @@ class TrafficService: ObservableObject {
             TransportLine(type: .metro, lineId: "12", navitiaId: "line:IDFM:C01382", status: .normal),
             TransportLine(type: .metro, lineId: "13", navitiaId: "line:IDFM:C01383", status: .normal),
             TransportLine(type: .metro, lineId: "14", navitiaId: "line:IDFM:C01386", status: .normal),
+            TransportLine(type: .metro, lineId: "15", status: .normal, isUnderConstruction: true),
+            TransportLine(type: .metro, lineId: "16", status: .normal, isUnderConstruction: true),
+            TransportLine(type: .metro, lineId: "17", status: .normal, isUnderConstruction: true),
+            TransportLine(type: .metro, lineId: "18", status: .normal, isUnderConstruction: true),
 
             // RER
             TransportLine(type: .rer, lineId: "A", status: .normal),

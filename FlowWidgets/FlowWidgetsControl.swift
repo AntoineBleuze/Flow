@@ -1,77 +1,63 @@
-//
-//  FlowWidgetsControl.swift
-//  FlowWidgets
-//
-//  Created by Antoine BLEUZE on 22/11/2025.
-//
-
 import AppIntents
 import SwiftUI
 import WidgetKit
 
-struct FlowWidgetsControl: ControlWidget {
-    static let kind: String = "AntoineBleuze.Flow.FlowWidgets"
+@available(iOS 18.0, *)
+public struct FlowLaunchItineraryControl: ControlWidget {
+    public static let kind: String = "AntoineBleuze.Flow.LaunchItinerary"
 
-    var body: some ControlWidgetConfiguration {
-        AppIntentControlConfiguration(
-            kind: Self.kind,
-            provider: Provider()
-        ) { value in
-            ControlWidgetToggle(
-                "Start Timer",
-                isOn: value.isRunning,
-                action: StartTimerIntent(value.name)
-            ) { isRunning in
-                Label(isRunning ? "On" : "Off", systemImage: "timer")
+    public init() {}
+
+    public var body: some ControlWidgetConfiguration {
+        StaticControlConfiguration(kind: Self.kind) {
+            ControlWidgetButton(action: LaunchItineraryIntent()) {
+                Label("Itinéraires", systemImage: "arrow.triangle.turn.up.right.circle.fill")
             }
         }
-        .displayName("Timer")
-        .description("A an example control that runs a timer.")
+        .displayName("Itinéraire")
+        .description("Ouvre Flow directement sur l'onglet Itinéraires.")
     }
 }
 
-extension FlowWidgetsControl {
-    struct Value {
-        var isRunning: Bool
-        var name: String
-    }
+@available(iOS 18.0, *)
+public struct FlowLaunchTrafficControl: ControlWidget {
+    public static let kind: String = "AntoineBleuze.Flow.LaunchTraffic"
 
-    struct Provider: AppIntentControlValueProvider {
-        func previewValue(configuration: TimerConfiguration) -> Value {
-            FlowWidgetsControl.Value(isRunning: false, name: configuration.timerName)
+    public init() {}
+
+    public var body: some ControlWidgetConfiguration {
+        StaticControlConfiguration(kind: Self.kind) {
+            ControlWidgetButton(action: LaunchTrafficIntent()) {
+                Label("Trafic", systemImage: "tram.fill")
+            }
         }
-
-        func currentValue(configuration: TimerConfiguration) async throws -> Value {
-            let isRunning = true // Check if the timer is running
-            return FlowWidgetsControl.Value(isRunning: isRunning, name: configuration.timerName)
-        }
+        .displayName("Trafic")
+        .description("Ouvre Flow directement sur l'onglet Trafic.")
     }
 }
 
-struct TimerConfiguration: ControlConfigurationIntent {
-    static let title: LocalizedStringResource = "Timer Name Configuration"
+@available(iOS 18.0, *)
+public struct LaunchItineraryIntent: AppIntent {
+    public static var title: LocalizedStringResource = "Ouvrir Itinéraires"
+    public static var openAppWhenRun: Bool = true
 
-    @Parameter(title: "Timer Name", default: "Timer")
-    var timerName: String
+    public init() {}
+
+    public func perform() async throws -> some IntentResult & OpensIntent {
+        let url = URL(string: "flow://itinerary")!
+        return .result(opensIntent: OpenURLIntent(url))
+    }
 }
 
-struct StartTimerIntent: SetValueIntent {
-    static let title: LocalizedStringResource = "Start a timer"
+@available(iOS 18.0, *)
+public struct LaunchTrafficIntent: AppIntent {
+    public static var title: LocalizedStringResource = "Ouvrir Trafic"
+    public static var openAppWhenRun: Bool = true
 
-    @Parameter(title: "Timer Name")
-    var name: String
+    public init() {}
 
-    @Parameter(title: "Timer is running")
-    var value: Bool
-
-    init() {}
-
-    init(_ name: String) {
-        self.name = name
-    }
-
-    func perform() async throws -> some IntentResult {
-        // Start the timer…
-        return .result()
+    public func perform() async throws -> some IntentResult & OpensIntent {
+        let url = URL(string: "flow://traffic")!
+        return .result(opensIntent: OpenURLIntent(url))
     }
 }

@@ -59,75 +59,91 @@ struct ItineraryMapViewRepresentable: UIViewRepresentable {
         
         var allCoordinates: [CLLocationCoordinate2D] = []
         
-        // Draw route segments from GeoJSON data
-        for section in sections where section.type == "public_transport" {
-            guard let geojson = section.geojson,
-                  let coordinates = geojson.coordinates,
-                  let display = section.display_informations else { continue }
+        for section in sections {
+            let isTransit = section.type == "public_transport"
             
-            // Get color for this line
-            let hexColor = display.color ?? "CCCCCC"
-            let color = UIColor(hex: hexColor) ?? .blue
-            
-            // Convert GeoJSON coordinates to CLLocationCoordinate2D
+            // Try to extract coordinates from geojson
             var routeCoordinates: [CLLocationCoordinate2D] = []
-            for coord in coordinates {
-                if coord.count >= 2 {
-                    let lon = coord[0]
-                    let lat = coord[1]
-                    let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
-                    routeCoordinates.append(coordinate)
-                    allCoordinates.append(coordinate)
+            if let geojson = section.geojson,
+               let coordinates = geojson.coordinates {
+                for coord in coordinates {
+                    if coord.count >= 2 {
+                        let lon = coord[0]
+                        let lat = coord[1]
+                        let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+                        routeCoordinates.append(coordinate)
+                        allCoordinates.append(coordinate)
+                    }
                 }
             }
             
-            // Create polyline for this section
+            // Fallback: connect from and to if routeCoordinates is empty
+            if routeCoordinates.isEmpty {
+                if let fromPlace = section.from, let fromCoord = fromPlace.coordinate,
+                   let toPlace = section.to, let toCoord = toPlace.coordinate {
+                    routeCoordinates = [fromCoord, toCoord]
+                    allCoordinates.append(fromCoord)
+                    allCoordinates.append(toCoord)
+                }
+            }
+            
+            // Create and add polyline
             if !routeCoordinates.isEmpty {
                 let polyline = ColoredPolyline(coordinates: routeCoordinates, count: routeCoordinates.count)
-                polyline.color = color
+                if isTransit {
+                    let hexColor = section.display_informations?.color ?? "007AFF"
+                    polyline.color = UIColor(hex: hexColor) ?? .blue
+                    polyline.isDashed = false
+                } else {
+                    polyline.color = .systemGray
+                    polyline.isDashed = true
+                }
                 mapView.addOverlay(polyline)
             }
             
-            // Add start marker
-            if let fromPlace = section.from, let fromCoord = fromPlace.coordinate {
-                let fromStation = StationMarkerAnnotation(
-                    coordinate: fromCoord,
-                    title: fromPlace.name ?? "Départ",
-                    type: .start
-                )
-                mapView.addAnnotation(fromStation)
-                allCoordinates.append(fromCoord)
-            }
-            
-            // Add end marker
-            if let toPlace = section.to, let toCoord = toPlace.coordinate {
-                let toStation = StationMarkerAnnotation(
-                    coordinate: toCoord,
-                    title: toPlace.name ?? "Arrivée",
-                    type: .end
-                )
-                mapView.addAnnotation(toStation)
-                allCoordinates.append(toCoord)
+            // Add markers
+            if isTransit {
+                // Add start marker
+                if let fromPlace = section.from, let fromCoord = fromPlace.coordinate {
+                    let fromStation = StationMarkerAnnotation(
+                        coordinate: fromCoord,
+                        title: fromPlace.name ?? "Départ",
+                        type: .start
+                    )
+                    mapView.addAnnotation(fromStation)
+                    allCoordinates.append(fromCoord)
+                }
+                
+                // Add end marker
+                if let toPlace = section.to, let toCoord = toPlace.coordinate {
+                    let toStation = StationMarkerAnnotation(
+                        coordinate: toCoord,
+                        title: toPlace.name ?? "Arrivée",
+                        type: .end
+                    )
+                    mapView.addAnnotation(toStation)
+                    allCoordinates.append(toCoord)
+                }
+            } else if section.type == "transfer" {
+                if let transferPlace = section.from, let coord = transferPlace.coordinate {
+                    let transfer = StationMarkerAnnotation(
+                        coordinate: coord,
+                        title: transferPlace.name ?? "Correspondance",
+                        type: .transfer
+                    )
+                    mapView.addAnnotation(transfer)
+                    allCoordinates.append(coord)
+                }
             }
         }
         
-        // Add transfer markers
-        for section in sections where section.type == "transfer" {
-            if let transferPlace = section.from, let coord = transferPlace.coordinate {
-                let transfer = StationMarkerAnnotation(
-                    coordinate: coord,
-                    title: transferPlace.name ?? "Correspondance",
-                    type: .transfer
-                )
-                mapView.addAnnotation(transfer)
-                allCoordinates.append(coord)
-            }
-        }
-        
-        // Fit map to show all coordinates
+        // Fit map to show all coordinates (only once per journey)
         if !allCoordinates.isEmpty {
-            let boundingRect = MKMapRect(coordinates: allCoordinates)
-            mapView.setVisibleMapRect(boundingRect, edgePadding: UIEdgeInsets(top: 50, left: 50, bottom: 50, right: 50), animated: true)
+            if context.coordinator.lastZoomedJourneyId != journey.id.uuidString {
+                context.coordinator.lastZoomedJourneyId = journey.id.uuidString
+                let boundingRect = MKMapRect(coordinates: allCoordinates)
+                mapView.setVisibleMapRect(boundingRect, edgePadding: UIEdgeInsets(top: 50, left: 50, bottom: 50, right: 50), animated: true)
+            }
         }
     }
     
@@ -136,13 +152,20 @@ struct ItineraryMapViewRepresentable: UIViewRepresentable {
     }
     
     class Coordinator: NSObject, MKMapViewDelegate {
+        var lastZoomedJourneyId: String?
+        
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             if let coloredPolyline = overlay as? ColoredPolyline {
-                let renderer = MKPolylineRenderer(polyline: coloredPolyline)
+                let renderer = BorderedPolylineRenderer(polyline: coloredPolyline)
                 renderer.strokeColor = coloredPolyline.color
-                renderer.lineWidth = 4
+                renderer.lineWidth = coloredPolyline.isDashed ? 3.5 : 5.0
                 renderer.lineJoin = CGLineJoin.round
                 renderer.lineCap = CGLineCap.round
+                
+                if coloredPolyline.isDashed {
+                    renderer.lineDashPattern = [4, 6] // [dashLength, gapLength]
+                }
+                
                 return renderer
             }
             return MKOverlayRenderer(overlay: overlay)
@@ -249,6 +272,12 @@ extension ItineraryPlace {
               let lonStr = coord.lon,
               let lat = Double(latStr),
               let lon = Double(lonStr) else { return nil }
+        guard lat != 0.0 && lon != 0.0 else { return nil }
         return CLLocationCoordinate2D(latitude: lat, longitude: lon)
     }
 }
+
+#Preview {
+    ItineraryMapView(journey: PreviewMockData.mockJourney)
+}
+

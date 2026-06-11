@@ -16,5 +16,10 @@ struct FlowWidgetsBundle: WidgetBundle {
         FlowWidgetsLiveActivity()
         StationActivityWidget()
         NavigationActivityWidget()
+        
+        if #available(iOS 18.0, *) {
+            FlowLaunchItineraryControl()
+            FlowLaunchTrafficControl()
+        }
     }
 }

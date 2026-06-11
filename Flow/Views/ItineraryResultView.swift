@@ -49,8 +49,8 @@ struct ItineraryResultView: View {
         .background {
             ZStack {
                 ShaderAnimationView(isLoading: isLoading, station: destination ?? startStation)
-                (colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.15))
-                    .glassEffect(.ultraThin)
+                (colorScheme == .dark ? Color.black.opacity(0.05) : Color.white.opacity(0.05))
+                    .background(.ultraThinMaterial)
             }
             .ignoresSafeArea()
         }
@@ -88,7 +88,7 @@ struct ItineraryResultView: View {
             }
         }
         .padding()
-        .glassEffect()
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .padding(.horizontal)
         .padding(.top)
     }
@@ -135,7 +135,7 @@ struct ItineraryResultView: View {
                 }
                 .padding()
             }
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12))
+            .background(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
             
             // Swap Button
             Button(action: swapStations) {
@@ -143,8 +143,9 @@ struct ItineraryResultView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(.blue)
                     .frame(width: 44, height: 44)
+                    .background(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.06), in: Circle())
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.plain)
         }
     }
 
@@ -430,7 +431,7 @@ struct JourneyRow: View {
                         .foregroundColor(.gray)
                 }
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.plain)
 
             // Summary line icons with real assets
             HStack(spacing: 6) {
@@ -449,14 +450,14 @@ struct JourneyRow: View {
                                     .frame(width: 28, height: 28)
                             } else {
                                 Circle()
-                                    .fill(Color(hex: display.color ?? "CCCCCC") ?? .gray)
+                                    .fill(Color(hex: display.color ?? "CCCCCC"))
                                     .frame(width: 26, height: 26)
                                     .overlay(
                                         Text(display.code ?? display.label ?? "?")
                                             .font(.system(size: 10, weight: .bold))
                                             .foregroundColor(
                                                 Color(hex: display.text_color ?? "FFFFFF")
-                                                    ?? .white)
+                                            )
                                     )
                             }
                         }
@@ -465,7 +466,6 @@ struct JourneyRow: View {
 
                 Spacer()
 
-                // Visible Start Navigation Button (Liquid Glass)
                 Button(action: {
                     NavigationManager.shared.startNavigation(journey: journey)
                 }) {
@@ -476,10 +476,8 @@ struct JourneyRow: View {
                     }
                     .font(.subheadline)
                     .foregroundColor(.blue)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.glassProminent)
             }
 
             // Detailed view when expanded
@@ -511,7 +509,8 @@ struct JourneyRow: View {
             }
         }
         .padding()
-        .glassEffect()
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal)
     }
 
@@ -587,13 +586,13 @@ struct SectionDetailView: View {
                         HStack(spacing: 8) {
                             // Line badge
                             Circle()
-                                .fill(Color(hex: display.color ?? "CCCCCC") ?? .gray)
+                                .fill(Color(hex: display.color ?? "CCCCCC"))
                                 .frame(width: 32, height: 32)
                                 .overlay(
                                     Text(display.code ?? display.label ?? "?")
                                         .font(.system(size: 12, weight: .bold))
                                         .foregroundColor(
-                                            Color(hex: display.text_color ?? "FFFFFF") ?? .white)
+                                            Color(hex: display.text_color ?? "FFFFFF"))
                                 )
 
                             VStack(alignment: .leading, spacing: 2) {
@@ -609,6 +608,25 @@ struct SectionDetailView: View {
                                         .foregroundColor(.secondary)
                                 }
                             }
+                            
+                            Spacer()
+                            
+                            NavigationLink(destination: LineSchematicPlanView(line: TransportLine(
+                                type: StationDetailScreen.determineType(mode: display.commercial_mode),
+                                lineId: display.code ?? display.label ?? "?",
+                                status: .normal
+                            ))) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "map")
+                                    Text("Plan")
+                                        .font(.caption)
+                                        .fontWeight(.semibold)
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.blue.opacity(0.1), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
                         }
 
                         // Departure and arrival
@@ -723,7 +741,7 @@ struct SectionDetailView: View {
 
     var circleColor: Color {
         if section.type == "public_transport" {
-            return Color(hex: section.display_informations?.color ?? "CCCCCC") ?? .blue
+            return Color(hex: section.display_informations?.color ?? "CCCCCC")
         } else if section.mode == "walking" {
             return .blue
         } else if section.type == "transfer" {
@@ -771,3 +789,13 @@ struct FavoriteStationButton: View {
         .buttonStyle(.glass)
     }
 }
+
+#Preview {
+    NavigationStack {
+        ItineraryResultView(
+            destination: PreviewMockData.mockStation,
+            currentLocation: CLLocationCoordinate2D(latitude: 48.8239, longitude: 2.2743)
+        )
+    }
+}
+

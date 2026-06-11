@@ -1,6 +1,7 @@
 import SwiftUI
 import ActivityKit
 import WidgetKit
+import AppIntents
 
 struct StationActivityView: View {
     let stationName: String
@@ -26,13 +27,26 @@ struct StationActivityView: View {
                 
                 Spacer()
                 
-                ZStack {
-                    Circle()
-                        .fill(Color(hex: lineColor))
-                        .frame(width: 50, height: 50)
-                    Text(lineName)
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundColor(Color(hex: textColor))
+                HStack(spacing: 12) {
+                    // Interactive refresh button
+                    Button(intent: RefreshDeparturesIntent()) {
+                        Image(systemName: "bolt.fill")
+                            .font(.title3)
+                            .foregroundColor(.pink)
+                            .padding(10)
+                            .background(Color.white.opacity(0.15))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+
+                    ZStack {
+                        Circle()
+                            .fill(Color(hex: lineColor))
+                            .frame(width: 50, height: 50)
+                        Text(lineName)
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundColor(Color(hex: textColor))
+                    }
                 }
             }
             

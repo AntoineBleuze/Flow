@@ -13,6 +13,8 @@ struct NavigationActivityAttributes: ActivityAttributes {
         var textColor: String?  // "FFFFFF"
         var remainingTime: String?  // "5 min" (walking or travel time)
         var progress: Double?  // 0.0 to 1.0
+        var stops: [String]?
+        var currentLegIndex: Int?
     }
 
     // Fixed properties

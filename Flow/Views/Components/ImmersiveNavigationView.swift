@@ -8,7 +8,36 @@ struct ImmersiveNavigationView: View {
     @Binding var userTrackingMode: MKUserTrackingMode
     
     @ObservedObject var navigationManager = NavigationManager.shared
-    @State private var currentStepIndex: Int = 0
+    @Environment(\.colorScheme) var colorScheme
+    
+    private var currentStepIndex: Int {
+        guard let sections = journey.sections else { return 0 }
+        let currentSectionIdx = navigationManager.currentSectionIndex
+        guard currentSectionIdx < sections.count else { return 0 }
+        let activeSection = sections[currentSectionIdx]
+        
+        if let index = steps.firstIndex(where: { $0.id == activeSection.id }) {
+            return index
+        }
+        
+        // Fallback: search forward
+        for idx in currentSectionIdx..<sections.count {
+            let sec = sections[idx]
+            if let index = steps.firstIndex(where: { $0.id == sec.id }) {
+                return index
+            }
+        }
+        
+        // Fallback: search backward
+        for idx in (0..<currentSectionIdx).reversed() {
+            let sec = sections[idx]
+            if let index = steps.firstIndex(where: { $0.id == sec.id }) {
+                return index
+            }
+        }
+        
+        return 0
+    }
     
     // Computed Steps
     private var steps: [ItinerarySection] {
@@ -24,185 +53,192 @@ struct ImmersiveNavigationView: View {
     
     var body: some View {
         GeometryReader { geometry in
-            ZStack {
-                // MAIN CONTENT LAYER
-                VStack {
-                    // Top Bar (ETA & Exit)
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Arrivée à \(formatTime(journey.arrival_date_time ?? ""))")
-                                .font(.headline)
-                                .foregroundColor(.primary)
-                            Text(formatDuration(journey.duration ?? 0))
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding()
-                        .background(.regularMaterial)
-                        .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 16))
-                        
-                        Spacer()
-                        
-                        HStack(spacing: 8) {
-                            if navigationManager.isSimulating {
-                                Button(action: {
-                                    withAnimation {
-                                        navigationManager.stopSimulation()
-                                    }
-                                }) {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "stop.fill")
-                                        Text("Arrêter")
-                                    }
+            GlassEffectContainer(spacing: 0.0) {
+                ZStack {
+                    // MAIN CONTENT LAYER
+                    VStack {
+                        // Top Bar (ETA & Exit) - Unified Glass Container
+                        HStack(alignment: .center) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Arrivée à \(formatTime(journey.arrival_date_time ?? ""))")
+                                    .font(.subheadline)
                                     .fontWeight(.bold)
-                                    .foregroundColor(.orange)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 10)
-                                }
-                                .buttonStyle(.glass)
-                            } else {
-                                Button(action: {
-                                    withAnimation {
-                                        navigationManager.startSimulation()
-                                    }
-                                }) {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "play.fill")
-                                        Text("Simuler")
-                                    }
-                                    .fontWeight(.bold)
-                                    .foregroundColor(.green)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 10)
-                                }
-                                .buttonStyle(.glass)
+                                    .foregroundColor(.primary)
+                                Text(formatDuration(journey.duration ?? 0))
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
                             }
+                            
+                            Spacer()
+                            
+                            HStack(spacing: 8) {
+                                if navigationManager.isSimulating {
+                                    Button(action: {
+                                        withAnimation {
+                                            navigationManager.stopSimulation()
+                                        }
+                                    }) {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "stop.fill")
+                                            Text("Arrêter")
+                                        }
+                                        .font(.subheadline)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.orange)
+                                        .padding(.horizontal, 12)
+                                        .frame(height: 36)
+                                        .background(Color.orange.opacity(0.15), in: Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                } else {
+                                    Button(action: {
+                                        withAnimation {
+                                            navigationManager.startSimulation()
+                                        }
+                                    }) {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "play.fill")
+                                            Text("Simuler")
+                                        }
+                                        .font(.subheadline)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.green)
+                                        .padding(.horizontal, 12)
+                                        .frame(height: 36)
+                                        .background(Color.green.opacity(0.15), in: Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                
+                                Button(action: {
+                                    withAnimation {
+                                        NavigationManager.shared.stopNavigation()
+                                    }
+                                }) {
+                                    Text("Quitter")
+                                        .font(.subheadline)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.red)
+                                        .padding(.horizontal, 14)
+                                        .frame(height: 36)
+                                        .background(Color.red.opacity(0.15), in: Capsule())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .padding(.horizontal)
+                        .padding(.top, max(60, geometry.safeAreaInsets.top))
+                    
+                    Spacer()
+                    
+                    // TRACKING BUTTON & CARD CONTAINER
+                    VStack(spacing: 10) {
+                        // Tracking Button (Liquid Glass Style)
+                        HStack {
+                            Spacer()
+                            Button(action: {
+                                withAnimation {
+                                    if userTrackingMode == .follow {
+                                        userTrackingMode = .followWithHeading
+                                    } else {
+                                        userTrackingMode = .follow
+                                    }
+                                }
+                            }) {
+                                Image(systemName: userTrackingMode == .followWithHeading ? "location.north.line.fill" : "location.fill")
+                                    .font(.title2)
+                                    .foregroundColor(.blue)
+                                    .frame(width: 50, height: 50)
+                            }
+                            .buttonStyle(.plain)
+                            .glassEffect(.regular.interactive(), in: .circle)
+                            .padding(.trailing, 24)
+                        }
+                        
+                        // Bottom Card Area (Just Instruction)
+                        if let step = currentSection {
+                            stepCard(for: step)
+                                .transition(.move(edge: .bottom))
+                                .shadow(color: .black.opacity(0.2), radius: 20, y: 10)
+                        }
+                    }
+                    .padding(.bottom, 100)
+                }
+                .ignoresSafeArea(edges: .bottom)
+                
+                // SIDEBAR SCHEMATIC VIEW (Floating Left)
+                 if let step = currentSection, 
+                    step.type == "public_transport", 
+                    let stops = step.stop_date_times, 
+                    !stops.isEmpty {
+                      
+                      HStack {
+                          VerticalSchematicLineView(
+                             color: Color(hex: step.display_informations?.color ?? "000000"),
+                             stops: stops,
+                             currentLegIndex: navigationManager.currentLegIndex,
+                             progress: navigationManager.progress
+                          )
+                          .padding(.leading, 12)
+                          
+                          Spacer()
+                      }
+                      .padding(.top, 180)
+                      .transition(.move(edge: .leading))
+                      .zIndex(2)
+                 }
+                
+                // BOARDING PROMPT OVERLAY
+                if navigationManager.showBoardingPrompt {
+                    Color.black.opacity(0.4).ignoresSafeArea()
+                    
+                    VStack(spacing: 20) {
+                        Text("Êtes-vous monté dans le transport ?")
+                            .font(.title3)
+                            .fontWeight(.bold)
+                            .foregroundColor(.primary)
+                            .multilineTextAlignment(.center)
+                        
+                        HStack(spacing: 0) {
+                            Button(action: {
+                                withAnimation {
+                                    navigationManager.showBoardingPrompt = false
+                                }
+                            }) {
+                                Text("Pas encore")
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.primary)
+                                    .padding()
+                                    .frame(maxWidth: .infinity)
+                            }
+                            
+                            Divider()
+                                .frame(height: 30)
                             
                             Button(action: {
                                 withAnimation {
-                                    NavigationManager.shared.stopNavigation()
+                                    navigationManager.showBoardingPrompt = false
+                                    navigationManager.confirmBoarding()
                                 }
                             }) {
-                                Text("Quitter")
+                                Text("Oui, c'est parti !")
                                     .fontWeight(.bold)
-                                    .foregroundColor(.red)
-                                    .padding(.horizontal, 20)
-                                    .padding(.vertical, 10)
+                                    .foregroundColor(.green)
+                                    .padding()
+                                    .frame(maxWidth: .infinity)
                             }
-                            .buttonStyle(.glass)
                         }
+                        .background(Color.white.opacity(0.08), in: Capsule())
                     }
-                    .padding(.horizontal)
-                    .padding(.top, max(16, geometry.safeAreaInsets.top))
-                
-                Spacer()
-                
-                // TRACKING BUTTON & CARD CONTAINER
-                VStack(spacing: 10) {
-                    // Tracking Button (Liquid Glass Style)
-                    HStack {
-                        Spacer()
-                        Button(action: {
-                            withAnimation {
-                                if userTrackingMode == .follow {
-                                    userTrackingMode = .followWithHeading
-                                } else {
-                                    userTrackingMode = .follow
-                                }
-                            }
-                        }) {
-                            Image(systemName: userTrackingMode == .followWithHeading ? "location.north.line.fill" : "location.fill")
-                                .font(.title2)
-                                .foregroundColor(.blue)
-                                .padding(16)
-                        }
-                        .buttonStyle(.glass)
-                        .padding(.trailing, 24)
-                    }
-                    
-                    // Bottom Card Area (Just Instruction)
-                    if let step = currentSection {
-                        stepCard(for: step)
-                            .transition(.move(edge: .bottom))
-                            .shadow(color: .black.opacity(0.2), radius: 20, y: 10)
-                    }
+                    .padding(30)
+                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24))
+                    .padding(.horizontal, 40)
+                    .transition(.scale.combined(with: .opacity))
+                    .zIndex(100)
                 }
-                .padding(.bottom, 100)
-            }
-            .ignoresSafeArea(edges: .bottom)
-            
-            // SIDEBAR SCHEMATIC VIEW (Floating Left)
-             if let step = currentSection, 
-                step.type == "public_transport", 
-                let stops = step.stop_date_times, 
-                !stops.isEmpty {
-                 
-                 HStack {
-                     VerticalSchematicLineView(
-                        color: Color(hex: step.display_informations?.color ?? "000000"),
-                        stops: stops,
-                        currentLegIndex: navigationManager.currentLegIndex,
-                        progress: navigationManager.progress
-                     )
-                     // No constraining frame - let the view size itself
-                     .padding(.leading, 12)
-                     .padding(.bottom, 300)
-                     
-                     Spacer()
-                 }
-                 .padding(.top, 150) // Increased to move schematic down
-                 .transition(.move(edge: .leading))
-                 .zIndex(2)
-             }
-            
-            // BOARDING PROMPT OVERLAY
-            if navigationManager.showBoardingPrompt {
-                Color.black.opacity(0.4).ignoresSafeArea()
-                
-                VStack(spacing: 20) {
-                    Text("Êtes-vous monté dans le transport ?")
-                        .font(.title3)
-                        .fontWeight(.bold)
-                        .foregroundColor(.primary)
-                        .multilineTextAlignment(.center)
-                    
-                    HStack(spacing: 0) {
-                        Button(action: {
-                            withAnimation {
-                                navigationManager.showBoardingPrompt = false
-                            }
-                        }) {
-                            Text("Pas encore")
-                                .fontWeight(.semibold)
-                                .foregroundColor(.primary)
-                                .padding()
-                                .frame(maxWidth: .infinity)
-                        }
-                        
-                        Divider()
-                            .frame(height: 30)
-                        
-                        Button(action: {
-                            withAnimation {
-                                navigationManager.showBoardingPrompt = false
-                                navigationManager.confirmBoarding()
-                            }
-                        }) {
-                            Text("Oui, c'est parti !")
-                                .fontWeight(.bold)
-                                .foregroundColor(.green)
-                                .padding()
-                                .frame(maxWidth: .infinity)
-                        }
-                    }
-                    .glassEffect(.regular, in: Capsule())
-                }
-                .padding(30)
-                .background(.regularMaterial)
-                .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 24))
-                .padding(.horizontal, 40)
-                .transition(.scale.combined(with: .opacity))
-                .zIndex(100)
             }
         }
     }
@@ -232,12 +268,10 @@ struct ImmersiveNavigationView: View {
                     Image(systemName: "figure.walk.circle.fill")
                         .font(.system(size: 50))
                         .foregroundColor(.blue)
-                        .glassEffect(.standard.interactive(), in: Circle())
                 } else if step.type == "transfer" {
                      Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
                          .font(.system(size: 50))
                          .foregroundColor(.orange)
-                         .glassEffect(.standard.interactive(), in: Circle())
                 }
                 
                 VStack(alignment: .leading, spacing: 4) {
@@ -268,8 +302,9 @@ struct ImmersiveNavigationView: View {
                         .font(.title2)
                         .foregroundColor(.primary)
                         .padding()
+                        .background(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.06), in: Circle())
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.plain)
             }
             
             Divider().background(Color.white.opacity(0.2))
@@ -290,7 +325,8 @@ struct ImmersiveNavigationView: View {
                          .frame(maxWidth: .infinity)
                          .padding()
                      }
-                     .buttonStyle(.glass)
+                     .buttonStyle(.plain)
+                     .background(Color.green.opacity(0.15), in: Capsule())
                  } else {
                      HStack {
                          Image(systemName: "clock")
@@ -312,24 +348,20 @@ struct ImmersiveNavigationView: View {
         }
         .padding(24)
         .background(
-            ZStack {
-                Rectangle().fill(.ultraThinMaterial)
-                LinearGradient(
-                    colors: [lineColor.opacity(0.3), Color.black.opacity(0.8)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            }
+            LinearGradient(
+                colors: [lineColor.opacity(0.3), Color.black.opacity(0.8)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
         )
-        .glassEffect(.standard.interactive(), in: RoundedRectangle(cornerRadius: 30))
+        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 30, style: .continuous))
         .padding(.horizontal)
     }
     
     func nextStep() {
-        if currentStepIndex < steps.count - 1 {
-            withAnimation { currentStepIndex += 1 }
-        } else {
-            NavigationManager.shared.stopNavigation()
+        withAnimation {
+            navigationManager.advanceToNextSection()
         }
     }
     
@@ -363,77 +395,86 @@ struct VerticalSchematicLineView: View {
     var progress: Double
     
     // Layout constants (compact)
-    let stopHeight: CGFloat = 45 // Reduced for more compact display
+    let stopHeight: CGFloat = 40
     let nodeSize: CGFloat = 10
     let lineWidth: CGFloat = 4
-    let indicatorSize: CGFloat = 16
+    let indicatorSize: CGFloat = 14
     
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 0) {
-                    // LINE TRACK (Glass Pill)
-                    ZStack(alignment: .top) {
-                        // The line backbone
-                        VStack(spacing: 0) {
-                            ForEach(Array(stops.enumerated()), id: \.offset) { index, stop in
+                VStack(spacing: 0) {
+                    ForEach(Array(stops.enumerated()), id: \.offset) { index, stop in
+                        let isFirst = index == 0
+                        let isLast = index == stops.count - 1
+                        let isPassed = index < currentLegIndex
+                        let isCurrent = index == currentLegIndex
+                        
+                        HStack(spacing: 12) {
+                            // Left timeline node & segment
+                            ZStack {
                                 VStack(spacing: 0) {
-                                    // Line Segment Before
                                     Rectangle()
                                         .fill(color)
-                                        .frame(width: lineWidth, height: 17)
-                                        .opacity(index == 0 ? 0 : 1)
+                                        .frame(width: lineWidth, height: stopHeight / 2)
+                                        .opacity(isFirst ? 0 : 1)
                                     
-                                    // Node
-                                    Circle()
-                                        .fill(color)
-                                        .frame(width: nodeSize, height: nodeSize)
-                                    
-                                    // Line Segment After
                                     Rectangle()
                                         .fill(color)
-                                        .frame(width: lineWidth, height: 18)
-                                        .opacity(index == stops.count - 1 ? 0 : 1)
+                                        .frame(width: lineWidth, height: stopHeight / 2)
+                                        .opacity(isLast ? 0 : 1)
                                 }
-                                .frame(height: stopHeight)
-                                .id(index)
+                                
+                                Circle()
+                                    .fill(isPassed ? color.opacity(0.5) : color)
+                                    .frame(width: nodeSize, height: nodeSize)
+                                
+                                if isCurrent {
+                                    Circle()
+                                        .fill(.white)
+                                        .frame(width: indicatorSize, height: indicatorSize)
+                                        .shadow(color: color, radius: 4)
+                                }
                             }
-                        }
-                        .padding(.vertical, 10)
-                        
-                        // User Indicator
-                        let baseY: CGFloat = 10 + 17 + (nodeSize / 2)
-                        let travelY = CGFloat(currentLegIndex) * stopHeight + CGFloat(progress * stopHeight)
-                        
-                        Circle()
-                            .fill(Color.white)
-                            .frame(width: indicatorSize, height: indicatorSize)
-                            .shadow(color: color, radius: 5)
-                            .offset(y: baseY + travelY - (indicatorSize / 2))
-                    }
-                    .frame(width: 28)
-                    .background(.ultraThinMaterial.opacity(0.5))
-                    .glassEffect(.standard, in: Capsule())
-                    
-                    // STATION LABELS (Angled, shifted right to avoid overlap)
-                    ZStack(alignment: .topLeading) {
-                        ForEach(Array(stops.enumerated()), id: \.offset) { index, stop in
+                            .frame(width: 20)
+                            
+                            // Station Name label (horizontal)
                             Text(stop.stop_point.name ?? "")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundColor(.primary)
+                                .font(.system(size: 11, weight: isCurrent ? .bold : .medium))
+                                .foregroundColor(isCurrent ? .primary : (isPassed ? .secondary : .primary))
                                 .lineLimit(1)
-                                .fixedSize()
-                                .rotationEffect(.degrees(50), anchor: .leading) // Angled downward
-                                .shadow(color: Color(UIColor.systemBackground).opacity(0.8), radius: 2)
-                                .offset(
-                                    x: 18, // Increased from 8 to prevent overlap with pill
-                                    y: 10 + 17 + (nodeSize / 2) + CGFloat(index) * stopHeight - 5
-                                )
+                                .minimumScaleFactor(0.8)
+                            
+                            Spacer()
                         }
+                        .frame(height: stopHeight)
+                        .id(index)
                     }
-                    .frame(width: 110)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+            .onAppear {
+                withAnimation {
+                    proxy.scrollTo(currentLegIndex, anchor: .center)
+                }
+            }
+            .onChange(of: currentLegIndex) { _, newValue in
+                withAnimation {
+                    proxy.scrollTo(newValue, anchor: .center)
                 }
             }
         }
+        .frame(width: 170, height: 260)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20))
     }
 }
+
+#Preview {
+    ImmersiveNavigationView(
+        journey: PreviewMockData.mockJourney,
+        navigationMode: .constant(true),
+        userTrackingMode: .constant(.follow)
+    )
+}
+

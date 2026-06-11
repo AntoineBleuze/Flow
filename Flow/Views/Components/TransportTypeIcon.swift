@@ -39,3 +39,14 @@ struct TransportTypeIcon: View {
         }
     }
 }
+
+#Preview {
+    HStack(spacing: 10) {
+        ForEach(TransportType.allCases) { type in
+            TransportTypeIcon(type: type)
+                .frame(width: 40, height: 40)
+        }
+    }
+    .padding()
+}
+

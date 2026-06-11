@@ -11,43 +11,40 @@ class IDFMService {
     private let baseURL = "https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia"
 
     func fetchDepartures(for stationId: String) -> AnyPublisher<[Departure], Error> {
-        // Mode serveur : passer par FlowServer si activé et connecté
-        if FlowServerService.shared.isEnabled && FlowServerService.shared.isConnected {
-            print("📡 [Server Mode] Departures via FlowServer")
+        // Mode serveur : passer par FlowServer si activé, avec fallback en cas d'erreur
+        if FlowServerService.shared.isEnabled {
+            print("📡 [Server Mode] Departures via FlowServer for \(stationId)")
             return FlowServerService.shared.fetchDepartures(for: stationId)
+                .catch { [weak self] error -> AnyPublisher<[Departure], Error> in
+                    print("⚠️ [Server Mode Failed] falling back to direct departures for \(stationId): \(error.localizedDescription)")
+                    guard let self = self else {
+                        return Fail(error: error).eraseToAnyPublisher()
+                    }
+                    return self.fetchDirectDepartures(for: stationId)
+                }
+                .eraseToAnyPublisher()
         }
 
-        // Mode direct : appel API IDFM
+        print("📡 [Direct Mode] Departures direct from IDFM for \(stationId)")
+        return fetchDirectDepartures(for: stationId)
+    }
+
+    private func fetchDirectDepartures(for stationId: String) -> AnyPublisher<[Departure], Error> {
         guard !apiKey.isEmpty else {
-            print("⚠️ API Key manquante pour IDFMService")
             return Fail(error: URLError(.userAuthenticationRequired)).eraseToAnyPublisher()
         }
 
-        // Formatage de l'ID pour Navitia
-        var endpoint = "stop_points"
-        var finalId = stationId
-
-        if stationId.contains("stop_area") {
-            endpoint = "stop_areas"
-            // Si l'ID a déjà le prefixe, on le garde, sinon on l'ajoute
-            finalId = stationId.hasPrefix("stop_area:") ? stationId : "stop_area:\(stationId)"
-        } else {
-            // Par défaut on considère que c'est un stop_point
-            finalId = stationId.hasPrefix("stop_point:") ? stationId : "stop_point:\(stationId)"
-        }
-
-        guard
-            let encodedId = finalId.addingPercentEncoding(
-                withAllowedCharacters: CharacterSet.urlPathAllowed),
-            let url = URL(string: "\(baseURL)/\(endpoint)/\(encodedId)/departures")
-        else {
+        let endpoint = stationId.contains("stop_area") ? "stop_areas" : "stop_points"
+        
+        guard let encodedId = stationId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: "\(baseURL)/\(endpoint)/\(encodedId)/departures") else {
             return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
         }
 
         var request = URLRequest(url: url)
         request.setValue(apiKey, forHTTPHeaderField: "apiKey")
 
-        print("📡 Requesting: \(url.absoluteString)")
+        print("📡 Requesting Direct Departures: \(url.absoluteString)")
 
         return URLSession.shared.dataTaskPublisher(for: request)
             .map { $0.data }
@@ -63,6 +60,12 @@ class IDFMService {
     }
 
     func fetchLineRoute(for navitiaId: String) -> AnyPublisher<[LineStation], Error> {
+        // Mode serveur : interdire les requêtes directes à IDFM
+        if FlowServerService.shared.isEnabled {
+            print("⚠️ [Server Mode] Direct line route fetch blocked")
+            return Fail(error: URLError(.cannotConnectToHost)).eraseToAnyPublisher()
+        }
+
         guard !apiKey.isEmpty else {
             return Fail(error: URLError(.userAuthenticationRequired)).eraseToAnyPublisher()
         }

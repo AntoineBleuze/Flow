@@ -18,73 +18,27 @@ struct SearchTabContent: View {
     let context = PersistenceController.shared.container.viewContext
     @State private var cancellables = Set<AnyCancellable>()
     
-    // Itinerary State
-    @State private var searchMode: SearchMode = .station
-    @State private var startStation: MapStation?
-    @State private var endStation: MapStation?
-    @State private var departureDate = Date()
-    @State private var isArrivalTime = false
-    @State private var itineraryResults: [Journey] = []
-    @State private var selectedJourney: Journey?
-    @State private var itineraryPanelState: ItineraryPanelState = .expanded
-    
     // Live Map and Focus Interaction State
     @State private var userTrackingMode: MKUserTrackingMode = .none
     @State private var focusedSectionId: String? = nil
-    
-    enum SearchMode: String, CaseIterable {
-        case station = "Stations"
-        case itinerary = "Itinéraire"
-    }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                Picker("Mode", selection: $searchMode) {
-                    ForEach(SearchMode.allCases, id: \.self) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .padding()
-                .background(.ultraThinMaterial)
-                .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 12))
-                .padding(.horizontal)
-                .padding(.bottom, 8)
-
-                if searchMode == .station {
+            GlassEffectContainer(spacing: 0) {
+                VStack(spacing: 0) {
                     stationSearchView
-                } else {
-                    Spacer() // Pushes ItinerarySearchPanel to the bottom
-                    itinerarySearchView
                 }
             }
             .background {
-                if searchMode == .itinerary {
-                    MapViewControllerBridge(
-                        data: mapData,
-                        selectedStation: .constant(nil),
-                        userTrackingMode: $userTrackingMode,
-                        journey: selectedJourney,
-                        focusedSectionId: focusedSectionId,
-                        useMainMap: false,
-                        showAnnotations: true
-                    )
-                    .ignoresSafeArea()
-                } else {
-                    ZStack {
-                        ShaderAnimationView(isLoading: true)
-                        (colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.15))
-                            .glassEffect(.ultraThin)
-                    }
-                    .ignoresSafeArea()
+                ZStack {
+                    ShaderAnimationView(isLoading: true)
+                    (colorScheme == .dark ? Color.black.opacity(0.05) : Color.white.opacity(0.05))
+                        .background(.ultraThinMaterial.opacity(0.97))
                 }
+                .ignoresSafeArea()
             }
-            .onChange(of: selectedJourney?.id) { _, _ in
-                focusedSectionId = nil
-            }
-            .navigationTitle(searchMode == .station ? "Recherche" : "Itinéraires")
-            .navigationBarTitleDisplayMode(searchMode == .station ? .large : .inline)
+            .navigationTitle("Recherche")
+            .navigationBarTitleDisplayMode(.large)
         }
     }
     
@@ -182,9 +136,11 @@ struct SearchTabContent: View {
                 }
             }
             .padding(.top, 8)
-            .padding(.bottom, 160)
+            .padding(.bottom, 100)
         }
-        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always))
+        .safeAreaInset(edge: .bottom) {
+            bottomSearchBar
+        }
         .onChange(of: searchText) { _, newValue in
             performSearch(query: newValue)
         }
@@ -196,69 +152,33 @@ struct SearchTabContent: View {
         }
     }
     
-    // MARK: - Itinerary Search View
-    var itinerarySearchView: some View {
-        ItinerarySearchPanel(
-            startStation: $startStation,
-            endStation: $endStation,
-            departureDate: $departureDate,
-            isArrivalTime: $isArrivalTime,
-            journeys: $itineraryResults,
-            selectedJourney: $selectedJourney,
-            focusedSectionId: $focusedSectionId,
-            panelState: $itineraryPanelState,
-            onSearch: performItinerarySearch,
-            onSwap: {
-                let temp = startStation
-                startStation = endStation
-                endStation = temp
-            },
-            onCurrentLocation: {
-               if let coord = LocationManager.shared.userLocation {
-                   startStation = MapStation(id: "user-location", name: "Ma position", coordinate: coord, platforms: [], isHub: false, mainType: .bus, lines: [])
-               }
-            },
-            onStartNavigation: {
-                print("🔘 Start Navigation Button Tapped")
-                if let journey = selectedJourney {
-                    print("🚀 Launching Journey: \(journey.id)")
-                    // 1. Direct Start
-                    NavigationManager.shared.startNavigation(journey: journey)
-                    // 2. Direct Switch
-                    coordinator.switchToExplore()
-                    
-                    // 3. Clear/Reset itinerary search state
-                    startStation = nil
-                    endStation = nil
-                    itineraryResults = []
-                    selectedJourney = nil
-                    itineraryPanelState = .expanded
-                    searchMode = .station
-                } else {
-                    print("⚠️ No selected journey to start")
+    var bottomSearchBar: some View {
+        HStack {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(.secondary)
+            
+            TextField("Rechercher une station...", text: $searchText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 16, weight: .medium))
+            
+            if !searchText.isEmpty {
+                Button(action: {
+                    searchText = ""
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
                 }
+                .buttonStyle(.plain)
             }
-        )
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .glassEffect(.regular.interactive(), in: Capsule())
+        .padding(.horizontal)
+        .padding(.bottom, 8)
     }
     
-    func performItinerarySearch() {
-        guard let start = startStation, let end = endStation else { return }
-        
-        IDFMItineraryService.shared.searchItinerary(
-            from: start.coordinate,
-            to: end,
-            date: departureDate,
-            isArrival: isArrivalTime
-        )
-        .receive(on: DispatchQueue.main)
-        .sink(receiveCompletion: { _ in }, receiveValue: { results in
-            self.itineraryResults = results
-            withAnimation {
-                self.itineraryPanelState = .results
-            }
-        })
-        .store(in: &cancellables) // Need to add cancellables set
-    }
+
 
 
     func selectStation(_ station: MapStation) {
@@ -373,7 +293,7 @@ struct SearchTabContent: View {
     }
 
     private func mapType(_ typeStr: String) -> TransportType {
-        let lower = typeStr.lowercased()
+        let lower = typeStr.lowercased().folding(options: .diacriticInsensitive, locale: .current)
         if lower.contains("rer") { return .rer }
         if lower.contains("metro") { return .metro }
         if lower.contains("tram") { return .tram }
@@ -387,7 +307,12 @@ struct StationRow: View {
 
     private var transportModes: [TransportType] {
         let modes = Set(station.lines.map { $0.type })
-        return Array(modes).sorted { $0.priority > $1.priority }
+        let nonBusModes = modes.filter { $0 != .bus }
+        if !nonBusModes.isEmpty {
+            return Array(nonBusModes).sorted { customPriority($0) > customPriority($1) }
+        } else {
+            return Array(modes).sorted { customPriority($0) > customPriority($1) }
+        }
     }
 
     private var modesString: String {
@@ -398,17 +323,58 @@ struct StationRow: View {
         transportModes.count > 1
     }
 
+    private var displayedStationLines: [StationLine] {
+        let allLines = station.lines
+        let nonBusLines = allLines.filter { $0.type != .bus }
+        
+        if !nonBusLines.isEmpty {
+            return nonBusLines.sorted { lhs, rhs in
+                let lhsPriority = customPriority(lhs.type)
+                let rhsPriority = customPriority(rhs.type)
+                if lhsPriority != rhsPriority {
+                    return lhsPriority > rhsPriority
+                }
+                
+                // Same type: compare names
+                let lhsName = lhs.name
+                let rhsName = rhs.name
+                let lhsIsNum = lhsName.allSatisfy { $0.isNumber }
+                let rhsIsNum = rhsName.allSatisfy { $0.isNumber }
+                if lhsIsNum && rhsIsNum {
+                    if let lVal = Int(lhsName), let rVal = Int(rhsName) {
+                        return lVal < rVal
+                    }
+                }
+                return lhsName.localizedStandardCompare(rhsName) == .orderedAscending
+            }
+        } else {
+            return []
+        }
+    }
+
+    private func customPriority(_ type: TransportType) -> Int {
+        switch type {
+        case .metro: return 100
+        case .rer: return 90
+        case .tram: return 80
+        case .transilien, .train: return 70
+        case .cable: return 60
+        case .bus: return 50
+        }
+    }
+
     var body: some View {
         HStack(spacing: 16) {
-            if !station.lines.isEmpty {
+            let lines = displayedStationLines
+            if !lines.isEmpty {
                 HStack(spacing: 4) {
-                    let displayedLines = station.lines.prefix(3)
-                    ForEach(displayedLines, id: \.name) { line in
+                    let displayed = lines.prefix(3)
+                    ForEach(displayed, id: \.id) { line in
                         LineIcon(type: line.type, lineId: line.name, size: 24)
                     }
                     
-                    if station.lines.count > 3 {
-                        Text("+\(station.lines.count - 3)")
+                    if lines.count > 3 {
+                        Text("+\(lines.count - 3)")
                             .font(.system(size: 9, weight: .bold))
                             .foregroundColor(.secondary)
                             .padding(.horizontal, 4)
@@ -418,12 +384,26 @@ struct StationRow: View {
                     }
                 }
                 .frame(width: 80, alignment: .leading)
+            } else if station.lines.contains(where: { $0.type == .bus }) {
+                // Show a single, beautiful bus icon for bus-only stations
+                HStack {
+                    ZStack {
+                        Circle()
+                            .fill(Color.orange.opacity(0.15))
+                            .frame(width: 28, height: 28)
+                        
+                        Image(systemName: "bus")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.orange)
+                    }
+                    Spacer()
+                }
+                .frame(width: 80, alignment: .leading)
             } else {
                 ZStack {
                     Circle()
                         .fill((isMultiModal ? .blue : color(for: station.mainType)).opacity(0.15))
                         .frame(width: 36, height: 36)
-                        .glassEffect(.standard, in: Circle())
                     
                     Image(systemName: isMultiModal ? "train.side.front.car" : iconName(for: station.mainType))
                         .font(.system(size: 16, weight: .semibold))
@@ -482,4 +462,10 @@ struct StationRow: View {
         }
     }
 }
+
+#Preview {
+    SearchTabContent(searchText: .constant(""))
+        .environmentObject(NavigationCoordinator())
+}
+
 

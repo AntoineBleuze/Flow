@@ -1,12 +1,14 @@
 import CoreData
 import CoreLocation
 import SwiftUI
+import MapKit
 
 struct SimpleStationPicker: View {
     @Environment(\.dismiss) var dismiss
     @Binding var selectedStation: MapStation?
     @State private var searchText = ""
     @State private var searchResults: [MapStation] = []
+    @State private var currentSearch: MKLocalSearch? = nil
 
     let currentLocation: CLLocationCoordinate2D?
     let context = PersistenceController.shared.container.viewContext
@@ -67,8 +69,13 @@ struct SimpleStationPicker: View {
                             dismiss()
                         }) {
                             HStack {
-                                Image(systemName: iconName(for: station.mainType))
-                                    .foregroundColor(color(for: station.mainType))
+                                if station.id.hasPrefix("address:") {
+                                    Image(systemName: "mappin.and.ellipse")
+                                        .foregroundColor(.red)
+                                } else {
+                                    Image(systemName: iconName(for: station.mainType))
+                                        .foregroundColor(color(for: station.mainType))
+                                }
                                 VStack(alignment: .leading) {
                                     Text(station.name)
                                         .font(.headline)
@@ -89,6 +96,8 @@ struct SimpleStationPicker: View {
     }
 
     func performSearch(query: String) {
+        currentSearch?.cancel()
+        
         guard !query.isEmpty else {
             searchResults = []
             return
@@ -99,11 +108,12 @@ struct SimpleStationPicker: View {
         request.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
         request.fetchLimit = 50
 
+        var stations: [MapStation] = []
         do {
             let results = try context.fetch(request)
             let grouped = Dictionary(grouping: results) { "\($0.name ?? "")_\($0.city ?? "")" }
 
-            let stations: [MapStation] = grouped.compactMap { (_, stops) in
+            stations = grouped.compactMap { (_, stops) in
                 guard let first = stops.first,
                     let name = first.name
                 else { return nil }
@@ -132,19 +142,66 @@ struct SimpleStationPicker: View {
                 )
             }
 
-            searchResults = stations.sorted { $0.name < $1.name }
+            stations.sort { $0.name < $1.name }
+            searchResults = stations
 
         } catch {
             print("❌ Search error: \(error)")
         }
+
+        let searchRequest = MKLocalSearch.Request()
+        searchRequest.naturalLanguageQuery = query
+        let parisCenter = CLLocationCoordinate2D(latitude: 48.8566, longitude: 2.3522)
+        searchRequest.region = MKCoordinateRegion(
+            center: parisCenter,
+            latitudinalMeters: 50000,
+            longitudinalMeters: 50000
+        )
+        
+        let search = MKLocalSearch(request: searchRequest)
+        currentSearch = search
+        
+        search.start { response, error in
+            guard let response = response, error == nil else {
+                return
+            }
+            
+            let addressStations: [MapStation] = response.mapItems.compactMap { item in
+                guard let coordinate = item.placemark.location?.coordinate else { return nil }
+                
+                let name = item.name ?? ""
+                let subtitle = item.placemark.title ?? ""
+                let displayName = subtitle.isEmpty ? name : subtitle
+                
+                return MapStation(
+                    id: "address:\(coordinate.latitude),\(coordinate.longitude)",
+                    name: displayName,
+                    coordinate: coordinate,
+                    platforms: [],
+                    isHub: false,
+                    mainType: .bus,
+                    lines: []
+                )
+            }
+            
+            DispatchQueue.main.async {
+                var merged = stations
+                for addr in addressStations {
+                    if !merged.contains(where: { $0.id == addr.id }) {
+                        merged.append(addr)
+                    }
+                }
+                self.searchResults = merged
+            }
+        }
     }
 
     private func mapType(_ typeStr: String) -> TransportType {
-        let lower = typeStr.lowercased()
-        if lower.contains("rer") { return .rer }
-        if lower.contains("metro") { return .metro }
-        if lower.contains("tram") { return .tram }
-        if lower.contains("train") || lower.contains("transilien") { return .transilien }
+        let folded = typeStr.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+        if folded.contains("rer") { return .rer }
+        if folded.contains("metro") { return .metro }
+        if folded.contains("tram") { return .tram }
+        if folded.contains("train") || folded.contains("transilien") { return .transilien }
         return .bus
     }
 
@@ -172,3 +229,11 @@ struct SimpleStationPicker: View {
         }
     }
 }
+
+#Preview {
+    SimpleStationPicker(
+        selectedStation: .constant(PreviewMockData.mockStation),
+        currentLocation: CLLocationCoordinate2D(latitude: 48.8239, longitude: 2.2743)
+    )
+}
+

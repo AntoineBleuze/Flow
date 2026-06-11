@@ -13,8 +13,8 @@ struct LineSchematicPlanView: View {
             ZStack {
                 let lineColor = resolveLineColor(line.lineId, type: line.type)
                 ShaderAnimationView(isLoading: false, customColors: [lineColor])
-                (colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.15))
-                    .glassEffect(.ultraThin)
+                (colorScheme == .dark ? Color.black.opacity(0.05) : Color.white.opacity(0.05))
+                    .background(.ultraThinMaterial)
             }
             .ignoresSafeArea()
             

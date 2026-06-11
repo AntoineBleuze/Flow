@@ -4,6 +4,14 @@ struct StationBadgeView: View {
     let station: MapStation
     let isSelected: Bool
 
+    private var displayedLines: [StationLine] {
+        if FavoritesService.shared.isFavorite(stationId: station.id) {
+            return station.lines
+        } else {
+            return station.lines.filter { MapDataService.shared.isLineTypeEnabled($0.type) }
+        }
+    }
+
     var body: some View {
         VStack(spacing: 3) {
             // Nom de la station avec fond légèrement translucide
@@ -22,13 +30,13 @@ struct StationBadgeView: View {
                 .scaleEffect(isSelected ? 1.15 : 1.0)
 
             Group {
-                if station.lines.isEmpty {
+                if displayedLines.isEmpty {
                     // Station sans ligne (fallback)
                     Circle()
                         .fill(Color.gray)
                         .frame(width: 14, height: 14)
                         .shadow(radius: 2)
-                } else if station.lines.count == 1, let firstLine = station.lines.first {
+                } else if displayedLines.count == 1, let firstLine = displayedLines.first {
                     // Station avec une seule ligne : on affiche directement son badge officiel
                     LineBadge(line: firstLine)
                         .shadow(color: isSelected ? resolveLineColor(firstLine.name, type: firstLine.type).opacity(0.6) : Color.black.opacity(0.15),
@@ -45,12 +53,12 @@ struct StationBadgeView: View {
                         
                         // Liste horizontale des badges des lignes (limité à 4 pour ne pas surcharger)
                         HStack(spacing: 2) {
-                            ForEach(station.lines.prefix(4), id: \.id) { line in
+                            ForEach(displayedLines.prefix(4), id: \.id) { line in
                                 LineBadge(line: line, mini: true)
                             }
                             
-                            if station.lines.count > 4 {
-                                Text("+\(station.lines.count - 4)")
+                            if displayedLines.count > 4 {
+                                Text("+\(displayedLines.count - 4)")
                                     .font(.system(size: 7, weight: .bold))
                                     .foregroundColor(.secondary)
                                     .padding(.horizontal, 2)
@@ -147,12 +155,21 @@ struct LineBadge: View {
 
                 default:
                     // Fallback bus ou autre
-                    Text(line.name)
-                        .font(.system(size: fontSize, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, mini ? 3 : 5)
-                        .frame(height: size)
-                        .background(Capsule().fill(color))
+                    if line.type == .bus {
+                        Text(line.name)
+                            .font(.system(size: fontSize, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, mini ? 3 : 5)
+                            .frame(height: size)
+                            .background(RoundedRectangle(cornerRadius: cornerRadius).fill(color))
+                    } else {
+                        Text(line.name)
+                            .font(.system(size: fontSize, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, mini ? 3 : 5)
+                            .frame(height: size)
+                            .background(Capsule().fill(color))
+                    }
                 }
             }
         }
@@ -215,3 +232,13 @@ func resolveLineColor(_ name: String, type: TransportType) -> Color {
     
     return Color(type.accentColor)
 }
+
+#Preview {
+    StationBadgeView(
+        station: PreviewMockData.mockStation,
+        isSelected: true
+    )
+    .padding()
+    .background(Color.secondary.opacity(0.3))
+}
+

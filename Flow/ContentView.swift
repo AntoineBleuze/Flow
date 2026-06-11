@@ -1,5 +1,6 @@
 import Combine
 import SwiftUI
+import MapKit
 
 struct ContentView: View {
     @StateObject private var coordinator = NavigationCoordinator()
@@ -17,9 +18,11 @@ struct ContentView: View {
                 }
 
                 Tab("À Proximité", systemImage: "location.circle.fill", value: "Nearby") {
-                    NavigationStack {
-                        NearbyStationsView()
-                    }
+                    NearbyStationsView()
+                }
+
+                Tab("Favoris", systemImage: "star.fill", value: "Favorites") {
+                    FavoritesView()
                 }
 
                 Tab("Trafic", systemImage: "tram.fill", value: "Trafic") {
@@ -29,18 +32,15 @@ struct ContentView: View {
                     }
                 }
 
-                Tab("Plans", systemImage: "map.fill", value: "Plans") {
-                    NavigationStack {
-                        LineSchematicSelectionView()
-                    }
-                }
-
                 Tab(value: "Search", role: .search) {
                     SearchTabContent(searchText: $searchText)
                 }
             }
             .accentColor(.blue)
             .environmentObject(coordinator)
+#if os(iOS)
+            .tabBarMinimizeBehavior(.onScrollDown)
+#endif
             // Auto-switch to Explore when navigation starts
             .onChange(of: navigationManager.shouldSwitchToMap) { _, shouldSwitch in
                 if shouldSwitch {
@@ -72,7 +72,6 @@ struct ContentView: View {
 
 struct TrafficViewContent: View {
     @StateObject var service = TrafficService()
-    @AppStorage("isTrafficSummaryEnabled") private var isTrafficSummaryEnabled = false
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.colorScheme) var colorScheme
 
@@ -118,23 +117,6 @@ struct TrafficViewContent: View {
                 }
                 .padding(.horizontal)
 
-                // Toggle IA (Global)
-                if TrafficSummarizer.shared.isAvailable {
-                    Toggle(isOn: $isTrafficSummaryEnabled) {
-                        HStack {
-                            Image(systemName: "sparkles")
-                                .foregroundColor(.purple)
-                            Text("Résumer le trafic avec l'IA")
-                                .font(.subheadline)
-                                .fontWeight(.bold)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .glassEffect(Glass.standard.interactive(), in: RoundedRectangle(cornerRadius: 15))
-                    .padding(.horizontal)
-                }
-
                 // Status Filter Menu
                 Menu {
                     ForEach(StatusFilter.allCases) { filter in
@@ -164,7 +146,8 @@ struct TrafficViewContent: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
-                    .glassEffect(Glass.standard.interactive(), in: Capsule())
+                    .background(.ultraThinMaterial.opacity(0.97))
+                    .clipShape(Capsule())
                 }
                 .padding(.horizontal)
 
@@ -181,13 +164,15 @@ struct TrafficViewContent: View {
 
                             // Grid Layout — adaptive for iPad
                             let isIPad = horizontalSizeClass == .regular
-                            LazyVGrid(
-                                columns: [
-                                    GridItem(.adaptive(minimum: isIPad ? 100 : 80, maximum: isIPad ? 130 : 100), spacing: isIPad ? 20 : 16)
-                                ], spacing: isIPad ? 20 : 16
-                            ) {
-                                ForEach(filteredLines) { line in
-                                    TrafficLineCell(line: line, isIPad: isIPad)
+                            GlassEffectContainer(spacing: isIPad ? 20 : 16) {
+                                LazyVGrid(
+                                    columns: [
+                                        GridItem(.adaptive(minimum: isIPad ? 100 : 80, maximum: isIPad ? 130 : 100), spacing: isIPad ? 20 : 16)
+                                    ], spacing: isIPad ? 20 : 16
+                                ) {
+                                    ForEach(filteredLines) { line in
+                                        TrafficLineCell(line: line, isIPad: isIPad)
+                                    }
                                 }
                             }
                             .padding(.horizontal)
@@ -209,19 +194,44 @@ struct TrafficViewContent: View {
         .background {
             ZStack {
                 ShaderAnimationView(isLoading: true)
-                (colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.15))
-                    .glassEffect(.ultraThin)
+                (colorScheme == .dark ? Color.black.opacity(0.05) : Color.white.opacity(0.05))
+                    .background(.ultraThinMaterial.opacity(0.65))
             }
             .ignoresSafeArea()
         }
     }
 
     private func lines(for type: TransportType) -> [TransportLine] {
-        service.lines.filter { line in
+        let filtered = service.lines.filter { line in
             if selectedFilter == .all {
                 return line.type == type
             } else {
                 return line.type == type && line.status == selectedFilter.matchingStatus
+            }
+        }
+        
+        return filtered.sorted { lhs, rhs in
+            let lhsId = lhs.lineId
+            let rhsId = rhs.lineId
+            
+            let lhsStartsWithNumber = lhsId.first?.isNumber ?? false
+            let rhsStartsWithNumber = rhsId.first?.isNumber ?? false
+            
+            if lhsStartsWithNumber && rhsStartsWithNumber {
+                let lhsNumPrefix = lhsId.prefix { $0.isNumber }
+                let rhsNumPrefix = rhsId.prefix { $0.isNumber }
+                if let lInt = Int(lhsNumPrefix), let rInt = Int(rhsNumPrefix) {
+                    if lInt != rInt {
+                        return lInt < rInt
+                    }
+                }
+                return lhsId.localizedStandardCompare(rhsId) == .orderedAscending
+            } else if lhsStartsWithNumber {
+                return true
+            } else if rhsStartsWithNumber {
+                return false
+            } else {
+                return lhsId.localizedStandardCompare(rhsId) == .orderedAscending
             }
         }
     }
@@ -240,7 +250,8 @@ private struct TrafficLineCell: View {
                     statusBadge
                 }
         }
-        .buttonStyle(.glass)
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     @ViewBuilder
@@ -302,7 +313,7 @@ struct FavoritesViewContent: View {
                             ) {
                                 FavoriteStationRow(station: station)
                             }
-                            .buttonStyle(.glass)
+                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -313,13 +324,15 @@ struct FavoritesViewContent: View {
         .background {
             ZStack {
                 ShaderAnimationView(isLoading: true)
-                (colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.15))
-                    .glassEffect(.ultraThin)
+                (colorScheme == .dark ? Color.black.opacity(0.05) : Color.white.opacity(0.05))
+                    .background(.ultraThinMaterial.opacity(0.97))
             }
             .ignoresSafeArea()
         }
         .navigationTitle("Favoris")
+#if os(iOS)
         .navigationBarTitleDisplayMode(.large)
+#endif
     }
 }
 
@@ -394,5 +407,16 @@ struct FavoriteStationRow: View {
 }
 
 #Preview {
-    ContentView()
+    let _ = {
+        LocationManager.shared.isSimulating = true
+        LocationManager.shared.simulateLocation(latitude: 48.8566, longitude: 2.3522)
+    }()
+    return ContentView()
+}
+
+#Preview("Traffic Line Picker") {
+    NavigationStack {
+        TrafficViewContent()
+            .navigationTitle("Trafic")
+    }
 }

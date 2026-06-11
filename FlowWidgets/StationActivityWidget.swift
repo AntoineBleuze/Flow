@@ -1,6 +1,7 @@
 import ActivityKit
 import WidgetKit
 import SwiftUI
+import AppIntents
 
 struct StationActivityWidget: Widget {
     var body: some WidgetConfiguration {
@@ -29,11 +30,20 @@ struct StationActivityWidget: Widget {
                 }
 
                 DynamicIslandExpandedRegion(.trailing) {
-                    if let first = context.state.nextDepartures.first {
-                        Text(first)
-                            .font(.system(size: 24, weight: .bold, design: .rounded))
-                            .foregroundStyle(.green)
-                            .monospacedDigit()
+                    HStack(spacing: 8) {
+                        Button(intent: RefreshDeparturesIntent()) {
+                            Image(systemName: "bolt.fill")
+                                .font(.caption)
+                                .foregroundColor(.pink)
+                        }
+                        .buttonStyle(.plain)
+                        
+                        if let first = context.state.nextDepartures.first {
+                            Text(first)
+                                .font(.system(size: 24, weight: .bold, design: .rounded))
+                                .foregroundStyle(.green)
+                                .monospacedDigit()
+                        }
                     }
                 }
 

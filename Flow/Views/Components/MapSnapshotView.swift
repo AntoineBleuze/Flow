@@ -237,3 +237,8 @@ class MapSnapshotCache {
 
     private init() {}
 }
+
+#Preview {
+    MapSnapshotView()
+}
+

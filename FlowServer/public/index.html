@@ -385,6 +385,14 @@
       </div>
     </div>
 
+    <!-- Logs Card -->
+    <div class="card" style="margin-top: 20px; margin-bottom: 20px;">
+      <div class="section-title"><span>📝</span> Logs du Serveur (Temps Réel)</div>
+      <div id="logs-viewer" style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 16px; font-family: 'Courier New', Courier, monospace; font-size: 0.78rem; line-height: 1.5; max-height: 350px; overflow-y: auto; white-space: pre-wrap; color: #a4b5c6;">
+        Chargement des logs...
+      </div>
+    </div>
+
     <p id="last-update">—</p>
 
   </div>
@@ -549,13 +557,43 @@
       });
     }
 
+    // ── Fetch logs ──
+    async function fetchLogs() {
+      try {
+        const res = await fetch("/api/logs");
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        const viewer = document.getElementById("logs-viewer");
+        if (data.logs && data.logs.length > 0) {
+          // Highlight errors/warnings
+          viewer.innerHTML = data.logs.map(line => {
+            if (line.includes("[ERROR]")) {
+              return `<span style="color:var(--red)">${line}</span>`;
+            }
+            if (line.includes("[WARN]")) {
+              return `<span style="color:var(--yellow)">${line}</span>`;
+            }
+            return line;
+          }).join("\n");
+          // auto scroll to bottom
+          viewer.scrollTop = viewer.scrollHeight;
+        } else {
+          viewer.textContent = "Aucun log enregistré.";
+        }
+      } catch {
+        document.getElementById("logs-viewer").textContent = "Impossible de récupérer les logs.";
+      }
+    }
+
     // ── Init ──
     async function init() {
       await fetchHealth();
       await fetchTraffic();
+      await fetchLogs();
       connectWS();
       setInterval(fetchHealth, 10000);
       setInterval(fetchTraffic, 30000);
+      setInterval(fetchLogs, 5000);
       const now = new Date().toLocaleTimeString("fr-FR", { hour:"2-digit", minute:"2-digit", second:"2-digit" });
       document.getElementById("last-update").textContent = `Page chargée à ${now}`;
     }

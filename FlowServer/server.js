@@ -9,6 +9,39 @@ const cors = require("cors");
 const http = require("http");
 const { WebSocketServer, WebSocket } = require("ws");
 
+// --- Système de capture des logs en mémoire ---
+const originalLog = console.log;
+const originalError = console.error;
+const originalWarn = console.warn;
+const serverLogs = [];
+const MAX_LOG_LINES = 1000;
+
+function formatTime() {
+  return new Date().toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris" });
+}
+
+console.log = function(...args) {
+  const msg = args.join(' ');
+  originalLog.apply(console, args);
+  serverLogs.push(`[${formatTime()}] [INFO] ${msg}`);
+  if (serverLogs.length > MAX_LOG_LINES) serverLogs.shift();
+};
+
+console.error = function(...args) {
+  const msg = args.join(' ');
+  originalError.apply(console, args);
+  serverLogs.push(`[${formatTime()}] [ERROR] ${msg}`);
+  if (serverLogs.length > MAX_LOG_LINES) serverLogs.shift();
+};
+
+console.warn = function(...args) {
+  const msg = args.join(' ');
+  originalWarn.apply(console, args);
+  serverLogs.push(`[${formatTime()}] [WARN] ${msg}`);
+  if (serverLogs.length > MAX_LOG_LINES) serverLogs.shift();
+};
+// ----------------------------------------------
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 const IDFM_API_KEY = process.env.IDFM_API_KEY;
@@ -96,14 +129,14 @@ async function processNavitiaQueue() {
 
     if (!response.ok) {
       const text = await response.text();
-      // Si on se prend un 429 quand même, on réinjecte au début de la queue avec un délai
+      // Si on se prend un 429 quand même, on réinjecte au début de la queue avec un délai de 2 secondes
       if (response.status === 429) {
-        console.warn(`[${timestamp}] ⚠️ 429 détecté, attente prolongée...`);
+        console.warn(`[${timestamp}] ⚠️ 429 détecté, attente prolongée (2s)...`);
         navitiaQueue.unshift({ url, resolve, reject });
         setTimeout(() => {
           isProcessingQueue = false;
           processNavitiaQueue();
-        }, 1000);
+        }, 2000);
         return;
       }
       throw new Error(`Navitia ${response.status}: ${text}`);
@@ -111,10 +144,15 @@ async function processNavitiaQueue() {
 
     const data = await response.json();
     resolve(data);
+
+    // Petit délai de 200ms après un appel réussi pour respecter les limites
+    setTimeout(() => {
+      isProcessingQueue = false;
+      processNavitiaQueue();
+    }, 200);
   } catch (err) {
     reject(err);
-  } finally {
-    // Petit délai entre chaque appel réussi pour ne pas saturer (100ms)
+    // En cas d'erreur (autre que 429), on passe à la suite après 100ms
     setTimeout(() => {
       isProcessingQueue = false;
       processNavitiaQueue();
@@ -487,6 +525,11 @@ function pushCachedDepartures(ws) {
 // ============================================================
 // REST Endpoints (toujours disponibles)
 // ============================================================
+
+// GET /api/logs — Obtenir les logs du serveur en mémoire
+app.get("/api/logs", (req, res) => {
+  res.json({ logs: serverLogs });
+});
 
 // GET /api/health — Santé du serveur
 app.get("/api/health", (req, res) => {

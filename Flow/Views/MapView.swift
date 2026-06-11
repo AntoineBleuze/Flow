@@ -19,8 +19,8 @@ struct AppMapView: View {
     @State private var selectedStation: MapStation?
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
+    @EnvironmentObject var coordinator: NavigationCoordinator
     @State private var visibleRegion: MKCoordinateRegion?
-    @State private var userTrackingMode: MKUserTrackingMode = .none
     
     // MARK: - Itinerary State
     @State private var startStation: MapStation?
@@ -41,103 +41,134 @@ struct AppMapView: View {
     var showControls: Bool = true
 
     var body: some View {
-        ZStack {
-            MapViewControllerBridge(
-                data: data,
-                selectedStation: $selectedStation,
-                userTrackingMode: $userTrackingMode,
-                journey: navigationManager.isNavigating ? navigationManager.currentJourney : selectedJourney,
-                useMainMap: showControls,
-                showAnnotations: showControls
-            )
-            .ignoresSafeArea()
-            
-            // ItinerarySearchPanel removed. Integrated into SearchTabContent.
-            
-            // Immersive Navigation View
-            // Immersive Navigation View
-            if navigationManager.isNavigating, let journey = navigationManager.currentJourney {
-                ImmersiveNavigationView(
-                    journey: journey,
-                    navigationMode: $navigationManager.isNavigating,
-                    userTrackingMode: $userTrackingMode
+        GlassEffectContainer {
+            ZStack {
+                MapViewControllerBridge(
+                    data: data,
+                    selectedStation: $selectedStation,
+                    userTrackingMode: $coordinator.userTrackingMode,
+                    journey: navigationManager.isNavigating ? navigationManager.currentJourney : selectedJourney,
+                    useMainMap: showControls,
+                    showAnnotations: showControls
                 )
-                .zIndex(20)
-                .transition(.move(edge: .bottom))
-            }
-
-            // Controls Layer (Recenter Button)
-            if showControls && !isNavigatingImmersive {
-                VStack(spacing: 0) {
-                    Spacer()
-
-                    // Recenter Button (Bottom Right)
-                    HStack {
+                .ignoresSafeArea()
+                
+                if showControls {
+                    VStack {
                         Spacer()
-
-                        Button(action: {
-                            cycleUserTrackingMode()
-                        }) {
-                            Image(systemName: userTrackingModeImageName)
-                                .font(.title2)
-                                .foregroundColor(userTrackingMode == .none ? .primary : .blue)
-                                .padding(14)
-                                .background(.clear)
+                        HStack {
+                            Spacer()
+                            VStack(spacing: 12) {
+                                // Recenter Button
+                                Button(action: {
+                                    coordinator.cycleUserTrackingMode()
+                                }) {
+                                    Image(systemName: coordinator.userTrackingModeImageName)
+                                        .font(.title3)
+                                        .foregroundColor(coordinator.userTrackingMode == .none ? .primary : .blue)
+                                        .frame(width: 44, height: 44)
+                                }
+                                .buttonStyle(.plain)
                                 .glassEffect(.regular.interactive(), in: .circle)
-                        }
-                        .padding(.trailing, 16)
-                    }
-                    .padding(.bottom, 16)
-                }
-            }
-
-            // iPad: Station detail panel at bottom-left (resizable)
-            if horizontalSizeClass == .regular, let station = selectedStation {
-                VStack {
-                    Spacer()
-                    HStack(alignment: .bottom) {
-                        VStack(spacing: 0) {
-                            // Drag handle at top for resizing
-                            Capsule()
-                                .fill(Color.secondary.opacity(0.5))
-                                .frame(width: 40, height: 5)
-                                .padding(.top, 8)
-                                .padding(.bottom, 4)
-                                .frame(maxWidth: .infinity)
-                                .contentShape(Rectangle().size(width: 120, height: 40))
-                                .gesture(
-                                    DragGesture()
-                                        .updating($iPadPanelDragOffset) { value, state, _ in
-                                            state = value.translation.height
-                                        }
-                                        .onEnded { value in
-                                            let newHeight = iPadPanelHeight - value.translation.height
-                                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                                iPadPanelHeight = min(700, max(350, newHeight))
+                                .shadow(color: Color.black.opacity(0.15), radius: 5, x: 0, y: 2)
+                                
+                                // Transport Filter Button
+                                Menu {
+                                    ForEach(["Métro", "RER / Train", "Tram", "Bus"], id: \.self) { category in
+                                        Button(action: {
+                                            if data.activeCategories.contains(category) {
+                                                data.activeCategories.remove(category)
+                                            } else {
+                                                data.activeCategories.insert(category)
+                                            }
+                                        }) {
+                                            HStack {
+                                                Text(category)
+                                                if data.activeCategories.contains(category) {
+                                                    Image(systemName: "checkmark")
+                                                }
                                             }
                                         }
-                                )
-
-                            StationDetailSheet(
-                                station: station,
-                                onDismiss: {
-                                    withAnimation(.easeInOut(duration: 0.3)) {
-                                        selectedStation = nil
                                     }
+                                } label: {
+                                    Image(systemName: data.activeCategories.count < 4 ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                                        .font(.title3)
+                                        .foregroundColor(data.activeCategories.count < 4 ? .blue : .primary)
+                                        .frame(width: 44, height: 44)
                                 }
-                            )
+                                .buttonStyle(.plain)
+                                .glassEffect(.regular.interactive(), in: .circle)
+                                .shadow(color: Color.black.opacity(0.15), radius: 5, x: 0, y: 2)
+                            }
+                            .padding(.trailing, 16)
+                            .padding(.bottom, 16)
                         }
-                        .frame(width: 380, height: min(700, max(350, iPadPanelHeight - iPadPanelDragOffset)))
-                        .clipShape(RoundedRectangle(cornerRadius: 20))
-                        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20))
-                        .shadow(color: .black.opacity(0.2), radius: 15, x: 0, y: 5)
-                        .padding(.leading, 16)
-                        .padding(.bottom, 16)
-                        .transition(.move(edge: .leading).combined(with: .opacity))
-                        Spacer()
                     }
+                    .zIndex(15)
                 }
-                .zIndex(10)
+                
+                // Immersive Navigation View
+                // Immersive Navigation View
+                if navigationManager.isNavigating, let journey = navigationManager.currentJourney {
+                    ImmersiveNavigationView(
+                        journey: journey,
+                        navigationMode: $navigationManager.isNavigating,
+                        userTrackingMode: $coordinator.userTrackingMode
+                    )
+                    .zIndex(20)
+                    .transition(.move(edge: .bottom))
+                }
+
+
+
+                // iPad: Station detail panel at bottom-left (resizable)
+                if horizontalSizeClass == .regular, let station = selectedStation {
+                    VStack {
+                        Spacer()
+                        HStack(alignment: .bottom) {
+                            VStack(spacing: 0) {
+                                // Drag handle at top for resizing
+                                Capsule()
+                                    .fill(Color.secondary.opacity(0.5))
+                                    .frame(width: 40, height: 5)
+                                    .padding(.top, 8)
+                                    .padding(.bottom, 4)
+                                    .frame(maxWidth: .infinity)
+                                    .contentShape(Rectangle().size(width: 120, height: 40))
+                                    .gesture(
+                                        DragGesture()
+                                            .updating($iPadPanelDragOffset) { value, state, _ in
+                                                state = value.translation.height
+                                            }
+                                            .onEnded { value in
+                                                let newHeight = iPadPanelHeight - value.translation.height
+                                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                                    iPadPanelHeight = min(700, max(350, newHeight))
+                                                }
+                                            }
+                                    )
+
+                                StationDetailSheet(
+                                    station: station,
+                                    onDismiss: {
+                                        withAnimation(.easeInOut(duration: 0.3)) {
+                                            selectedStation = nil
+                                        }
+                                    }
+                                )
+                            }
+                            .frame(width: 380, height: min(700, max(350, iPadPanelHeight - iPadPanelDragOffset)))
+                            .clipShape(RoundedRectangle(cornerRadius: 20))
+                            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20))
+                            .shadow(color: .black.opacity(0.2), radius: 15, x: 0, y: 5)
+                            .padding(.leading, 16)
+                            .padding(.bottom, 16)
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                            Spacer()
+                        }
+                    }
+                    .zIndex(10)
+                }
             }
         }
         // iPhone: keep classic sheet behavior (iPad uses inline panel above)
@@ -180,27 +211,7 @@ struct AppMapView: View {
         }
     }
 
-    private var userTrackingModeImageName: String {
-        switch userTrackingMode {
-        case .none: return "location"
-        case .follow: return "location.fill"
-        case .followWithHeading: return "location.north.line.fill"
-        @unknown default: return "location"
-        }
-    }
 
-    private func cycleUserTrackingMode() {
-        switch userTrackingMode {
-        case .none:
-            userTrackingMode = .follow
-        case .follow:
-            userTrackingMode = .followWithHeading
-        case .followWithHeading:
-            userTrackingMode = .none
-        @unknown default:
-            userTrackingMode = .none
-        }
-    }
     
     private func performSearch() {
         guard let start = startStation, let end = endStation else { return }

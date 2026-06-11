@@ -40,6 +40,8 @@ class LiveActivityManager: ObservableObject {
         self.currentLineColor = lineColor
         self.currentTextColor = textColor
 
+        saveActivityContext(stopIds: stopIds, lineColor: lineColor, textColor: textColor)
+
         let attributes = StationActivityAttributes(stationName: stationName)
         let contentState = StationActivityAttributes.ContentState(
             nextDepartures: nextDepartures,
@@ -166,8 +168,8 @@ class LiveActivityManager: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // 3. Fallback timer (120s) au cas où le WS est déconnecté
-        updateTimer = Timer.scheduledTimer(withTimeInterval: 120.0, repeats: true) {
+        // 3. Fallback timer (60s) au cas où le WS est déconnecté
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) {
             [weak self] _ in
             print("\n⏰ [LiveActivity] Fallback timer fired - Fetching updates...")
             self?.fetchUpdates()
@@ -249,6 +251,16 @@ class LiveActivityManager: ObservableObject {
             )
         } else {
             print("  ⚠️ No valid times found to update")
+        }
+    }
+
+    private func saveActivityContext(stopIds: [String], lineColor: String, textColor: String) {
+        if let defaults = UserDefaults(suiteName: "group.AntoineBleuze.Flow") {
+            defaults.set(stopIds, forKey: "live_activity_stop_ids")
+            defaults.set(lineColor, forKey: "live_activity_line_color")
+            defaults.set(textColor, forKey: "live_activity_text_color")
+            defaults.set(IDFMService.shared.apiKey, forKey: "idfm_api_key")
+            defaults.synchronize()
         }
     }
 

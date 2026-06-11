@@ -68,7 +68,8 @@ struct JourneyCard: View {
             }
         }
         .padding()
-        .glassEffect(isSelected ? .standard.interactive() : .standard, in: RoundedRectangle(cornerRadius: 16))
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
                 .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 2)
@@ -149,3 +150,8 @@ struct JourneyCard: View {
         return "\(mins) min"
     }
 }
+
+#Preview {
+    JourneyCard(journey: PreviewMockData.mockJourney)
+}
+

@@ -13,9 +13,14 @@ struct LoadingScreenView: View {
     
     var body: some View {
         ZStack {
-            // Pure black background
-            Color.black
-                .ignoresSafeArea()
+            // Animated Mesh Gradient mixed with black for a premium backdrop
+            ZStack {
+                Color.black
+                AnimatedMeshGradientView(colors: [.indigo.opacity(0.8), .purple.opacity(0.8), .blue.opacity(0.6), .black], speed: 0.6, intensity: 0.12)
+                    .opacity(0.7)
+            }
+            .ignoresSafeArea()
+
             
             // 1. Metal Shader Animation in background
             if shaderOpacity > 0.0 {
@@ -31,16 +36,14 @@ struct LoadingScreenView: View {
                     .scaleEffect(logoScale)
                     .opacity(logoOpacity)
                 
-                Text("Flow")
-                    .font(.system(size: 48, weight: .black, design: .default))
+                WWDCTextAnimator(text: "Flow", fontSize: 48, animationType: .reveal, speed: 0.9, delay: 0.1)
                     .foregroundColor(.white)
-                    .tracking(4.0)
                     .scaleEffect(logoScale)
                     .opacity(logoOpacity)
                 
-                Text("Le réseau francilien en temps réel")
-                    .font(.system(size: 14, weight: .medium, design: .default))
+                WWDCTextAnimator(text: "Le réseau francilien en temps réel", fontSize: 14, animationType: .reveal, speed: 1.2, delay: 0.4)
                     .foregroundColor(.gray)
+                    .scaleEffect(logoScale)
                     .opacity(logoOpacity)
                 
                 // Subtle progress indicator to show activity

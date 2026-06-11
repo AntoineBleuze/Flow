@@ -4,78 +4,54 @@ struct ShaderAnimationView: View {
     let isLoading: Bool
     let station: MapStation?
     let customColors: [Color]?
+    let showMeshGradient: Bool
     
     @Environment(\.colorScheme) var colorScheme
     @State private var waveProgress: CGFloat
-    @State private var relativeTimeOffset = Date().timeIntervalSinceReferenceDate
+    @State private var relativeTimeOffset = Date().timeIntervalSinceReferenceDate - Double.random(in: 0...1000)
     
-    init(isLoading: Bool, station: MapStation? = nil, customColors: [Color]? = nil) {
+    @State private var isLowPowerMode: Bool
+    
+    // Random parameters to ensure the mesh points move differently every time the screen loads
+    struct AnimationConfig {
+        let dx1: Float = Float.random(in: 0.0...3.0)
+        let dy1: Float = Float.random(in: 0.0...3.0)
+        let fx1: Float = Float.random(in: 0.7...1.3)
+        let fy1: Float = Float.random(in: 0.7...1.3)
+        
+        let dx2: Float = Float.random(in: 0.0...3.0)
+        let dy2: Float = Float.random(in: 0.0...3.0)
+        let fx2: Float = Float.random(in: 0.7...1.3)
+        let fy2: Float = Float.random(in: 0.7...1.3)
+        
+        let dx3: Float = Float.random(in: 0.0...3.0)
+        let dy3: Float = Float.random(in: 0.0...3.0)
+        let fx3: Float = Float.random(in: 0.7...1.3)
+        let fy3: Float = Float.random(in: 0.7...1.3)
+    }
+    @State private var config = AnimationConfig()
+    
+    init(isLoading: Bool, station: MapStation? = nil, customColors: [Color]? = nil, showMeshGradient: Bool = true, forceLowPowerMode: Bool? = nil) {
         self.isLoading = isLoading
         self.station = station
         self.customColors = customColors
+        self.showMeshGradient = showMeshGradient
         self._waveProgress = State(initialValue: isLoading ? 0.0 : 1.0)
+        self._isLowPowerMode = State(initialValue: forceLowPowerMode ?? ProcessInfo.processInfo.isLowPowerModeEnabled)
     }
     
     var body: some View {
-        TimelineView(.animation) { timeline in
-            let date = timeline.date
-            let elapsed = date.timeIntervalSinceReferenceDate - relativeTimeOffset
-            let timeVal = Float(elapsed)
-            
-            let meshColors = getMeshColors(for: colorScheme)
-            
-            // Generate animated mesh points using the unpredictable oscillation pattern
-            let animatedPoints: [SIMD2<Float>] = [
-                // Top row
-                SIMD2<Float>(0.0, 0.0),
-                SIMD2<Float>(0.5, 0.0),
-                SIMD2<Float>(1.0, 0.0),
-                
-                // Middle row (animated asynchronously)
-                SIMD2<Float>(sinOSC(time: timeVal, d: 0.2, f: 1.0), 0.5 + cosOSC(time: timeVal, d: 0.4, f: 0.8)),
-                SIMD2<Float>(0.5 + sinOSC(time: timeVal, d: 0.1, f: 1.2), 0.5 + cosOSC(time: timeVal, d: 0.5, f: 0.9)),
-                SIMD2<Float>(1.0 + sinOSC(time: timeVal, d: 0.3, f: 1.1), 0.5 + cosOSC(time: timeVal, d: 0.2, f: 1.3)),
-                
-                // Bottom row
-                SIMD2<Float>(0.0, 1.0),
-                SIMD2<Float>(0.5, 1.0),
-                SIMD2<Float>(1.0, 1.0)
-            ]
-            
-            GeometryReader { geometry in
-                ZStack {
-                    // Base background matching the theme
-                    colorScheme == .dark ? Color.black : Color.white
-                    
-                    // 1. Mesh Gradient (Gently animated ambient background)
-                    if waveProgress > 0.0 {
-                        MeshGradient(
-                            width: 3,
-                            height: 3,
-                            points: animatedPoints,
-                            colors: meshColors,
-                            background: colorScheme == .dark ? .black : .white
-                        )
-                        .opacity(Double(waveProgress))
-                    }
-                    
-                    // 2. Metal Shader (Glowing rings and wave)
-                    if isLoading || waveProgress < 1.0 {
-                        Rectangle()
-                            .fill(Color.black)
-                            .colorEffect(
-                                ShaderLibrary.shaderAnimation(
-                                    .float(timeVal * 3.0), // match original speed
-                                    .float2(geometry.size),
-                                    .float(Float(waveProgress))
-                                )
-                            )
-                            .opacity(isLoading ? 1.0 : Double(1.0 - waveProgress))
-                    }
-                }
+        Group {
+            if isLowPowerMode {
+                staticBody
+            } else {
+                animatedBody
             }
         }
         .ignoresSafeArea()
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name.NSProcessInfoPowerStateDidChange)) { _ in
+            self.isLowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
+        }
         .onChange(of: isLoading) { oldValue, newValue in
             if newValue {
                 // Instantly reset wave progress to hide mesh gradient when loading starts
@@ -83,6 +59,70 @@ struct ShaderAnimationView: View {
             } else if oldValue == true && newValue == false {
                 // Trigger transition to reveal mesh gradient when loading finishes
                 triggerWave()
+            }
+        }
+    }
+    
+    private var staticBody: some View {
+        let meshColors = getMeshColors(for: colorScheme)
+        let staticPoints: [SIMD2<Float>] = [
+            SIMD2<Float>(0.0, 0.0), SIMD2<Float>(0.5, 0.0), SIMD2<Float>(1.0, 0.0),
+            SIMD2<Float>(0.0, 0.5), SIMD2<Float>(0.5, 0.5), SIMD2<Float>(1.0, 0.5),
+            SIMD2<Float>(0.0, 1.0), SIMD2<Float>(0.5, 1.0), SIMD2<Float>(1.0, 1.0)
+        ]
+        
+        return ZStack {
+            // Base background matching the theme
+            colorScheme == .dark ? Color.black : Color.white
+            
+            // 1. Mesh Gradient (Static ambient background)
+            if showMeshGradient && waveProgress > 0.0 {
+                MeshGradient(
+                    width: 3,
+                    height: 3,
+                    points: staticPoints,
+                    colors: meshColors,
+                    background: colorScheme == .dark ? .black : .white
+                )
+                .opacity(Double(waveProgress))
+            }
+            
+            // 2. Static black background if loading
+            if isLoading {
+                Color.black.opacity(0.8)
+            }
+        }
+    }
+    
+    private var animatedBody: some View {
+        TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { timeline in
+            let date = timeline.date
+            let elapsed = date.timeIntervalSinceReferenceDate - relativeTimeOffset
+            let timeVal = Float(elapsed)
+            
+            GeometryReader { geometry in
+                ZStack {
+                    if isLoading {
+                        Rectangle()
+                            .fill(Color.black)
+                            .colorEffect(
+                                ShaderLibrary.shaderLoading(
+                                    .float(timeVal * 3.0), // match original speed
+                                    .float2(geometry.size)
+                                )
+                            )
+                    } else {
+                        Rectangle()
+                            .fill(Color.black)
+                            .colorEffect(
+                                ShaderLibrary.shaderActive(
+                                    .float(timeVal * 3.0), // match original speed
+                                    .float2(geometry.size),
+                                    .float(Float(waveProgress))
+                                )
+                            )
+                    }
+                }
             }
         }
     }
@@ -155,6 +195,10 @@ extension Color {
     }
 }
 
-#Preview {
-    ShaderAnimationView(isLoading: false, station: nil)
+#Preview("Shader Only (Normal Mode)") {
+    ShaderAnimationView(isLoading: false, showMeshGradient: false, forceLowPowerMode: false)
+}
+
+#Preview("Mesh Gradient (Eco Mode)") {
+    ShaderAnimationView(isLoading: false, showMeshGradient: true, forceLowPowerMode: true)
 }

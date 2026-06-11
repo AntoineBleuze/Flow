@@ -3,7 +3,6 @@ import SwiftUI
 struct TrafficDetailView: View {
     let line: TransportLine
     
-    @AppStorage("isTrafficSummaryEnabled") private var isTrafficSummaryEnabled = false
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
@@ -24,7 +23,8 @@ struct TrafficDetailView: View {
                     Spacer()
                 }
                 .padding()
-                .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 15))
+                .background(.ultraThinMaterial.opacity(0.97))
+                .clipShape(RoundedRectangle(cornerRadius: 15))
 
                 // Section: Détails des incidents
                 let activeInfos = deduplicateInfos(
@@ -36,7 +36,7 @@ struct TrafficDetailView: View {
                             .padding(.bottom, 5)
 
                         ForEach(activeInfos) { info in
-                            TrafficInfoCard(info: info, isActive: true)
+                            TrafficInfoCard(line: line, info: info, isActive: true)
                         }
                     }
                 } else if line.status == .normal {
@@ -57,7 +57,7 @@ struct TrafficDetailView: View {
                             .padding(.bottom, 5)
 
                         ForEach(futureInfos) { info in
-                            TrafficInfoCard(info: info, isActive: false)
+                            TrafficInfoCard(line: line, info: info, isActive: false)
                         }
                     }
                 }
@@ -76,8 +76,8 @@ struct TrafficDetailView: View {
                     }
                 }()
                 ShaderAnimationView(isLoading: false, customColors: [lineColor])
-                (colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.15))
-                    .glassEffect(.ultraThin)
+                (colorScheme == .dark ? Color.black.opacity(0.05) : Color.white.opacity(0.05))
+                    .background(.ultraThinMaterial.opacity(0.65))
             }
             .ignoresSafeArea()
         }
@@ -102,11 +102,12 @@ struct TrafficDetailView: View {
 }
 
 struct TrafficInfoCard: View {
+    let line: TransportLine
     let info: TrafficInfo
     let isActive: Bool
     @State private var isExpanded = false
-    @State private var summary: String? = nil
-    @AppStorage("isTrafficSummaryEnabled") private var isTrafficSummaryEnabled = false
+    @State private var showPlan = false
+    @Environment(\.colorScheme) var colorScheme
     
     private let maxCharacters = 150
 
@@ -119,54 +120,36 @@ struct TrafficInfoCard: View {
                 Text(info.title)
                     .font(.subheadline).bold()
                 Spacer()
-                
-                if isTrafficSummaryEnabled && summary != nil {
-                    Image(systemName: "sparkles")
-                        .font(.caption)
-                        .foregroundColor(.purple)
-                }
             }
 
-            // Message (IA ou Original)
+            // Message
             Group {
-                if isTrafficSummaryEnabled && TrafficSummarizer.shared.isAvailable, let aiSummary = summary {
-                    Text(verbatim: aiSummary)
-                        .font(.body)
-                        .foregroundColor(.primary)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    let messageText = formatMessage(info.message)
-                    let shouldTruncate = messageText.count > maxCharacters && !isExpanded
+                let messageText = formatMessage(info.message)
+                let shouldTruncate = messageText.count > maxCharacters && !isExpanded
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        if shouldTruncate {
-                            Text(.init(String(messageText.prefix(maxCharacters)) + "..."))
-                                .font(.body)
-                        } else {
-                            Text(.init(messageText))
-                                .font(.body)
-                        }
+                VStack(alignment: .leading, spacing: 6) {
+                    if shouldTruncate {
+                        Text(.init(String(messageText.prefix(maxCharacters)) + "..."))
+                            .font(.body)
+                    } else {
+                        Text(.init(messageText))
+                            .font(.body)
+                    }
 
-                        if messageText.count > maxCharacters {
-                            Button(action: {
-                                withAnimation { isExpanded.toggle() }
-                            }) {
-                                Text(isExpanded ? "Voir moins" : "Voir plus")
-                                    .font(.caption)
-                                    .foregroundColor(.primary)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 5)
-                            }
-                            .buttonStyle(.glass)
+                    if messageText.count > maxCharacters {
+                        Button(action: {
+                            withAnimation { isExpanded.toggle() }
+                        }) {
+                            Text(isExpanded ? "Voir moins" : "Voir plus")
+                                .font(.caption)
+                                .foregroundColor(.primary)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(colorScheme == .dark ? Color.white.opacity(0.15) : Color.black.opacity(0.08), in: Capsule())
                         }
+                        .buttonStyle(.plain)
                     }
                 }
-            }
-            .task(id: info.id) {
-                await loadSummaryIfNeeded()
-            }
-            .onChange(of: isTrafficSummaryEnabled) { newValue in
-                if newValue { Task { await loadSummaryIfNeeded() } }
             }
 
             // Section impactée
@@ -175,24 +158,39 @@ struct TrafficInfoCard: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
-        }
-        .padding()
-        .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 10))
-    }
-    
-    private func loadSummaryIfNeeded() async {
-        guard isTrafficSummaryEnabled, TrafficSummarizer.shared.isAvailable, summary == nil else { return }
-        
-        do {
-            let rawMessage = info.message
-            if let result = try await TrafficSummarizer.shared.summarize(message: rawMessage) {
-                await MainActor.run {
-                    self.summary = result
+
+            // Plan de ligne
+            let hasStops = info.impactedStops?.isEmpty == false
+            let hasSection = info.impactedSection != nil
+            if hasStops || hasSection {
+                VStack(alignment: .leading, spacing: 8) {
+                    Button(action: {
+                        withAnimation { showPlan.toggle() }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "map")
+                            Text(showPlan ? "Masquer le plan" : "Visualiser sur le plan")
+                            Image(systemName: showPlan ? "chevron.up" : "chevron.down")
+                        }
+                        .font(.caption).bold()
+                        .foregroundColor(isActive ? info.severity.color : .blue)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.05), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    
+                    if showPlan {
+                        MiniLinePlanView(line: line, info: info)
+                            .padding(.top, 4)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
                 }
             }
-        } catch {
-            print("❌ [UI] Erreur résumé pour \(info.title): \(error)")
         }
+        .padding()
+        .background(.ultraThinMaterial.opacity(0.97))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     private func formatMessage(_ message: String) -> String {
@@ -208,3 +206,10 @@ struct TrafficInfoCard: View {
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
+
+#Preview {
+    NavigationStack {
+        TrafficDetailView(line: PreviewMockData.mockTransportLine)
+    }
+}
+

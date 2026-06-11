@@ -14,11 +14,6 @@ struct AdaptiveMapBackground: View {
             Rectangle()
                 .fill(.ultraThinMaterial)
                 .opacity(0.95)
-
-            // Overlay Liquid Glass par-dessus
-            Rectangle()
-                .fill(.clear)
-                .glassEffect()
         }
         .ignoresSafeArea()
     }

@@ -36,43 +36,42 @@ struct ItinerarySearchPanel: View {
     
     // Animation properties
     @Namespace private var animation
+    @Environment(\.colorScheme) var colorScheme
     
     var body: some View {
-        VStack(spacing: 0) {
-            // Drag Handle — interactive for resizing
-            Capsule()
-                .fill(Color.secondary.opacity(0.5))
-                .frame(width: 40, height: 5)
-                .padding(.top, 8)
-                .padding(.bottom, 12)
-                .frame(maxWidth: .infinity)
-                .contentShape(Rectangle().size(width: 120, height: 40))
-                .gesture(
-                    DragGesture()
-                        .updating($dragOffset) { value, state, _ in
-                            state = value.translation.height
-                        }
-                        .onEnded { value in
-                            let newHeight = panelHeight - value.translation.height
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                panelHeight = min(maxPanelHeight, max(minPanelHeight, newHeight))
+        GlassEffectContainer {
+            VStack(spacing: 0) {
+                // Drag Handle — interactive for resizing
+                Capsule()
+                    .fill(Color.secondary.opacity(0.5))
+                    .frame(width: 40, height: 5)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle().size(width: 120, height: 40))
+                    .gesture(
+                        DragGesture()
+                            .updating($dragOffset) { value, state, _ in
+                                state = value.translation.height
                             }
-                        }
-                )
-            
-            if panelState == .compact {
-                compactView
-            } else if panelState == .expanded {
-                expandedView
-            } else if panelState == .results {
-                resultsView
+                            .onEnded { value in
+                                let newHeight = panelHeight - value.translation.height
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                    panelHeight = min(maxPanelHeight, max(minPanelHeight, newHeight))
+                                }
+                            }
+                    )
+                
+                if panelState == .compact {
+                    compactView
+                } else if panelState == .expanded {
+                    expandedView
+                } else if panelState == .results {
+                    resultsView
+                }
             }
-        }
-        .frame(height: min(maxPanelHeight, max(minPanelHeight, panelHeight - dragOffset)))
-        .background {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(.regularMaterial)
-                .shadow(color: .black.opacity(0.1), radius: 10, y: -5)
+            .frame(height: min(maxPanelHeight, max(minPanelHeight, panelHeight - dragOffset)))
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         }
         .onChange(of: panelState) { _, newValue in
             withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
@@ -121,16 +120,19 @@ struct ItinerarySearchPanel: View {
                     Spacer()
                 }
                 .padding()
+                .background(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.plain)
             
             // Profile or Settings button (optional)
             Button(action: {}) {
                 Image(systemName: "person.crop.circle")
                     .font(.title)
                     .foregroundColor(.blue)
+                    .frame(width: 44, height: 44)
+                    .background(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.06), in: Circle())
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.plain)
         }
         .padding(.horizontal)
         .padding(.bottom, 30) // Safe area
@@ -151,11 +153,13 @@ struct ItinerarySearchPanel: View {
                         panelState = .compact
                     }
                 }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title2)
-                        .foregroundColor(.gray)
+                    Image(systemName: "xmark")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.primary)
+                        .frame(width: 44, height: 44)
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: .circle)
             }
             .padding(.horizontal)
             
@@ -197,7 +201,7 @@ struct ItinerarySearchPanel: View {
                 }
                 .padding()
             }
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12))
+            .background(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
             .padding(.horizontal)
             .overlay(
                  // Swap Button
@@ -223,7 +227,8 @@ struct ItinerarySearchPanel: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.plain)
+                .background(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.05), in: Capsule())
                 .foregroundColor(.primary)
                 
                 Spacer()
@@ -240,11 +245,12 @@ struct ItinerarySearchPanel: View {
             Button(action: onSearch) {
                 Text("Rechercher")
                     .font(.headline)
-                    .foregroundColor(.blue)
+                    .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .padding()
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.borderedProminent)
+            .tint(.blue)
             .padding(.horizontal)
             .padding(.bottom, 30) // Safe area
             .disabled(endStation == nil)
@@ -309,13 +315,13 @@ struct ItinerarySearchPanel: View {
                                       }
                                       
                                       Button(action: onStartNavigation) {
-                                          Text("Démarrer la navigation")
-                                              .fontWeight(.bold)
-                                              .foregroundColor(.green)
-                                              .frame(maxWidth: .infinity)
-                                              .padding()
-                                      }
-                                      .buttonStyle(.glass)
+                                           Text("Démarrer la navigation")
+                                               .fontWeight(.bold)
+                                               .foregroundColor(.green)
+                                               .frame(maxWidth: .infinity)
+                                               .padding()
+                                       }
+                                       .buttonStyle(.glassProminent)
                                       .padding(.horizontal)
                                       .padding(.top, 8)
                                   }
@@ -391,6 +397,25 @@ struct PanelSectionDetailView: View {
                                         .foregroundColor(.secondary)
                                 }
                             }
+                            
+                            Spacer()
+                            
+                            NavigationLink(destination: LineSchematicPlanView(line: TransportLine(
+                                type: StationDetailScreen.determineType(mode: display.commercial_mode),
+                                lineId: display.code ?? display.label ?? "?",
+                                status: .normal
+                            ))) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "map")
+                                    Text("Plan")
+                                        .font(.caption)
+                                        .fontWeight(.semibold)
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.blue.opacity(0.1), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
                         }
 
                         // Station name and times
@@ -522,7 +547,7 @@ struct PanelSectionDetailView: View {
 
     var circleColor: Color {
         if section.type == "public_transport" {
-            return Color(hex: section.display_informations?.color ?? "CCCCCC") ?? .blue
+            return Color(hex: section.display_informations?.color ?? "CCCCCC")
         } else if section.mode == "walking" || section.type == "street_network" {
             return .blue
         } else if section.type == "transfer" {
@@ -556,3 +581,21 @@ struct PanelSectionDetailView: View {
         return isoDate
     }
 }
+
+#Preview {
+    ItinerarySearchPanel(
+        startStation: .constant(PreviewMockData.mockStation),
+        endStation: .constant(PreviewMockData.mockStation),
+        departureDate: .constant(Date()),
+        isArrivalTime: .constant(false),
+        journeys: .constant([PreviewMockData.mockJourney]),
+        selectedJourney: .constant(PreviewMockData.mockJourney),
+        focusedSectionId: .constant(nil),
+        panelState: .constant(.compact),
+        onSearch: {},
+        onSwap: {},
+        onCurrentLocation: {},
+        onStartNavigation: {}
+    )
+}
+

@@ -16,54 +16,8 @@
             endingColumnNumber = "9223372036854775807"
             startingLineNumber = "42"
             endingLineNumber = "42"
-            landmarkName = "sheetContent"
-            landmarkType = "24">
-            <Locations>
-               <Location
-                  uuid = "8F5F14E9-C472-44E0-841E-B8A03078AD82 - b29da2ce11ed0255"
-                  shouldBeEnabled = "Yes"
-                  ignoreCount = "0"
-                  continueAfterRunningActions = "No"
-                  symbolName = "Flow.StationDetailSheet.sheetContent.getter : some"
-                  moduleName = "Flow.debug.dylib"
-                  usesParentBreakpointCondition = "Yes"
-                  urlString = "file:///Users/antoinebleuze/Documents/projet%20xcode/Flow/Flow/Views/StationDetailSheet.swift"
-                  startingColumnNumber = "9223372036854775807"
-                  endingColumnNumber = "9223372036854775807"
-                  startingLineNumber = "42"
-                  endingLineNumber = "42">
-               </Location>
-               <Location
-                  uuid = "8F5F14E9-C472-44E0-841E-B8A03078AD82 - a1229c6c3c4339d0"
-                  shouldBeEnabled = "Yes"
-                  ignoreCount = "0"
-                  continueAfterRunningActions = "No"
-                  symbolName = "closure #2 (Flow.StationLine) -&gt; Swift.Bool in Flow.StationDetailSheet.sheetContent.getter : some"
-                  moduleName = "Flow.debug.dylib"
-                  usesParentBreakpointCondition = "Yes"
-                  urlString = "file:///Users/antoinebleuze/Documents/projet%20xcode/Flow/Flow/Views/StationDetailSheet.swift"
-                  startingColumnNumber = "9223372036854775807"
-                  endingColumnNumber = "9223372036854775807"
-                  startingLineNumber = "42"
-                  endingLineNumber = "42">
-               </Location>
-            </Locations>
-         </BreakpointContent>
-      </BreakpointProxy>
-      <BreakpointProxy
-         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
-         <BreakpointContent
-            uuid = "81D568CD-6414-49A1-B9FD-7196FB6FFF8C"
-            shouldBeEnabled = "Yes"
-            ignoreCount = "0"
-            continueAfterRunningActions = "No"
-            filePath = "Flow/ContentView.swift"
-            startingColumnNumber = "9223372036854775807"
-            endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "299"
-            endingLineNumber = "299"
-            landmarkName = "body"
-            landmarkType = "24">
+            landmarkName = "DirectionGroup"
+            landmarkType = "14">
          </BreakpointContent>
       </BreakpointProxy>
    </Breakpoints>

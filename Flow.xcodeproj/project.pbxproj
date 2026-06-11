@@ -9,7 +9,7 @@
 /* Begin PBXBuildFile section */
 		6E1327DD2ED25FAE00A28845 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6E1327DC2ED25FAD00A28845 /* WidgetKit.framework */; };
 		6E1327DF2ED25FAE00A28845 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6E1327DE2ED25FAE00A28845 /* SwiftUI.framework */; };
-		6E1327F02ED25FB100A28845 /* FlowWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 6E1327DA2ED25FAD00A28845 /* FlowWidgetsExtension.appex */; platformFilters = (ios, ); settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		6E1327F02ED25FB100A28845 /* FlowWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 6E1327DA2ED25FAD00A28845 /* FlowWidgetsExtension.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -253,7 +253,7 @@
 /* Begin PBXTargetDependency section */
 		6E1327EF2ED25FB100A28845 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			platformFilters = (ios, );
+			platformFilter = ios;
 			target = 6E1327D92ED25FAD00A28845 /* FlowWidgetsExtension */;
 			targetProxy = 6E1327EE2ED25FB100A28845 /* PBXContainerItemProxy */;
 		};
@@ -474,6 +474,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 26.6;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = AntoineBleuze.Flow;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -519,6 +520,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 26.6;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = AntoineBleuze.Flow;
 				PRODUCT_NAME = "$(TARGET_NAME)";

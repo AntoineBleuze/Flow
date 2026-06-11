@@ -18,6 +18,8 @@ public class ColoredPolyline: MKPolyline {
     var color: MapPlatformColor = .blue
     var lineName: String = ""
     var isDashed: Bool = false
+    var status: LineStatus = .normal
+    var type: TransportType = .metro
 }
 
 // Note: TransportType est déjà défini dans TransportModels.swift
@@ -175,6 +177,23 @@ class MapDataService: ObservableObject {
     @Published var externalSelection: MapStation?  // Pour déclencher une sélection depuis l'extérieur (Recherche)
     @Published var loadingProgress: Double = 0.0
 
+    @Published var activeCategories: Set<String> = ["Métro", "RER / Train", "Tram", "Bus"]
+
+    func isLineTypeEnabled(_ type: TransportType) -> Bool {
+        switch type {
+        case .metro:
+            return activeCategories.contains("Métro")
+        case .rer, .transilien, .train:
+            return activeCategories.contains("RER / Train")
+        case .tram:
+            return activeCategories.contains("Tram")
+        case .bus:
+            return activeCategories.contains("Bus")
+        case .cable:
+            return true
+        }
+    }
+
     func selectStation(_ station: MapStation) {
         DispatchQueue.main.async {
             self.externalSelection = station
@@ -206,7 +225,7 @@ class MapDataService: ObservableObject {
 
     private var stationsCacheURL: URL {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("stationsCache.json")
+            .appendingPathComponent("stationsCache_v5.json")
     }
 
     private var colorsCacheURL: URL {
@@ -607,21 +626,26 @@ class MapDataService: ObservableObject {
                 var currentBatchCount = 0
                 
                 try backgroundContext.performAndWait {
+                    // Supprimer les anciens arrêts de bus pour repartir sur une base propre
+                    self.clearBusStopPoints(in: backgroundContext)
+                    
                     for (index, row) in rows.enumerated() {
                         if index == 0 || row.isEmpty { continue }
                         
-                        let columns = row.split(separator: ";", omittingEmptySubsequences: false)
+                        let columns = row.split(separator: ";", omittingEmptySubsequences: false).map {
+                            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                        }
                         guard columns.count > 10 else { continue }
                         
                         let modeStr = columns[8]
-                        if modeStr == "Bus" {
-                            let id = String(columns[2])
-                            let stopAreaId = String(columns[0])
-                            let name = String(columns[3])
-                            let lonStr = String(columns[4])
-                            let latStr = String(columns[5])
-                            let lineName = String(columns[7])
-                            let city = String(columns[10])
+                        if modeStr.caseInsensitiveCompare("bus") == .orderedSame {
+                            let id = columns[2]
+                            let stopAreaId = columns[0]
+                            let name = columns[3]
+                            let lonStr = columns[4]
+                            let latStr = columns[5]
+                            let lineName = columns[7]
+                            let city = columns[10]
                             
                             if let lat = Double(latStr), let lon = Double(lonStr) {
                                 let entity = StopPointEntity(context: backgroundContext)
@@ -650,7 +674,7 @@ class MapDataService: ObservableObject {
                     }
                 }
                 
-                UserDefaults.standard.set(true, forKey: "didImportBusStops_v5")
+                UserDefaults.standard.set(true, forKey: "didImportBusStops_v6")
                 print("✅ [Bus Import] Importation de tous les arrêts de bus terminée avec succès !")
                 
             } catch {
@@ -664,7 +688,7 @@ class MapDataService: ObservableObject {
         let fetchRequest: NSFetchRequest<StopPointEntity> = StopPointEntity.fetchRequest()
 
         // Import des bus en arrière-plan si pas encore fait
-        let didImportBus = UserDefaults.standard.bool(forKey: "didImportBusStops_v5")
+        let didImportBus = UserDefaults.standard.bool(forKey: "didImportBusStops_v6")
         if !didImportBus {
             self.importBusStopsInBackground()
         }
@@ -826,7 +850,9 @@ class MapDataService: ObservableObject {
                 }
             }
 
-            self.finalizeStations(groupedStops)
+            DispatchQueue.global(qos: .userInitiated).async {
+                self.finalizeStations(groupedStops)
+            }
 
         } catch {
             print("❌ Erreur de lecture/décodage du JSON des stations: \(error)")
@@ -849,6 +875,25 @@ class MapDataService: ObservableObject {
             print("✅ StopPointEntity cleared.")
         } catch {
             print("❌ Error clearing StopPointEntity: \(error)")
+        }
+    }
+
+    private func clearBusStopPoints(in context: NSManagedObjectContext) {
+        let fetchRequest: NSFetchRequest<NSFetchRequestResult> = StopPointEntity.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "type == %@", "Bus")
+        let deleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
+        deleteRequest.resultType = .resultTypeObjectIDs
+
+        do {
+            let result = try context.execute(deleteRequest) as? NSBatchDeleteResult
+            if let objectIDs = result?.result as? [NSManagedObjectID] {
+                NSManagedObjectContext.mergeChanges(
+                    fromRemoteContextSave: [NSDeletedObjectsKey: objectIDs], into: [context])
+            }
+            try context.save()
+            print("✅ Bus StopPointEntity cleared.")
+        } catch {
+            print("❌ Error clearing Bus StopPointEntity: \(error)")
         }
     }
 
@@ -937,7 +982,9 @@ class MapDataService: ObservableObject {
                 }
             }
 
-            self.finalizeStations(groupedStops)
+            DispatchQueue.global(qos: .userInitiated).async {
+                self.finalizeStations(groupedStops)
+            }
 
             // Une fois que tout est chargé, on lance le calcul des overlays en tache de fond
             // On attend un peu que self.lines soit peuplé si ce n'est pas synchrone (mais ici c'est appelé après processEntities)
@@ -987,10 +1034,25 @@ class MapDataService: ObservableObject {
             groupedStops[key, default: []].append(stop)
         }
 
-        self.finalizeStations(groupedStops)
+        DispatchQueue.global(qos: .userInitiated).async {
+            self.finalizeStations(groupedStops)
+        }
     }
 
-    private func finalizeStations(_ groupedStops: [String: [StopPoint]]) {
+    @MainActor
+    private func updateStationsOnMainActor(initialStations: [MapStation], finalStations: [MapStation]) {
+        self.unmergedStations = initialStations
+        self.allStations = finalStations
+        self.visibleStations = finalStations  // Initialement tout
+        self.majorHubs = finalStations.filter { $0.isHub }
+        self.loadingProgress = 0.9
+        print("✅ \(finalStations.count) stations finales (après fusion des pôles).")
+        
+        // Charger les données du Grand Paris Express une fois les stations de base prêtes
+        self.loadGrandParisExpressCold()
+    }
+
+    nonisolated private func finalizeStations(_ groupedStops: [String: [StopPoint]]) {
         var initialStations: [MapStation] = []
 
         for (_, stops) in groupedStops {
@@ -1038,31 +1100,121 @@ class MapDataService: ObservableObject {
 
         let finalStations = self.mergeHubs(initialStations)
 
-        DispatchQueue.main.async {
-            self.unmergedStations = initialStations
-            self.allStations = finalStations
-            self.visibleStations = finalStations  // Initialement tout
-            self.majorHubs = finalStations.filter { $0.isHub }
-            self.loadingProgress = 0.9
-            print("✅ \(finalStations.count) stations finales (après fusion des pôles).")
-            
-            // Charger les données du Grand Paris Express une fois les stations de base prêtes
-            self.loadGrandParisExpressCold()
+        Task { @MainActor in
+            self.updateStationsOnMainActor(initialStations: initialStations, finalStations: finalStations)
         }
     }
 
-    // Logique de fusion des pôles
-    private func mergeHubs(_ stations: [MapStation]) -> [MapStation] {
-        var mergedStations = stations
+    // Helper to get normalized base name for clustering comparison
+    nonisolated private func getNormalizedBaseName(_ name: String) -> String {
+        // Replace long dashes with standard hyphens
+        let cleanName = name
+            .replacingOccurrences(of: "—", with: "-")
+            .replacingOccurrences(of: "–", with: "-")
+        
+        // Split by " - " or "-" or "("
+        let separators = [" - ", "-", "("]
+        var base = cleanName
+        for sep in separators {
+            if let first = base.components(separatedBy: sep).first {
+                base = first
+            }
+        }
+        
+        // Remove punctuation (like apostrophes), lowercase, and trim
+        let allowedChars = CharacterSet.letters.union(CharacterSet.whitespaces)
+        let filtered = base.unicodeScalars.filter { allowedChars.contains($0) }
+        let result = String(String.UnicodeScalarView(filtered))
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        return result
+    }
 
-        // Définition des règles de fusion (Nom du pôle -> Mots clés à chercher)
+    // Helper to get clean name for a merged hub
+    nonisolated private func cleanHubName(_ name: String) -> String {
+        let cleanName = name
+            .replacingOccurrences(of: "—", with: "-")
+            .replacingOccurrences(of: "–", with: "-")
+        
+        let separators = [" - ", "-", "("]
+        var base = cleanName
+        for sep in separators {
+            if let first = base.components(separatedBy: sep).first {
+                base = first
+            }
+        }
+        return base.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // Helper to create a single merged hub from a list of stations
+    nonisolated private func createHub(from stations: [MapStation], name: String) -> MapStation {
+        let allPlatforms = stations.flatMap { $0.platforms }
+        
+        // Prioritize structured rail/metro/gare platforms for centroid calculation to avoid skew from surrounding bus/tram stops
+        let railPlatforms = allPlatforms.filter { $0.type == .rer || $0.type == .metro || $0.type == .transilien || $0.type == .train }
+        let centroidPlatforms: [StopPoint]
+        if !railPlatforms.isEmpty {
+            centroidPlatforms = railPlatforms
+        } else {
+            let tramPlatforms = allPlatforms.filter { $0.type == .tram }
+            if !tramPlatforms.isEmpty {
+                centroidPlatforms = tramPlatforms
+            } else {
+                centroidPlatforms = allPlatforms
+            }
+        }
+        
+        // Centroïde
+        let totalLat = centroidPlatforms.reduce(0.0) { $0 + $1.coordinate.latitude }
+        let totalLon = centroidPlatforms.reduce(0.0) { $0 + $1.coordinate.longitude }
+        let count = Double(max(1, centroidPlatforms.count))
+        let center = CLLocationCoordinate2D(
+            latitude: totalLat / count,
+            longitude: totalLon / count
+        )
+        
+        // Type principal
+        let mainType: TransportType
+        if allPlatforms.contains(where: { $0.type == .rer }) {
+            mainType = .rer
+        } else if allPlatforms.contains(where: { $0.type == .transilien || $0.type == .train }) {
+            mainType = .transilien
+        } else if allPlatforms.contains(where: { $0.type == .metro }) {
+            mainType = .metro
+        } else if allPlatforms.contains(where: { $0.type == .tram }) {
+            mainType = .tram
+        } else {
+            mainType = allPlatforms.first?.type ?? .bus
+        }
+        
+        // Agrégation unique des lignes
+        let uniqueLines = Set(allPlatforms.map { StationLine(name: $0.lineName, type: $0.type) })
+        let sortedLines = Array(uniqueLines).sorted { $0.name < $1.name }
+        
+        return MapStation(
+            id: stations.first?.id ?? UUID().uuidString,
+            name: name,
+            coordinate: center,
+            platforms: allPlatforms,
+            isHub: true,
+            mainType: mainType,
+            lines: sortedLines
+        )
+    }
+
+    // Logique de fusion des pôles
+    nonisolated private func mergeHubs(_ stations: [MapStation]) -> [MapStation] {
+        var remainingStations = stations
+
+        // 1. Définition des règles de fusion spécifiques (Nom du pôle -> Mots clés à chercher)
         let hubRules: [String: [String]] = [
             "Saint-Lazare": ["Saint-Lazare", "Haussmann Saint-Lazare"],
             "La Défense": ["La Défense"],
             "Gare du Nord": ["Gare du Nord", "Magenta"],
             "Gare de l'Est": ["Gare de l'Est"],
             "Montparnasse": ["Montparnasse", "Gaîté"],  // Gaîté est parfois séparé mais proche, restons sur Montparnasse
-            "Châtelet - Les Halles": ["Châtelet", "Les Halles"],
+            "Châtelet": ["Châtelet"],
             "Nation": ["Nation"],
             "République": ["République"],
             "Bastille": ["Bastille"],
@@ -1070,78 +1222,102 @@ class MapDataService: ObservableObject {
         ]
 
         var stationsToRemove: Set<String> = []
-        var newHubs: [MapStation] = []
+        var mergedHubs: [MapStation] = []
 
         for (hubName, keywords) in hubRules {
             // Trouver toutes les stations qui matchent les mots-clés
-            let candidates = stations.filter { station in
-                // Correctif: "Assemblée Nationale" contient "Nation" mais ne doit pas être fusionné
-                if hubName == "Nation" && station.name.contains("Assemblée") {
+            let candidates = remainingStations.filter { station in
+                if hubName == "Nation" && (station.name.localizedCaseInsensitiveContains("Assemblée") || station.name.localizedCaseInsensitiveContains("Nationale")) {
                     return false
                 }
-
-                // Correctif: "République" et "Bastille" doivent correspondre exactement pour éviter de fusionner
-                // "République - Pont de Neuilly" ou des arrêts de bus homonymes du même nom
-                if hubName == "République" && station.name != "République" {
+                if hubName == "République" && station.name.localizedCompare("République") != .orderedSame {
                     return false
                 }
-                if hubName == "Bastille" && station.name != "Bastille" {
+                if hubName == "Bastille" && station.name.localizedCompare("Bastille") != .orderedSame {
+                    return false
+                }
+                if hubName == "La Défense" && station.name.localizedCaseInsensitiveContains("Esplanade") {
                     return false
                 }
 
                 return keywords.contains { keyword in
-                    station.name.contains(keyword)
+                    station.name.localizedCaseInsensitiveContains(keyword)
                 }
             }
 
             if candidates.count > 1 {
-                // Fusionner
-                let allPlatforms = candidates.flatMap { $0.platforms }
-
-                // Recalculer le centroïde
-                var center: CLLocationCoordinate2D
-                if hubName == "République" {
-                    center = CLLocationCoordinate2D(latitude: 48.8674, longitude: 2.3631)
-                } else {
-                    let totalLat = allPlatforms.reduce(0.0) { $0 + $1.coordinate.latitude }
-                    let totalLon = allPlatforms.reduce(0.0) { $0 + $1.coordinate.longitude }
-                    center = CLLocationCoordinate2D(
-                        latitude: totalLat / Double(allPlatforms.count),
-                        longitude: totalLon / Double(allPlatforms.count)
-                    )
-                }
-
-                // Type principal (RER > Transilien > Métro)
-                let mainType =
-                    allPlatforms.first { $0.type == .rer }?.type ?? allPlatforms.first {
-                        $0.type == .transilien
-                    }?.type ?? allPlatforms.first { $0.type == .metro }?.type ?? .metro
-
-                // Agrégation des lignes pour le hub
-                let uniqueLines = Set(
-                    allPlatforms.map { StationLine(name: $0.lineName, type: $0.type) })
-                let sortedLines = Array(uniqueLines).sorted { $0.name < $1.name }
-
-                let hub = MapStation(
-                    id: candidates.first?.id ?? UUID().uuidString,  // On garde un ID existant
-                    name: hubName,
-                    coordinate: center,
-                    platforms: allPlatforms,
-                    isHub: true,
-                    mainType: mainType,
-                    lines: sortedLines
-                )
-
-                newHubs.append(hub)
+                let hub = createHub(from: candidates, name: hubName)
+                mergedHubs.append(hub)
                 candidates.forEach { stationsToRemove.insert($0.id) }
             }
         }
 
-        // Retirer les stations fusionnées et ajouter les hubs
-        mergedStations.removeAll { stationsToRemove.contains($0.id) }
-        mergedStations.append(contentsOf: newHubs)
+        // Retirer les stations fusionnées spécifiquement
+        remainingStations.removeAll { stationsToRemove.contains($0.id) }
 
-        return mergedStations
+        // 2. Fusion générique des autres pôles basés sur la similarité de nom et la proximité géographique
+        var finalStations: [MapStation] = mergedHubs
+        var visited = Set<String>()
+        let maxMergeDistance: CLLocationDistance = 350.0 // 350 mètres max pour un pôle
+
+        for station in remainingStations {
+            if visited.contains(station.id) { continue }
+
+            let stationNameBase = getNormalizedBaseName(station.name)
+            visited.insert(station.id)
+
+            // Trouver les autres stations non visitées avec le même nom de base et proches géographiquement
+            var cluster = [station]
+            let candidates = remainingStations.filter { other in
+                if visited.contains(other.id) { return false }
+
+                let otherNameBase = getNormalizedBaseName(other.name)
+                guard otherNameBase == stationNameBase else { return false }
+
+                let loc1 = CLLocation(latitude: station.coordinate.latitude, longitude: station.coordinate.longitude)
+                let loc2 = CLLocation(latitude: other.coordinate.latitude, longitude: other.coordinate.longitude)
+                return loc1.distance(from: loc2) < maxMergeDistance
+            }
+
+            cluster.append(contentsOf: candidates)
+            candidates.forEach { visited.insert($0.id) }
+
+            // Règle : ne pas fusionner si le pôle contient seulement 2 arrêts (ex: arrêts de bus opposés comme Roger Salengro)
+            // SAUF si au moins l'un d'eux est un métro, RER, tram ou train (pour fusionner le bus et le rail au même pôle).
+            let hasRailOrTram = cluster.contains { stat in
+                stat.mainType == .metro || stat.mainType == .rer || stat.mainType == .tram || stat.mainType == .transilien || stat.mainType == .train
+            }
+            
+            if cluster.count == 2 && !hasRailOrTram {
+                finalStations.append(contentsOf: cluster)
+            } else if cluster.count >= 3 || (cluster.count == 2 && hasRailOrTram) {
+                let cleanName = cleanHubName(station.name)
+                let mergedHub = createHub(from: cluster, name: cleanName)
+                finalStations.append(mergedHub)
+            } else {
+                finalStations.append(station)
+            }
+        }
+
+        // Post-process to ensure all multi-line rail stations are marked as hubs
+        let processedStations = finalStations.map { station in
+            let railLineCount = station.lines.filter { $0.type != .bus && $0.type != .cable }.count
+            if railLineCount >= 2 && !station.isHub {
+                return MapStation(
+                    id: station.id,
+                    name: station.name,
+                    coordinate: station.coordinate,
+                    platforms: station.platforms,
+                    isHub: true,
+                    mainType: station.mainType,
+                    lines: station.lines,
+                    city: station.city
+                )
+            }
+            return station
+        }
+
+        return processedStations
     }
 
     // Helper pour parser le CSV proprement
@@ -1415,14 +1591,11 @@ class MapDataService: ObservableObject {
         let center = region.center
         let span = region.span
 
-        // Choix de la source de données selon 3 niveaux de zoom :
+        // Choix de la source de données :
         // 1. Dézoomé (delta >= 0.05) : pôles majeurs uniquement (majorHubs)
-        // 2. Zoom moyen (0.015 <= delta < 0.05) : toutes les stations fusionnées (allStations)
-        // 3. Zoom élevé (delta < 0.015) : stations individuelles séparées sur leurs coordonnées réelles (unmergedStations)
+        // 2. Zoomé (delta < 0.05) : toutes les stations fusionnées (allStations)
         let source: [MapStation]
-        if span.latitudeDelta < 0.015 {
-            source = self.unmergedStations
-        } else if span.latitudeDelta < 0.05 {
+        if span.latitudeDelta < 0.05 {
             source = self.allStations
         } else {
             source = self.majorHubs
@@ -1440,12 +1613,17 @@ class MapDataService: ObservableObject {
         }
 
         // Si le zoom est très élevé, on ajoute les arrêts de bus
-        if span.latitudeDelta < 0.006 {
+        if span.latitudeDelta < 0.015 {
             let busStations = await fetchBusStations(in: minLat, maxLat: maxLat, minLon: minLon, maxLon: maxLon)
             filtered.append(contentsOf: busStations)
         }
 
-        return filtered
+        // Fusionner dynamiquement les stations et les arrêts de bus
+        let merged = self.mergeHubs(filtered)
+        return merged.filter { station in
+            FavoritesService.shared.isFavorite(stationId: station.id) ||
+            station.lines.contains { self.isLineTypeEnabled($0.type) }
+        }
     }
 
     // Méthode asynchrone pour mettre à jour les stations visibles
@@ -1457,9 +1635,7 @@ class MapDataService: ObservableObject {
         // On utilise une Task détachée pour ne pas bloquer le thread appelant
         Task.detached(priority: .userInitiated) {
             let source: [MapStation]
-            if delta < 0.015 {
-                source = await self.unmergedStations
-            } else if delta < 0.05 {
+            if delta < 0.05 {
                 source = await self.allStations
             } else {
                 source = await self.majorHubs
@@ -1476,13 +1652,15 @@ class MapDataService: ObservableObject {
                 return lat >= minLat && lat <= maxLat && lon >= minLon && lon <= maxLon
             }
 
-            if delta < 0.006 {
+            if delta < 0.015 {
                 let busStations = await self.fetchBusStations(in: minLat, maxLat: maxLat, minLon: minLon, maxLon: maxLon)
                 filtered.append(contentsOf: busStations)
             }
 
+            let merged = self.mergeHubs(filtered)
+
             await MainActor.run {
-                self.visibleStations = filtered
+                self.visibleStations = merged
             }
         }
     }
@@ -1554,6 +1732,7 @@ class MapDataService: ObservableObject {
                     points: finalPolyline.points(), count: finalPolyline.pointCount)
                 colored.color = MapPlatformColor(item.line.color)
                 colored.lineName = item.line.name
+                colored.type = item.line.type
                 results.append(colored)
             }
             return results
@@ -1705,13 +1884,19 @@ class MapDataService: ObservableObject {
             var stationsByLine: [String: [(name: String, code: String, coord: CLLocationCoordinate2D)]] = [:]
             
             for feature in collection.features {
-                guard let name = feature.properties.libelle,
+                guard var name = feature.properties.libelle,
                       let code = feature.properties.code,
                       let lineStr = feature.properties.ligne,
                       feature.geometry.coordinates.count >= 2 else { continue }
                 
                 let coords = feature.geometry.coordinates
-                let coordinate = CLLocationCoordinate2D(latitude: coords[1], longitude: coords[0])
+                var coordinate = CLLocationCoordinate2D(latitude: coords[1], longitude: coords[0])
+                
+                // Relocate and rename Line 15 Bagneux station to Bagneux - Lucie Aubrac
+                if name == "Bagneux" && lineStr.contains("15") {
+                    name = "Bagneux - Lucie Aubrac"
+                    coordinate = CLLocationCoordinate2D(latitude: 48.80353046920307, longitude: 2.317499440854107)
+                }
                 
                 let lineParts = lineStr.split(separator: "/").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 var stationLines: [StationLine] = []

@@ -99,3 +99,9 @@ struct GeoJSON: Codable {
     let type: String?
     let coordinates: [[Double]]?
 }
+
+extension Journey {
+    var destinationCoordinate: CLLocationCoordinate2D? {
+        sections?.last?.to?.coordinate
+    }
+}

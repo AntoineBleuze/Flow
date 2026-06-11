@@ -17,8 +17,10 @@ struct LineIcon: View {
         self.size = size
         if let hex = line.colorHex {
             self.customColor = Color(hex: hex)
+        } else if let cached = MapDataService.shared.lineColorCache[line.lineId] {
+            self.customColor = cached
         } else {
-            self.customColor = MapDataService.shared.lineColorCache[line.lineId]
+            self.customColor = resolveLineColor(line.lineId, type: line.type)
         }
     }
 
@@ -27,7 +29,7 @@ struct LineIcon: View {
         self.type = type
         self.lineId = lineId
         self.size = size
-        self.customColor = customColor ?? MapDataService.shared.lineColorCache[lineId]
+        self.customColor = customColor ?? MapDataService.shared.lineColorCache[lineId] ?? resolveLineColor(lineId, type: type)
     }
 
     var body: some View {
@@ -44,16 +46,25 @@ struct LineIcon: View {
             // Fallback Text
             // Pour le texte, on ajuste la taille de police et le padding en fonction de "size"
             // approximativement
-            Text(lineId)
-                .font(.system(size: size * 0.5, weight: .bold))
-                .padding(.horizontal, size * 0.25)
-                .padding(.vertical, size * 0.1)
-                .background(customColor ?? type.accentColor)
-                .foregroundColor(.white)
-                .clipShape(Capsule())
-                // On s'assure qu'il a au moins la hauteur demandée si possible,
-                // mais pour une capsule texte c'est le contenu qui dicte souvent.
-                .frame(minHeight: size)
+            if type == .bus {
+                Text(lineId)
+                    .font(.system(size: size * 0.5, weight: .bold))
+                    .padding(.horizontal, size * 0.2)
+                    .padding(.vertical, size * 0.1)
+                    .background(customColor ?? type.accentColor)
+                    .foregroundColor(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: size * 0.15, style: .continuous))
+                    .frame(minHeight: size)
+            } else {
+                Text(lineId)
+                    .font(.system(size: size * 0.5, weight: .bold))
+                    .padding(.horizontal, size * 0.25)
+                    .padding(.vertical, size * 0.1)
+                    .background(customColor ?? type.accentColor)
+                    .foregroundColor(.white)
+                    .clipShape(Capsule())
+                    .frame(minHeight: size)
+            }
         }
     }
 
@@ -86,3 +97,13 @@ struct LineIcon: View {
         }
     }
 }
+
+#Preview {
+    VStack(spacing: 10) {
+        LineIcon(type: .metro, lineId: "1")
+        LineIcon(type: .rer, lineId: "A")
+        LineIcon(type: .tram, lineId: "3a")
+        LineIcon(type: .bus, lineId: "38")
+    }
+}
+

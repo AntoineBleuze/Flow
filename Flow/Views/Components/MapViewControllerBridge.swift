@@ -32,8 +32,38 @@ class SharedMapView {
         )
         mapView.setRegion(defaultRegion, animated: false)
 
-        // Hide built-in public transport markers
-        mapView.pointOfInterestFilter = MKPointOfInterestFilter(excluding: [.publicTransport])
+        // Hide clutter POIs (restaurants, cafés, shops…) but keep landmarks & cultural spots
+        mapView.pointOfInterestFilter = MKPointOfInterestFilter(excluding: [
+            .publicTransport,
+            .restaurant,
+            .cafe,
+            .bakery,
+            .brewery,
+            .winery,
+            .foodMarket,
+            .nightlife,
+            .store,
+            .gasStation,
+            .carRental,
+            .evCharger,
+            .parking,
+            .atm,
+            .bank,
+            .laundry,
+            .postOffice,
+        ])
+    }
+}
+
+class SimulatedUserAnnotation: NSObject, MKAnnotation {
+    @objc dynamic var coordinate: CLLocationCoordinate2D
+    var title: String?
+    var subtitle: String?
+    
+    init(coordinate: CLLocationCoordinate2D, title: String? = "Ma position (Simulée)", subtitle: String? = nil) {
+        self.coordinate = coordinate
+        self.title = title
+        self.subtitle = subtitle
     }
 }
 
@@ -41,6 +71,9 @@ struct MapViewControllerBridge: UIViewRepresentable {
     @ObservedObject var data: MapDataService
     @Binding var selectedStation: MapStation?
     @Binding var userTrackingMode: MKUserTrackingMode
+    
+    @ObservedObject var locationManager = LocationManager.shared
+    @ObservedObject var navigationManager = NavigationManager.shared
     var journey: Journey?  // Optional journey to display
     var focusedSectionId: String? = nil  // Optional section to focus on
     var useMainMap: Bool = false  // Default to background map if not specified
@@ -105,7 +138,7 @@ struct MapViewControllerBridge: UIViewRepresentable {
         // If showAnnotations is false, clear everything and skip updates (background mode)
         if !showAnnotations {
             mapView.removeOverlays(mapView.overlays)
-            mapView.removeAnnotations(mapView.annotations.filter { !($0 is MKUserLocation) })
+            mapView.removeAnnotations(mapView.annotations.filter { !($0 is MKUserLocation || $0 is SimulatedUserAnnotation) })
             return
         }
 
@@ -113,22 +146,102 @@ struct MapViewControllerBridge: UIViewRepresentable {
         if let journey = journey {
             // For now, let's remove existing overlays to avoid clutter if we are navigating
             mapView.removeOverlays(mapView.overlays)
-            mapView.removeAnnotations(mapView.annotations.filter { !($0 is MKUserLocation) })
+            mapView.removeAnnotations(mapView.annotations.filter { !($0 is MKUserLocation || $0 is SimulatedUserAnnotation) })
 
             drawJourney(journey, on: mapView)
 
-            // Zoom/pan to focused section or entire journey
-            if let focusedSectionId = focusedSectionId,
-               let sections = journey.sections,
-               let section = sections.first(where: { $0.id == focusedSectionId }) {
-                zoomToSection(section, on: mapView)
-            } else {
-                zoomToJourney(journey, on: mapView)
+            // Zoom/pan to focused section or entire journey (only if not simulating to avoid fight with centering)
+            if !locationManager.isSimulating {
+                if let focusedSectionId = focusedSectionId {
+                    if context.coordinator.lastZoomedSectionId != focusedSectionId {
+                        context.coordinator.lastZoomedSectionId = focusedSectionId
+                        if let sections = journey.sections,
+                           let section = sections.first(where: { $0.id == focusedSectionId }) {
+                            zoomToSection(section, on: mapView)
+                        }
+                    }
+                } else if context.coordinator.lastZoomedJourneyId != journey.id.uuidString {
+                    context.coordinator.lastZoomedJourneyId = journey.id.uuidString
+                    context.coordinator.lastZoomedSectionId = nil
+                    zoomToJourney(journey, on: mapView)
+                }
             }
         } else {
+            context.coordinator.lastZoomedJourneyId = nil
+            context.coordinator.lastZoomedSectionId = nil
             // Standard behavior: Show all lines
             updateStandardOverlays(mapView, data: data)
         }
+
+        // Center on user at startup
+        if !data.hasCenteredOnUser, let userCoord = locationManager.userLocation, isValidCoordinate(userCoord) {
+            let region = MKCoordinateRegion(center: userCoord, span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05))
+            mapView.setRegion(region, animated: true)
+            
+            // Set tracking mode to follow and mark as centered on main thread
+            DispatchQueue.main.async {
+                data.hasCenteredOnUser = true
+                self.userTrackingMode = .follow
+            }
+        }
+
+        // 3D Camera Pitch implementation
+        if let station = selectedStation {
+            if context.coordinator.lastSelectedStationId != station.id {
+                context.coordinator.lastSelectedStationId = station.id
+                context.coordinator.lastSelectedStationCoordinate = station.coordinate
+                let targetCenter = coordinate(from: station.coordinate, distance: 250, bearing: mapView.camera.heading + 180)
+                let camera = MKMapCamera(lookingAtCenter: targetCenter, fromDistance: 1200, pitch: 45, heading: mapView.camera.heading)
+                mapView.setCamera(camera, animated: true)
+            }
+        } else if let journey = journey {
+            if context.coordinator.lastSelectedStationId != journey.id.uuidString {
+                context.coordinator.lastSelectedStationId = journey.id.uuidString
+                let camera = mapView.camera
+                camera.pitch = 45
+                mapView.setCamera(camera, animated: true)
+            }
+        } else {
+            if context.coordinator.lastSelectedStationId != nil {
+                let lastCoord = context.coordinator.lastSelectedStationCoordinate
+                context.coordinator.lastSelectedStationId = nil
+                context.coordinator.lastSelectedStationCoordinate = nil
+                
+                if let lastCoord = lastCoord {
+                    let camera = MKMapCamera(lookingAtCenter: lastCoord, fromDistance: 1500, pitch: 0, heading: mapView.camera.heading)
+                    mapView.setCamera(camera, animated: true)
+                } else {
+                    let camera = mapView.camera
+                    camera.pitch = 0
+                    mapView.setCamera(camera, animated: true)
+                }
+            }
+        }
+
+        // Handle simulation location tracking and centering
+        if locationManager.isSimulating, let userCoord = locationManager.userLocation, isValidCoordinate(userCoord) {
+            mapView.showsUserLocation = false
+            if let existing = mapView.annotations.first(where: { $0 is SimulatedUserAnnotation }) as? SimulatedUserAnnotation {
+                existing.coordinate = userCoord
+            } else {
+                let simUser = SimulatedUserAnnotation(coordinate: userCoord)
+                mapView.addAnnotation(simUser)
+            }
+            mapView.setCenter(userCoord, animated: true)
+        } else {
+            mapView.showsUserLocation = true
+            let simAnnotations = mapView.annotations.filter { $0 is SimulatedUserAnnotation }
+            if !simAnnotations.isEmpty {
+                mapView.removeAnnotations(simAnnotations)
+            }
+        }
+        
+        // Refresh annotations when active categories change
+        context.coordinator.updateAnnotations(in: mapView.region, for: mapView)
+    }
+
+    private func isValidCoordinate(_ coordinate: CLLocationCoordinate2D) -> Bool {
+        return coordinate.latitude != 0.0 && coordinate.longitude != 0.0 && coordinate.latitude >= -90.0 && coordinate.latitude <= 90.0 && coordinate.longitude >= -180.0 && coordinate.longitude <= 180.0
     }
 
     private func drawJourney(_ journey: Journey, on mapView: MKMapView) {
@@ -148,8 +261,10 @@ struct MapViewControllerBridge: UIViewRepresentable {
             var routeCoordinates: [CLLocationCoordinate2D] = []
             for coord in coordinates {
                 if coord.count >= 2 {
-                    routeCoordinates.append(
-                        CLLocationCoordinate2D(latitude: coord[1], longitude: coord[0]))
+                    let coordinate = CLLocationCoordinate2D(latitude: coord[1], longitude: coord[0])
+                    if isValidCoordinate(coordinate) {
+                        routeCoordinates.append(coordinate)
+                    }
                 }
             }
 
@@ -158,12 +273,19 @@ struct MapViewControllerBridge: UIViewRepresentable {
                     coordinates: routeCoordinates, count: routeCoordinates.count)
                 polyline.color = color
                 polyline.lineName = display.label ?? ""
+                
+                let cleanLineName = (display.code ?? display.label ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let status = TrafficService.shared.lines.first(where: {
+                    $0.lineId.lowercased() == cleanLineName.lowercased()
+                })?.status ?? .normal
+                polyline.status = status
+                
                 mapView.addOverlay(polyline)
                 allCoordinates.append(contentsOf: routeCoordinates)
             }
 
             // Add start/end markers for sections
-            if let fromPlace = section.from, let fromCoord = fromPlace.coordinate {
+            if let fromPlace = section.from, let fromCoord = fromPlace.coordinate, isValidCoordinate(fromCoord) {
                 let annotation = StationAnnotation(
                     station: MapStation(
                         id: fromPlace.id ?? UUID().uuidString, name: fromPlace.name ?? "",
@@ -183,8 +305,10 @@ struct MapViewControllerBridge: UIViewRepresentable {
             var routeCoordinates: [CLLocationCoordinate2D] = []
             for coord in coordinates {
                 if coord.count >= 2 {
-                    routeCoordinates.append(
-                        CLLocationCoordinate2D(latitude: coord[1], longitude: coord[0]))
+                    let coordinate = CLLocationCoordinate2D(latitude: coord[1], longitude: coord[0])
+                    if isValidCoordinate(coordinate) {
+                        routeCoordinates.append(coordinate)
+                    }
                 }
             }
 
@@ -210,13 +334,16 @@ struct MapViewControllerBridge: UIViewRepresentable {
         for section in sections {
             if let geojson = section.geojson, let coordinates = geojson.coordinates {
                 for coord in coordinates where coord.count >= 2 {
-                    allCoordinates.append(CLLocationCoordinate2D(latitude: coord[1], longitude: coord[0]))
+                    let coordinate = CLLocationCoordinate2D(latitude: coord[1], longitude: coord[0])
+                    if isValidCoordinate(coordinate) {
+                        allCoordinates.append(coordinate)
+                    }
                 }
             }
-            if let from = section.from, let fromCoord = from.coordinate {
+            if let from = section.from, let fromCoord = from.coordinate, isValidCoordinate(fromCoord) {
                 allCoordinates.append(fromCoord)
             }
-            if let to = section.to, let toCoord = to.coordinate {
+            if let to = section.to, let toCoord = to.coordinate, isValidCoordinate(toCoord) {
                 allCoordinates.append(toCoord)
             }
         }
@@ -234,13 +361,16 @@ struct MapViewControllerBridge: UIViewRepresentable {
 
         if let geojson = section.geojson, let coordinates = geojson.coordinates {
             for coord in coordinates where coord.count >= 2 {
-                sectionCoordinates.append(CLLocationCoordinate2D(latitude: coord[1], longitude: coord[0]))
+                let coordinate = CLLocationCoordinate2D(latitude: coord[1], longitude: coord[0])
+                if isValidCoordinate(coordinate) {
+                    sectionCoordinates.append(coordinate)
+                }
             }
         }
-        if let from = section.from, let fromCoord = from.coordinate {
+        if let from = section.from, let fromCoord = from.coordinate, isValidCoordinate(fromCoord) {
             sectionCoordinates.append(fromCoord)
         }
-        if let to = section.to, let toCoord = to.coordinate {
+        if let to = section.to, let toCoord = to.coordinate, isValidCoordinate(toCoord) {
             sectionCoordinates.append(toCoord)
         }
 
@@ -252,17 +382,49 @@ struct MapViewControllerBridge: UIViewRepresentable {
         }
     }
 
+    private func isLineEnabledOrFavorite(_ lineName: String, type: TransportType) -> Bool {
+        if MapDataService.shared.isLineTypeEnabled(type) {
+            return true
+        }
+        return FavoritesService.shared.favoriteLineKeys.contains { key in
+            let parts = key.components(separatedBy: "|")
+            return parts.count > 1 && parts[1] == lineName
+        }
+    }
+
     private func updateStandardOverlays(_ mapView: MKMapView, data: MapDataService) {
-        let expectedOverlayCount = data.lines.reduce(0) { $0 + $1.polylines.count }
-        if mapView.overlays.count != expectedOverlayCount {
+        if !data.cachedOverlays.isEmpty {
+            let activeOverlays = data.cachedOverlays.filter { overlay in
+                isLineEnabledOrFavorite(overlay.lineName, type: overlay.type)
+            }
+            
+            let currentOverlays = mapView.overlays.compactMap { $0 as? ColoredPolyline }
+            if Set(currentOverlays) != Set(activeOverlays) {
+                mapView.removeOverlays(mapView.overlays)
+                mapView.addOverlays(activeOverlays)
+            }
+            return
+        }
+
+        let filteredLines = data.lines.filter { line in
+            isLineEnabledOrFavorite(line.name, type: line.type)
+        }
+
+        let expectedOverlayCount = filteredLines.reduce(0) { $0 + $1.polylines.count }
+        let currentOverlaysCount = mapView.overlays.compactMap { $0 as? ColoredPolyline }.count
+        
+        if currentOverlaysCount != expectedOverlayCount {
             mapView.removeOverlays(mapView.overlays)
 
             var allPolylines: [(line: LineTrace, polyline: MKPolyline, index: Int)] = []
-            for line in data.lines {
+            for line in filteredLines {
                 for (index, polyline) in line.polylines.enumerated() {
                     allPolylines.append((line: line, polyline: polyline, index: index))
                 }
             }
+
+            // Sort by priority so higher priority lines (Metro, RER, Tram) are rendered on top of lower priority (Bus, etc.)
+            allPolylines.sort { $0.line.type.priority < $1.line.type.priority }
 
             for (lineIndex, item) in allPolylines.enumerated() {
                 let overlappingPolylines = allPolylines.enumerated().filter {
@@ -303,6 +465,13 @@ struct MapViewControllerBridge: UIViewRepresentable {
                     points: finalPolyline.points(), count: finalPolyline.pointCount)
                 coloredPolyline.color = UIColor(item.line.color)
                 coloredPolyline.lineName = item.line.name
+                coloredPolyline.type = item.line.type
+                
+                let status = TrafficService.shared.lines.first(where: {
+                    $0.lineId == item.line.name && $0.type == item.line.type
+                })?.status ?? .normal
+                coloredPolyline.status = status
+                
                 mapView.addOverlay(coloredPolyline)
             }
         }
@@ -426,6 +595,11 @@ struct MapViewControllerBridge: UIViewRepresentable {
     class Coordinator: NSObject, MKMapViewDelegate {
         var parent: MapViewControllerBridge
         var currentTask: Task<Void, Never>?
+        var lastSelectedStationId: String?
+        var lastSelectedStationCoordinate: CLLocationCoordinate2D?
+        var lastZoomedJourneyId: String?
+        var lastZoomedSectionId: String?
+        var lastSelectionTime: Date?
 
         init(_ parent: MapViewControllerBridge) {
             self.parent = parent
@@ -436,12 +610,37 @@ struct MapViewControllerBridge: UIViewRepresentable {
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
             if annotation is MKUserLocation { return nil }
 
+            if annotation is SimulatedUserAnnotation {
+                let reuseId = "simulatedUser"
+                let markerView = mapView.dequeueReusableAnnotationView(withIdentifier: reuseId) as? MKMarkerAnnotationView
+                    ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: reuseId)
+                markerView.markerTintColor = .systemBlue
+                markerView.glyphImage = UIImage(systemName: "location.fill")
+                markerView.titleVisibility = .visible
+                markerView.displayPriority = .required
+                markerView.zPriority = .max
+                return markerView
+            }
+
+            if annotation is BusStopTempAnnotation {
+                let reuseId = "busStopTemp"
+                let markerView = mapView.dequeueReusableAnnotationView(withIdentifier: reuseId) as? MKMarkerAnnotationView
+                    ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: reuseId)
+                markerView.markerTintColor = UIColor(red: 0.0, green: 0.545, blue: 0.369, alpha: 1.0)
+                markerView.glyphImage = UIImage(systemName: "bus.fill")
+                markerView.canShowCallout = true
+                markerView.titleVisibility = .visible
+                markerView.displayPriority = .defaultLow
+                markerView.zPriority = MKAnnotationViewZPriority(rawValue: 100)
+                return markerView
+            }
+
             if annotation is StationAnnotation {
                 let view = mapView.dequeueReusableAnnotationView(
                     withIdentifier: MKMapViewDefaultAnnotationViewReuseIdentifier, for: annotation)
 
-                // Clustering configuration
-                view.clusteringIdentifier = "stationCluster"
+                // Clustering configuration: disabled as requested
+                view.clusteringIdentifier = nil
                 view.canShowCallout = false  // We handle selection manually
 
                 return view
@@ -482,9 +681,9 @@ struct MapViewControllerBridge: UIViewRepresentable {
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             if let coloredPolyline = overlay as? ColoredPolyline {
-                let renderer = MKPolylineRenderer(polyline: coloredPolyline)
+                let renderer = BorderedPolylineRenderer(polyline: coloredPolyline)
                 renderer.strokeColor = coloredPolyline.color
-                renderer.lineWidth = 5  // Increased from 3 for better visibility
+                renderer.lineWidth = 5.0  // Thicker for readability at high zoom
 
                 // Smoothing: arrondir les jonctions et les caps
                 renderer.lineJoin = .round
@@ -492,14 +691,14 @@ struct MapViewControllerBridge: UIViewRepresentable {
 
                 // Additional smoothing
                 renderer.shouldRasterize = false  // Keep vector rendering for smoothness
-                renderer.alpha = 0.85  // Slight transparency helps with overlapping
+                renderer.alpha = 0.95  // Slightly more opaque since it's thinner
 
                 if ["15", "16", "17", "18"].contains(coloredPolyline.lineName) {
                     renderer.lineDashPattern = [10, 8] as [NSNumber]
-                    renderer.lineWidth = 4.0
+                    renderer.lineWidth = 3.5
                 } else if coloredPolyline.isDashed {
                     renderer.lineDashPattern = [6, 6] as [NSNumber]
-                    renderer.lineWidth = 3.0
+                    renderer.lineWidth = 3.5
                 }
 
                 return renderer
@@ -512,12 +711,18 @@ struct MapViewControllerBridge: UIViewRepresentable {
                 stationAnnotation.isSelected = true
                 (view as? StationSwiftUIAnnotationView)?.annotation = stationAnnotation // Trigger update
                 
+                self.lastSelectionTime = Date()
                 parent.selectedStation = stationAnnotation.station
             }
         }
         
         func mapView(_ mapView: MKMapView, didDeselect view: MKAnnotationView) {
             if let stationAnnotation = view.annotation as? StationAnnotation {
+                if let lastTime = lastSelectionTime, Date().timeIntervalSince(lastTime) < 0.8 {
+                    mapView.selectAnnotation(stationAnnotation, animated: false)
+                    return
+                }
+                
                 stationAnnotation.isSelected = false
                 (view as? StationSwiftUIAnnotationView)?.annotation = stationAnnotation // Trigger update
                 
@@ -575,6 +780,18 @@ struct MapViewControllerBridge: UIViewRepresentable {
                 }
             }
         }
+    }
+}
+
+class BusStopTempAnnotation: NSObject, MKAnnotation {
+    let coordinate: CLLocationCoordinate2D
+    let title: String?
+    let subtitle: String?
+
+    init(coordinate: CLLocationCoordinate2D, title: String?, subtitle: String?) {
+        self.coordinate = coordinate
+        self.title = title
+        self.subtitle = subtitle
     }
 }
 
@@ -647,8 +864,17 @@ class StationSwiftUIAnnotationView: MKAnnotationView {
             self.displayPriority = .required
             self.zPriority = .max
         } else {
-            self.displayPriority = .defaultHigh
-            self.zPriority = MKAnnotationViewZPriority(rawValue: 0)
+            let hasPriorityMode = station.lines.contains { line in
+                line.type == .metro || line.type == .rer || line.type == .tram
+            } || station.mainType == .metro || station.mainType == .rer || station.mainType == .tram
+            
+            if hasPriorityMode {
+                self.displayPriority = .defaultHigh
+                self.zPriority = MKAnnotationViewZPriority(rawValue: 500)
+            } else {
+                self.displayPriority = .defaultLow
+                self.zPriority = MKAnnotationViewZPriority(rawValue: 100)
+            }
         }
     }
     

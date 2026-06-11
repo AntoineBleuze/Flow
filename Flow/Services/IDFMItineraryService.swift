@@ -20,7 +20,12 @@ class IDFMItineraryService: ObservableObject {
             )
         }
 
-        // Mode direct : appel API IDFM
+        return Fail(error: URLError(.cannotConnectToHost)).eraseToAnyPublisher()
+    }
+
+    private func searchDirectItinerary(
+        from: CLLocationCoordinate2D, to: MapStation, date: Date = Date(), isArrival: Bool = false
+    ) -> AnyPublisher<[Journey], Error> {
         // Format coordinates: "lon;lat"
         let fromCoord = "\(from.longitude);\(from.latitude)"
         // Use station coordinates as destination
@@ -49,14 +54,14 @@ class IDFMItineraryService: ObservableObject {
         var request = URLRequest(url: url)
         request.addValue(IDFMService.shared.apiKey, forHTTPHeaderField: "apikey")
 
-        print("🚀 Searching Itinerary: \(url.absoluteString)")
+        print("🚀 Searching Itinerary (Direct): \(url.absoluteString)")
 
         return URLSession.shared.dataTaskPublisher(for: request)
             .map(\.data)
             .handleEvents(receiveOutput: { data in
                 // Debug: print json string if needed
                 if let str = String(data: data, encoding: .utf8) {
-                    print("📥 Itinerary Data: \(str)")
+                    print("📥 Itinerary Data (Direct): \(str)")
                 }
             })
             .decode(type: ItineraryResponse.self, decoder: JSONDecoder())

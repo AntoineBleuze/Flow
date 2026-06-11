@@ -2,56 +2,25 @@ import Combine
 import CoreLocation
 import SwiftUI
 
-enum StationTab: String, CaseIterable, Identifiable {
-    case nearby = "À proximité"
-    case favorites = "Favoris"
-    
-    var id: String { self.rawValue }
-}
-
 struct NearbyStationsView: View {
     @StateObject private var viewModel = NearbyStationsViewModel()
-    @ObservedObject private var favoritesService = FavoritesService.shared
     @ObservedObject private var mapData = MapDataService.shared
-    @State private var selectedTab: StationTab = .nearby
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                // Segmented picker stylisé Liquid Glass
-                Picker("Mode", selection: $selectedTab) {
-                    ForEach(StationTab.allCases) { tab in
-                        Text(tab.rawValue).tag(tab)
+            nearbyStationsContent
+                .background {
+                    ZStack {
+                        ShaderAnimationView(isLoading: true)
+                        (colorScheme == .dark ? Color.black.opacity(0.05) : Color.white.opacity(0.05))
+                            .background(.ultraThinMaterial.opacity(0.97))
                     }
+                    .ignoresSafeArea()
                 }
-                .pickerStyle(.segmented)
-                .padding(8)
-                .background(.ultraThinMaterial)
-                .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 12))
-                .padding(.horizontal)
-                .padding(.vertical, 8)
-
-                Group {
-                    switch selectedTab {
-                    case .nearby:
-                        nearbyStationsContent
-                    case .favorites:
-                        favoriteStationsContent
-                    }
-                }
-            }
-            .background {
-                ZStack {
-                    ShaderAnimationView(isLoading: true)
-                    (colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.15))
-                        .glassEffect(.ultraThin)
-                }
-                .ignoresSafeArea()
-            }
-            .navigationTitle(selectedTab == .nearby ? "À Proximité" : "Favoris")
-            .navigationBarTitleDisplayMode(.large)
+                .navigationTitle("À Proximité")
+                .navigationBarTitleDisplayMode(.large)
         }
     }
 
@@ -95,7 +64,7 @@ struct NearbyStationsView: View {
                         .frame(maxWidth: .infinity)
                         .foregroundColor(.primary)
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.borderedProminent)
                 .padding(.horizontal, 40)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -136,7 +105,7 @@ struct NearbyStationsView: View {
                         ) {
                             NearbyStationRow(station: station)
                         }
-                        .buttonStyle(.glass)
+                        .buttonStyle(.plain)
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                     }
@@ -149,45 +118,7 @@ struct NearbyStationsView: View {
         }
     }
 
-    @ViewBuilder
-    private var favoriteStationsContent: some View {
-        let favoriteStations = favoritesService.favoriteStations
-        
-        if favoriteStations.isEmpty {
-            VStack(spacing: 20) {
-                Image(systemName: "star.slash.fill")
-                    .font(.system(size: 50))
-                    .foregroundColor(.gray)
-                Text("Aucun favori")
-                    .font(.headline)
-                Text(
-                    "Ajoutez des stations à vos favoris en appuyant sur l'icône de cœur dans l'écran de détails d'une station."
-                )
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
-                .foregroundColor(.secondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(.horizontal, 20)
-        } else {
-            List {
-                ForEach(favoriteStations) { station in
-                    NavigationLink(
-                        destination: StationDetailScreen(station: station)
-                    ) {
-                        NearbyStationRow(station: station)
-                    }
-                    .buttonStyle(.glass)
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                }
-            }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .frame(maxWidth: horizontalSizeClass == .regular ? 700 : .infinity)
-            .frame(maxWidth: .infinity) // center within parent
-        }
-    }
+
 }
 
 struct RadiusSelector: View {
@@ -224,7 +155,7 @@ struct RadiusSelector: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
-            .glassEffect(.standard, in: Capsule())
+            .background(.ultraThinMaterial, in: Capsule())
         }
     }
 
@@ -462,3 +393,8 @@ extension TransportType {
         }
     }
 }
+
+#Preview {
+    NearbyStationsView()
+}
+

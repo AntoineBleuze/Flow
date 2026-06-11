@@ -1,10 +1,18 @@
 import Combine
 import CoreLocation
+import CoreData
+import MapKit
 import SwiftUI
 
 struct StationDetailSheet: View {
     let station: MapStation
     var onDismiss: (() -> Void)? = nil  // For inline iPad panel
+    @State private var mergedStation: MapStation? = nil
+    
+    private var currentStation: MapStation {
+        mergedStation ?? station
+    }
+    
     @State private var departures: [Departure] = []
     @ObservedObject var favoritesService = FavoritesService.shared
     @State private var isLoading = false
@@ -38,8 +46,8 @@ struct StationDetailSheet: View {
 
     @ViewBuilder
     private var sheetContent: some View {
-        let gpeLines = station.lines.filter { ["15", "16", "17", "18"].contains($0.name) }
-        let hasActiveLines = station.lines.contains { !["15", "16", "17", "18"].contains($0.name) }
+        let gpeLines = currentStation.lines.filter { ["15", "16", "17", "18"].contains($0.name) }
+        let hasActiveLines = currentStation.lines.contains { !["15", "16", "17", "18"].contains($0.name) }
 
         if isLoading && hasActiveLines {
             ProgressView("Chargement des horaires...")
@@ -68,33 +76,35 @@ struct StationDetailSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                ShaderAnimationView(isLoading: isLoading, station: station)
-                
-                (colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.15))
-                    .glassEffect(.ultraThin)
-                    .ignoresSafeArea()
+                if onDismiss == nil {
+                    // iPhone sheet: needs its own glass effect background
+                    (colorScheme == .dark ? Color.black.opacity(0.05) : Color.white.opacity(0.05))
+                        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        .ignoresSafeArea()
+                } else {
+                    // iPad panel: background is handled by the MapView container
+                    (colorScheme == .dark ? Color.black.opacity(0.05) : Color.white.opacity(0.05))
+                        .ignoresSafeArea()
+                }
                 
                 // Sheet content constrained within safe area boundaries
                 sheetContent
             }
             .toolbar(.hidden, for: .navigationBar)
             .onAppear {
-                let hasActiveLines = station.lines.contains { !["15", "16", "17", "18"].contains($0.name) }
+                loadNearbyBusesAndMerge()
+                let current = mergedStation ?? station
+                let hasActiveLines = current.lines.contains { !["15", "16", "17", "18"].contains($0.name) }
                 if hasActiveLines {
                     loadDepartures()
                 }
             }
-            .background(
-                NavigationLink(
-                    destination: ItineraryResultView(
-                        destination: station,
-                        currentLocation: locationManager.userLocation
-                    ),
-                    isActive: $showItinerary
-                ) {
-                    EmptyView()
-                }
-            )
+            .navigationDestination(isPresented: $showItinerary) {
+                ItineraryResultView(
+                    destination: currentStation,
+                    currentLocation: locationManager.userLocation
+                )
+            }
         }
         .presentationBackground(.clear)
     }
@@ -103,11 +113,13 @@ struct StationDetailSheet: View {
         VStack(spacing: 0) {
             // Header — Station name + close
             HStack(alignment: .center) {
-                Text(station.name)
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.7)
+                WWDCTextAnimator(
+                    text: currentStation.name,
+                    fontSize: 22,
+                    animationType: .pulseOnce,
+                    speed: 1.0
+                )
+                .foregroundColor(.primary)
 
                 Spacer()
 
@@ -119,11 +131,13 @@ struct StationDetailSheet: View {
                         dismiss()
                     }
                 }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title)
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(.secondary)
+                    Image(systemName: "xmark")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.primary)
+                        .frame(width: 22, height: 33)
                 }
+                .buttonStyle(.glass)
+                .glassEffect(.regular.interactive(), in: .circle)
             }
             .padding(.horizontal)
             .padding(.top, 16)
@@ -135,42 +149,47 @@ struct StationDetailSheet: View {
                     Label("Y aller", systemImage: "arrow.triangle.turn.up.right.circle.fill")
                         .font(.subheadline)
                         .fontWeight(.semibold)
+                        
                 }
                 .buttonStyle(.glassProminent)
+                .glassEffect(.regular.interactive(), in: .capsule)
 
                 Spacer()
 
                 // Action buttons — individual glass circles
-                let hasActiveLines = station.lines.contains { !["15", "16", "17", "18"].contains($0.name) }
+                let hasActiveLines = currentStation.lines.contains { !["15", "16", "17", "18"].contains($0.name) }
                 if hasActiveLines {
                     Button(action: { loadDepartures() }) {
                         Image(systemName: "arrow.clockwise")
                             .font(.body)
-                            .fontWeight(.medium)
-                            .frame(width: 36, height: 36)
+                            .fontWeight(.semibold)
+                            .frame(width: 44, height: 44)
                     }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.interactive(), in: .circle)
                 }
 
                 Button(action: {
-                    FavoritesService.shared.toggleFavorite(stationId: station.id)
+                    FavoritesService.shared.toggleFavorite(stationId: currentStation.id)
                 }) {
                     Image(
-                        systemName: FavoritesService.shared.isFavorite(stationId: station.id)
+                        systemName: FavoritesService.shared.isFavorite(stationId: currentStation.id)
                             ? "heart.fill" : "heart"
                     )
                     .font(.body)
-                    .fontWeight(.medium)
+                    .fontWeight(.semibold)
                     .foregroundStyle(.red)
-                    .frame(width: 36, height: 36)
+                    .frame(width: 44, height: 44)
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: .circle)
             }
             .padding(.horizontal)
             .padding(.top, 8)
 
             // Filtre des modes
-            let availableModes = getAvailableModes(from: departures)
+            let groups = groupDepartures(departures)
+            let availableModes = getAvailableModes(from: groups)
             if availableModes.count > 1 {
                 Picker("Mode", selection: $selectedMode) {
                     Text("Tout").tag("Tout")
@@ -185,45 +204,100 @@ struct StationDetailSheet: View {
 
             ScrollView {
                 VStack(spacing: 16) {
-                    let groups = groupDepartures(departures)
                     let filteredGroups = groups.filter { group in
                         if selectedMode == "Tout" { return true }
                         return group.mode?.lowercased().contains(selectedMode.lowercased()) ?? false
                             || (group.mode == nil && selectedMode == "Autre")
                     }
-                    let gpeLines = station.lines.filter { ["15", "16", "17", "18"].contains($0.name) }
+                    let gpeLines = currentStation.lines.filter { ["15", "16", "17", "18"].contains($0.name) }
 
                     if filteredGroups.isEmpty && gpeLines.isEmpty {
-                        VStack(spacing: 16) {
-                            Spacer().frame(height: 20)
-                            Image(systemName: "clock.badge.exclamationmark")
-                                .font(.system(size: 40))
-                                .foregroundColor(.secondary)
-                            Text("Aucun départ trouvé")
-                                .font(.headline)
-                                .foregroundColor(.secondary)
-                            Text("Veuillez réactualiser ou réessayer plus tard.")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal)
-                        }
-                        .padding(.top, 20)
-                    } else {
-                        ForEach(filteredGroups) { group in
-                            LineGroupRowSheet(
-                                group: group,
-                                liveActivityManager: liveActivityManager,
-                                onLiveActivity: { lineName, direction, times, color, textColor in
-                                    startLiveActivity(
-                                        lineName: lineName,
-                                        direction: direction,
-                                        nextDepartures: times,
-                                        lineColor: color,
-                                        textColor: textColor
-                                    )
+                        let activeLines = currentStation.lines.filter { !["15", "16", "17", "18"].contains($0.name) }
+                        let hour = Calendar.current.component(.hour, from: Date())
+                        let isNight = hour >= 1 && hour < 5
+                        
+                        if !activeLines.isEmpty {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Lignes desservies")
+                                    .font(.headline)
+                                    .foregroundColor(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal)
+                                    .padding(.top, 12)
+                                
+                                ForEach(activeLines) { line in
+                                    HStack(spacing: 12) {
+                                        // Badge
+                                        LineBadge(line: line)
+                                            .scaleEffect(1.2)
+                                            .frame(width: 32, height: 32)
+                                        
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(line.name.count < 3 ? "\(line.type.rawValue) Ligne \(line.name)" : line.name)
+                                                .font(.subheadline)
+                                                .fontWeight(.semibold)
+                                            Text(isNight ? "Service de jour terminé • Reprise à 05:30" : "Aucun départ planifié actuellement")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 12)
+                                    .background(.ultraThinMaterial)
+                                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                                    .padding(.horizontal)
                                 }
-                            )
+                            }
+                        } else {
+                            VStack(spacing: 16) {
+                                Spacer().frame(height: 20)
+                                Image(systemName: "clock.badge.exclamationmark")
+                                    .font(.system(size: 40))
+                                    .foregroundColor(.secondary)
+                                Text("Aucun départ trouvé")
+                                    .font(.headline)
+                                    .foregroundColor(.secondary)
+                                Text("Veuillez réactualiser ou réessayer plus tard.")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal)
+                            }
+                            .padding(.top, 20)
+                        }
+                    } else {
+                        let categories = ["Métro", "RER", "Tramway", "Train", "Bus", "Autre"]
+                        ForEach(categories, id: \.self) { category in
+                            let categoryGroups = filteredGroups.filter { displayModeName(for: $0.mode) == category }
+                            if !categoryGroups.isEmpty {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text(category.uppercased())
+                                        .font(.system(.caption, design: .rounded))
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.secondary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.horizontal, 20)
+                                        .padding(.top, 10)
+                                    
+                                    ForEach(categoryGroups) { group in
+                                        LineGroupRowSheet(
+                                            group: group,
+                                            station: currentStation,
+                                            liveActivityManager: liveActivityManager,
+                                            onLiveActivity: { lineName, direction, times, color, textColor in
+                                                startLiveActivity(
+                                                    lineName: lineName,
+                                                    direction: direction,
+                                                    nextDepartures: times,
+                                                    lineColor: color,
+                                                    textColor: textColor
+                                                )
+                                            }
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -278,7 +352,7 @@ struct StationDetailSheet: View {
                                                 .font(.caption)
                                                 .foregroundColor(.secondary)
                                             
-                                            Text(getGPEDeliveryDate(lineName: gpeLine.name, stationName: station.name))
+                                            Text(getGPEDeliveryDate(lineName: gpeLine.name, stationName: currentStation.name))
                                                 .font(.subheadline)
                                                 .bold()
                                                 .foregroundColor(.blue)
@@ -290,7 +364,8 @@ struct StationDetailSheet: View {
                                     }
                                     .padding(.horizontal, 14)
                                     .padding(.vertical, 12)
-                                    .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 16))
+                                    .background(.ultraThinMaterial)
+                                    .clipShape(RoundedRectangle(cornerRadius: 16))
                                 }
                                 .padding(.horizontal)
                             }
@@ -301,6 +376,96 @@ struct StationDetailSheet: View {
                 .padding(.bottom, 100)
             }
             .scrollContentBackground(.hidden)
+        }
+    }
+
+    private func loadNearbyBusesAndMerge() {
+        if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" || station.mainType == .bus {
+            self.mergedStation = station
+            return
+        }
+        
+        let context = PersistenceController.shared.container.viewContext
+        let request: NSFetchRequest<StopPointEntity> = StopPointEntity.fetchRequest()
+        
+        let latDelta = 0.0032
+        let lonDelta = 0.0048
+        let minLat = station.latitude - latDelta
+        let maxLat = station.latitude + latDelta
+        let minLon = station.longitude - lonDelta
+        let maxLon = station.longitude + lonDelta
+        
+        request.predicate = NSPredicate(
+            format: "type == %@ AND latitude >= %f AND latitude <= %f AND longitude >= %f AND longitude <= %f",
+            "Bus", minLat, maxLat, minLon, maxLon
+        )
+        
+        do {
+            let entities = try context.fetch(request)
+            if entities.isEmpty {
+                self.mergedStation = station
+                return
+            }
+            
+            let centerLoc = CLLocation(latitude: station.latitude, longitude: station.longitude)
+            let filteredEntities = entities.filter { entity in
+                let entityLoc = CLLocation(latitude: entity.latitude, longitude: entity.longitude)
+                return centerLoc.distance(from: entityLoc) <= 350.0
+            }
+            
+            if filteredEntities.isEmpty {
+                self.mergedStation = station
+                return
+            }
+            
+            var newPlatforms = station.platforms
+            var existingLines = station.lines
+            
+            for entity in filteredEntities {
+                guard let id = entity.id,
+                      let name = entity.name,
+                      let lineName = entity.lineName else { continue }
+                
+                if !newPlatforms.contains(where: { $0.id == id }) {
+                    newPlatforms.append(
+                        StopPoint(
+                            id: id,
+                            stopAreaId: entity.stopAreaId ?? "",
+                            name: name,
+                            coordinate: CLLocationCoordinate2D(latitude: entity.latitude, longitude: entity.longitude),
+                            type: .bus,
+                            lineName: lineName
+                        )
+                    )
+                }
+                
+                if !existingLines.contains(where: { $0.name == lineName && $0.type == .bus }) {
+                    existingLines.append(StationLine(name: lineName, type: .bus))
+                }
+            }
+            
+            existingLines.sort { a, b in
+                let priorityA = a.type.priority
+                let priorityB = b.type.priority
+                if priorityA != priorityB {
+                    return priorityA > priorityB
+                }
+                return a.name.localizedStandardCompare(b.name) == .orderedAscending
+            }
+            
+            self.mergedStation = MapStation(
+                id: station.id,
+                name: station.name,
+                coordinate: station.coordinate,
+                platforms: newPlatforms,
+                isHub: true,
+                mainType: station.mainType,
+                lines: existingLines,
+                city: station.city
+            )
+        } catch {
+            print("❌ Error fetching nearby buses: \(error)")
+            self.mergedStation = station
         }
     }
 
@@ -362,6 +527,59 @@ struct StationDetailSheet: View {
             }
         }
 
+        // Add local lines that have no departures at all (to show they serve the station but are out of service)
+        let allLocalLines = currentStation.lines
+        for localLine in allLocalLines {
+            let lineKey = localLine.name
+            
+            if groups[lineKey] == nil {
+                let modeName: String
+                switch localLine.type {
+                case .metro: modeName = "Métro"
+                case .rer: modeName = "RER"
+                case .tram: modeName = "Tramway"
+                case .transilien, .train: modeName = "Train"
+                case .bus: modeName = "Bus"
+                case .cable: modeName = "Câble"
+                }
+                
+                let defaultResumeTime: String?
+                switch localLine.type {
+                case .metro:
+                    defaultResumeTime = "05:30"
+                case .rer:
+                    defaultResumeTime = "05:15"
+                case .tram:
+                    defaultResumeTime = "05:00"
+                case .transilien, .train:
+                    defaultResumeTime = "05:00"
+                case .bus:
+                    defaultResumeTime = "05:30"
+                default:
+                    defaultResumeTime = nil
+                }
+                
+                if ["15", "16", "17", "18"].contains(localLine.name) {
+                    continue
+                }
+                
+                let colorHex = MapDataService.shared.lineColorCache[localLine.name]?.toHex() 
+                    ?? resolveLineColor(localLine.name, type: localLine.type).toHex() 
+                    ?? "000000"
+                
+                groups[lineKey] = LineGroup(
+                    id: lineKey,
+                    label: lineKey,
+                    color: colorHex,
+                    text_color: "FFFFFF",
+                    network: modeName,
+                    mode: modeName,
+                    directions: [],
+                    resumeTime: defaultResumeTime
+                )
+            }
+        }
+
         return groups.values.sorted { a, b in
             let priorityA = modePriority(a.mode)
             let priorityB = modePriority(b.mode)
@@ -375,55 +593,100 @@ struct StationDetailSheet: View {
     }
 
     private func loadDepartures() {
+        if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" {
+            let nowStr = DateFormat.navitia.string(from: Date())
+            let minutesLater = DateFormat.navitia.string(from: Date().addingTimeInterval(300))
+            let tenMinutesLater = DateFormat.navitia.string(from: Date().addingTimeInterval(600))
+            
+            let mockDepartures: [Departure] = [
+                Departure(
+                    displayInformations: DisplayInformations(
+                        direction: "La Défense",
+                        label: "1",
+                        code: "1",
+                        color: "FFCD00",
+                        commercial_mode: "Métro",
+                        network: "Métro",
+                        textColor: "000000",
+                        name: "Ligne 1"
+                    ),
+                    stopDateTime: StopDateTime(departureDateTime: minutesLater)
+                ),
+                Departure(
+                    displayInformations: DisplayInformations(
+                        direction: "Château de Vincennes",
+                        label: "1",
+                        code: "1",
+                        color: "FFCD00",
+                        commercial_mode: "Métro",
+                        network: "Métro",
+                        textColor: "000000",
+                        name: "Ligne 1"
+                    ),
+                    stopDateTime: StopDateTime(departureDateTime: tenMinutesLater)
+                ),
+                Departure(
+                    displayInformations: DisplayInformations(
+                        direction: "Saint-Germain-en-Laye",
+                        label: "A",
+                        code: "A",
+                        color: "5291CE",
+                        commercial_mode: "RER",
+                        network: "RER",
+                        textColor: "FFFFFF",
+                        name: "RER A"
+                    ),
+                    stopDateTime: StopDateTime(departureDateTime: nowStr)
+                )
+            ]
+            self.departures = mockDepartures
+            self.isLoading = false
+            return
+        }
+
         isLoading = true
         errorMessage = nil
 
-        // Récupérer les stopAreaIds uniques des quais (le vrai ID de zone d'arrêt pour l'API)
-        let stopAreaIds = Set(station.platforms.compactMap { platform -> String? in
-            let id = platform.stopAreaId
-            return id.isEmpty ? nil : id
-        })
-        
-        print("🏪 Station: \(station.name)")
-        print("📡 Unique stop_area IDs: \(stopAreaIds)")
-        
-        // Si pas de stopAreaId valide, fallback sur les stop_points individuels
-        if stopAreaIds.isEmpty {
-            print("⚠️ No valid stopAreaIds, falling back to stop_points")
-            let stopPointIds = Set(station.platforms.map { $0.id })
+        var queryIds = Set<String>()
+        for platform in currentStation.platforms {
+            let cleanId = platform.id
+                .replacingOccurrences(of: "stop_point:", with: "")
+                .replacingOccurrences(of: "stop_area:", with: "")
             
-            // Limiter à 15 requêtes max pour économiser le quota mais avoir tout le hub
-            let limitedIds = Array(stopPointIds.prefix(15))
-            print("📡 Using \(limitedIds.count) stop_points (limited): \(limitedIds)")
-            
-            let publishers = limitedIds.map { id in
-                IDFMService.shared.fetchDepartures(for: id)
-                    .catch { _ in Just<[Departure]>([]) }
+            if platform.type == .bus {
+                queryIds.insert("stop_point:\(cleanId)")
+            } else {
+                if !platform.stopAreaId.isEmpty {
+                    let cleanAreaId = platform.stopAreaId
+                        .replacingOccurrences(of: "stop_point:", with: "")
+                        .replacingOccurrences(of: "stop_area:", with: "")
+                    queryIds.insert("stop_area:\(cleanAreaId)")
+                } else {
+                    queryIds.insert("stop_point:\(cleanId)")
+                }
             }
-            
-            cancellable = Publishers.MergeMany(publishers)
-                .collect()
-                .map { $0.flatMap { $0 } }
-                .receive(on: DispatchQueue.main)
-                .sink(
-                    receiveCompletion: { _ in self.isLoading = false },
-                    receiveValue: { deps in
-                        self.departures = deps.sorted { $0.stopDateTime.departureDateTime < $1.stopDateTime.departureDateTime }
-                        print("✅ Received \(deps.count) departures")
-                    })
-            return
         }
         
-        // Utiliser les stop_areas (1 requête par zone unique, généralement 1-2 max)
-        let publishers = stopAreaIds.map { id in
-            IDFMService.shared.fetchDepartures(for: "stop_area:\(id)")
+        print("🏪 Station: \(currentStation.name)")
+        print("📡 Constructed Query IDs: \(queryIds)")
+        
+        if queryIds.isEmpty {
+            print("⚠️ No query IDs found for departures")
+            self.isLoading = false
+            return
+        }
+
+        // Limiter à 15 requêtes max pour économiser le quota
+        let limitedIds = Array(queryIds.prefix(15))
+        print("📡 Fetching departures for \(limitedIds.count) IDs: \(limitedIds)")
+        
+        let publishers = limitedIds.map { id in
+            IDFMService.shared.fetchDepartures(for: id)
                 .catch { error -> Just<[Departure]> in
-                    print("⚠️ Error for stop_area \(id): \(error)")
+                    print("⚠️ Error for departures query \(id): \(error)")
                     return Just([])
                 }
         }
-        
-        print("📡 Fetching \(stopAreaIds.count) stop_area(s)")
         
         cancellable = Publishers.MergeMany(publishers)
             .collect()
@@ -438,7 +701,7 @@ struct StationDetailSheet: View {
                     self.isLoading = false
                     if case .failure(let error) = completion {
                         self.errorMessage = error.localizedDescription
-                        print("❌ Error: \(error)")
+                        print("❌ Error fetching departures: \(error)")
                     }
                 },
                 receiveValue: { allDepartures in
@@ -473,7 +736,7 @@ struct StationDetailSheet: View {
         // 1. Filtrer les quais qui correspondent à la ligne sélectionnée
         // 2. Utiliser les stop_area_id si disponibles (1 requête au lieu de N)
         // 3. Dédupliquer
-        let relevantPlatforms = station.platforms.filter { $0.lineName == lineName }
+        let relevantPlatforms = currentStation.platforms.filter { $0.lineName == lineName }
         
         let optimizedIds: Set<String> = Set(relevantPlatforms.compactMap { platform in
             if !platform.stopAreaId.isEmpty {
@@ -490,7 +753,7 @@ struct StationDetailSheet: View {
         })
 
         LiveActivityManager.shared.startLiveActivity(
-            stationName: station.name,
+            stationName: currentStation.name,
             lineName: lineName,
             direction: direction,
             nextDepartures: departuresToUse,
@@ -510,6 +773,16 @@ struct StationDetailSheet: View {
         return 5
     }
 
+    private func displayModeName(for mode: String?) -> String {
+        guard let m = mode?.lowercased() else { return "Autre" }
+        if m.contains("metro") || m.contains("métro") { return "Métro" }
+        if m.contains("rer") { return "RER" }
+        if m.contains("tram") { return "Tramway" }
+        if m.contains("train") || m.contains("transilien") { return "Train" }
+        if m.contains("bus") { return "Bus" }
+        return "Autre"
+    }
+
     private func compareLineLabels(_ a: String, _ b: String) -> Bool {
         if let numA = Int(a), let numB = Int(b) {
             return numA < numB
@@ -519,28 +792,57 @@ struct StationDetailSheet: View {
         return a.localizedStandardCompare(b) == .orderedAscending
     }
 
-    private func getAvailableModes(from departures: [Departure]) -> [String] {
-        let modes = Set(departures.compactMap { $0.displayInformations.commercial_mode })
-        // On peut normaliser les noms si besoin (ex: "Metro" -> "Métro")
-        return Array(modes).sorted()
+    private func getAvailableModes(from groups: [LineGroup]) -> [String] {
+        let modes = Set(groups.compactMap { group -> String? in
+            guard let mode = group.mode else { return nil }
+            let lower = mode.lowercased()
+            if lower == "metro" || lower.contains("metro") {
+                return "Métro"
+            } else if lower == "rer" {
+                return "RER"
+            } else if lower == "tram" || lower.contains("tram") {
+                return "Tramway"
+            } else if lower == "bus" {
+                return "Bus"
+            } else if lower == "train" || lower.contains("transilien") {
+                return "Train"
+            }
+            return mode.capitalized
+        })
+        let orderPriority: [String: Int] = [
+            "métro": 0,
+            "rer": 1,
+            "tramway": 2,
+            "train": 3,
+            "bus": 4
+        ]
+        return Array(modes).sorted { a, b in
+            let pA = orderPriority[a.lowercased()] ?? 99
+            let pB = orderPriority[b.lowercased()] ?? 99
+            if pA != pB {
+                return pA < pB
+            }
+            return a < b
+        }
     }
+
+    private static let sudStations: [String] = [
+        "Pont de Sèvres", "Issy", "Clamart", "Châtillon", "Bagneux", "Arcueil", 
+        "Villejuif", "Vitry", "Ardoines", "Vert de Maisons", "Créteil", 
+        "Saint-Maur", "Champigny", "Bry", "Noisy"
+    ]
+    private static let lateStations: [String] = ["Chelles", "Noisy"]
 
     private func getGPEDeliveryDate(lineName: String, stationName: String) -> String {
         switch lineName {
         case "15":
-            let sudStations = [
-                "Pont de Sèvres", "Issy", "Clamart", "Châtillon", "Bagneux", "Arcueil", 
-                "Villejuif", "Vitry", "Ardoines", "Vert de Maisons", "Créteil", 
-                "Saint-Maur", "Champigny", "Bry", "Noisy"
-            ]
-            if sudStations.contains(where: { stationName.contains($0) }) {
+            if Self.sudStations.contains(where: { stationName.contains($0) }) {
                 return "Avril 2027 (Ligne 15 Sud)"
             } else {
                 return "Horizon 2031 (Ligne 15 Est/Ouest)"
             }
         case "16":
-            let lateStations = ["Chelles", "Noisy"]
-            if lateStations.contains(where: { stationName.contains($0) }) {
+            if Self.lateStations.contains(where: { stationName.contains($0) }) {
                 return "Horizon 2028"
             } else {
                 return "Horizon 2027"
@@ -572,8 +874,10 @@ private struct LineGroupRowSheet: View {
     typealias LineGroup = StationDetailSheet.LineGroup
 
     let group: LineGroup
+    let station: MapStation
     let liveActivityManager: LiveActivityManager
     let onLiveActivity: (String, String, [String], String, String) -> Void
+    @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -600,13 +904,15 @@ private struct LineGroupRowSheet: View {
                     .frame(width: 36, height: 36)
             } else {
                 ZStack {
-                    if group.mode == "RER" || group.mode == "Train" {
+                    let isBus = group.mode?.lowercased().contains("bus") == true
+                    let badgeColor = isBus ? (group.color.isEmpty || group.color == "000000" ? Color(hex: "008B5E") : Color(hex: group.color)) : Color(hex: group.color)
+                    if group.mode == "RER" || group.mode == "Train" || isBus {
                         RoundedRectangle(cornerRadius: 6)
-                            .fill(Color(hex: group.color))
-                            .frame(width: 36, height: 36)
+                            .fill(badgeColor)
+                            .frame(width: isBus ? 45 : 36, height: 36)
                     } else {
                         Circle()
-                            .fill(Color(hex: group.color))
+                            .fill(badgeColor)
                             .frame(width: 30, height: 30)
                     }
                     Text(group.label)
@@ -617,9 +923,62 @@ private struct LineGroupRowSheet: View {
             if let network = group.network {
                 Text(network).font(.caption).foregroundColor(.secondary)
             }
+            
             Spacer()
+            
+            if group.mode?.lowercased().contains("bus") == true {
+                Button(action: {
+                    locateBusStops()
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "mappin.and.ellipse")
+                            .font(.system(size: 13, weight: .bold))
+                        Text("Localiser")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                    }
+                    .foregroundColor(.blue)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.06))
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(.horizontal)
+    }
+
+    private func locateBusStops() {
+        let busPlatforms = station.platforms.filter { $0.lineName == group.label && $0.type == .bus }
+        guard !busPlatforms.isEmpty else {
+            print("⚠️ No physical bus stops found for line \(group.label)")
+            return
+        }
+        
+        let mapView = SharedMapView.main.mapView
+        let oldAnnotations = mapView.annotations.filter { $0 is BusStopTempAnnotation }
+        mapView.removeAnnotations(oldAnnotations)
+        
+        var annotationsToAdd: [BusStopTempAnnotation] = []
+        for platform in busPlatforms {
+            let anno = BusStopTempAnnotation(
+                coordinate: platform.coordinate,
+                title: "\(station.name) - Bus \(group.label)",
+                subtitle: "Arrêt physique"
+            )
+            annotationsToAdd.append(anno)
+        }
+        
+        mapView.addAnnotations(annotationsToAdd)
+        
+        if let first = busPlatforms.first {
+            let region = MKCoordinateRegion(
+                center: first.coordinate,
+                span: MKCoordinateSpan(latitudeDelta: 0.002, longitudeDelta: 0.002)
+            )
+            mapView.setRegion(region, animated: true)
+        }
     }
 
     @ViewBuilder
@@ -640,7 +999,6 @@ private struct LineGroupRowSheet: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 16))
     }
 
     private var directionsView: some View {
@@ -649,7 +1007,7 @@ private struct LineGroupRowSheet: View {
                 directionRow(direction: direction, index: index)
             }
         }
-        .glassEffect(.standard, in: RoundedRectangle(cornerRadius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
     private func directionRow(direction: StationDetailSheet.DirectionGroup, index: Int) -> some View {
@@ -688,9 +1046,10 @@ private struct LineGroupRowSheet: View {
                     Image(systemName: "bolt.fill")
                         .font(.body)
                         .foregroundColor(isActive ? .green : .pink)
-                        .frame(width: 34, height: 34)
+                        .frame(width: 44, height: 44)
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: .circle)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
@@ -700,4 +1059,36 @@ private struct LineGroupRowSheet: View {
         }
     }
 }
+
+struct StationDetailSheet_Previews: PreviewProvider {
+    static var previews: some View {
+        StationDetailSheet(
+            station: MapStation(
+                id: "IDFM:C01377",
+                name: "Nation",
+                coordinate: CLLocationCoordinate2D(latitude: 48.8482, longitude: 2.3982),
+                platforms: [
+                    StopPoint(
+                        id: "stop_point:1",
+                        stopAreaId: "C01377",
+                        name: "Nation - RER A",
+                        coordinate: CLLocationCoordinate2D(latitude: 48.8482, longitude: 2.3982),
+                        type: .rer,
+                        lineName: "A"
+                    )
+                ],
+                isHub: true,
+                mainType: .rer,
+                lines: [
+                    StationLine(name: "A", type: .rer),
+                    StationLine(name: "1", type: .metro),
+                    StationLine(name: "6", type: .metro),
+                    StationLine(name: "15", type: .metro)
+                ],
+                city: "Paris"
+            )
+        )
+    }
+}
+
 

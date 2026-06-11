@@ -18,7 +18,7 @@ enum TransportType: String, CaseIterable, Identifiable, Codable {
         case .rer: return Color.red
         case .train, .transilien: return Color.blue
         case .tram: return Color.green
-        case .bus: return Color.orange
+        case .bus: return Color(hex: "008B5E")
         case .cable: return Color.gray
         }
     }
@@ -129,6 +129,18 @@ struct TransportLine: Identifiable {
     // Custom colors (usually for bus lines)
     var colorHex: String? = nil
     var textColorHex: String? = nil
+    var isUnderConstruction: Bool = false
+
+    var openingDate: String? {
+        guard isUnderConstruction else { return nil }
+        switch lineId {
+        case "15": return "2025 - 2031"
+        case "16": return "2026 - 2028"
+        case "17": return "2026 - 2030"
+        case "18": return "2026 - 2030"
+        default: return nil
+        }
+    }
 
     // Computed properties for backward compatibility
     var message: String? { trafficInfos.first?.message }
