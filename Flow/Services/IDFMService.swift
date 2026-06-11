@@ -28,7 +28,11 @@ class IDFMService {
 
         let endpoint = stationId.contains("stop_area") ? "stop_areas" : "stop_points"
         
-        guard let encodedId = stationId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+        // S'assurer que l'ID n'a pas déjà de préfixe avant d'en ajouter un autre via l'URL Navitia
+        let cleanId = stationId.replacingOccurrences(of: "stop_area:", with: "")
+                             .replacingOccurrences(of: "stop_point:", with: "")
+
+        guard let encodedId = cleanId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
               let url = URL(string: "\(baseURL)/\(endpoint)/\(encodedId)/departures") else {
             return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
         }
