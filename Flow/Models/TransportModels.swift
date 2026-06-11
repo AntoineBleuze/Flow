@@ -25,12 +25,12 @@ enum TransportType: String, CaseIterable, Identifiable, Codable {
 
     var priority: Int {
         switch self {
-        case .rer: return 100
-        case .train, .transilien: return 80
-        case .metro: return 60
-        case .tram: return 40
-        case .bus: return 20
-        case .cable: return 10
+        case .metro: return 100
+        case .rer: return 90
+        case .tram: return 80
+        case .transilien, .train: return 70
+        case .cable: return 60
+        case .bus: return 50
         }
     }
 

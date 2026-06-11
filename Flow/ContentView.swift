@@ -341,15 +341,45 @@ struct FavoriteStationRow: View {
     @State private var nextDepartures: [String] = []
     @State private var isLoading = true
 
+    private var displayedStationLines: [StationLine] {
+        let allLines = station.lines
+        let nonBusLines = allLines.filter { $0.type != .bus }
+
+        return nonBusLines.sorted { lhs, rhs in
+            let lhsPriority = customPriority(lhs.type)
+            let rhsPriority = customPriority(rhs.type)
+            if lhsPriority != rhsPriority {
+                return lhsPriority > rhsPriority
+            }
+            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    private func customPriority(_ type: TransportType) -> Int {
+        type.priority
+    }
+
     var body: some View {
         HStack {
-            // Icone Type
-            TransportTypeIcon(type: station.mainType)
-                .frame(width: 40, height: 40)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .center, spacing: 8) {
+                    Text(station.name)
+                        .font(.headline)
 
-            VStack(alignment: .leading) {
-                Text(station.name)
-                    .font(.headline)
+                    HStack(spacing: 4) {
+                        let lines = displayedStationLines
+                        ForEach(lines.prefix(5), id: \.id) { line in
+                            LineIcon(type: line.type, lineId: line.name, size: 16)
+                        }
+
+                        if station.lines.contains(where: { $0.type == .bus }) {
+                            Image("Bus")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(height: 16)
+                        }
+                    }
+                }
 
                 if isLoading {
                     Text("Chargement...")

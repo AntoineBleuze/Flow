@@ -297,7 +297,7 @@ struct SearchTabContent: View {
         if lower.contains("rer") { return .rer }
         if lower.contains("metro") { return .metro }
         if lower.contains("tram") { return .tram }
-        if lower.contains("train") || lower.contains("transilien") { return .transilien }
+        if lower.contains("train") || lower.contains("transilien") || lower.contains("rail") { return .transilien }
         return .bus
     }
 }
@@ -353,69 +353,31 @@ struct StationRow: View {
     }
 
     private func customPriority(_ type: TransportType) -> Int {
-        switch type {
-        case .metro: return 100
-        case .rer: return 90
-        case .tram: return 80
-        case .transilien, .train: return 70
-        case .cable: return 60
-        case .bus: return 50
-        }
+        type.priority
     }
 
     var body: some View {
-        HStack(spacing: 16) {
-            let lines = displayedStationLines
-            if !lines.isEmpty {
-                HStack(spacing: 4) {
-                    let displayed = lines.prefix(3)
-                    ForEach(displayed, id: \.id) { line in
-                        LineIcon(type: line.type, lineId: line.name, size: 24)
-                    }
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .center, spacing: 8) {
+                    Text(station.name)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(.primary)
                     
-                    if lines.count > 3 {
-                        Text("+\(lines.count - 3)")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 2)
-                            .background(Color.secondary.opacity(0.15))
-                            .cornerRadius(4)
-                    }
-                }
-                .frame(width: 80, alignment: .leading)
-            } else if station.lines.contains(where: { $0.type == .bus }) {
-                // Show a single, beautiful bus icon for bus-only stations
-                HStack {
-                    ZStack {
-                        Circle()
-                            .fill(Color.orange.opacity(0.15))
-                            .frame(width: 28, height: 28)
+                    HStack(spacing: 4) {
+                        let lines = displayedStationLines
+                        ForEach(lines.prefix(5), id: \.id) { line in
+                            LineIcon(type: line.type, lineId: line.name, size: 16)
+                        }
                         
-                        Image(systemName: "bus")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(.orange)
+                        if station.lines.contains(where: { $0.type == .bus }) {
+                            Image("Bus")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(height: 16)
+                        }
                     }
-                    Spacer()
                 }
-                .frame(width: 80, alignment: .leading)
-            } else {
-                ZStack {
-                    Circle()
-                        .fill((isMultiModal ? .blue : color(for: station.mainType)).opacity(0.15))
-                        .frame(width: 36, height: 36)
-                    
-                    Image(systemName: isMultiModal ? "train.side.front.car" : iconName(for: station.mainType))
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(isMultiModal ? .blue : color(for: station.mainType))
-                }
-                .frame(width: 80, alignment: .leading)
-            }
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text(station.name)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundColor(.primary)
                 
                 if let city = station.city, !city.isEmpty {
                     Text(city)

@@ -69,16 +69,38 @@ struct SimpleStationPicker: View {
                             dismiss()
                         }) {
                             HStack {
-                                if station.id.hasPrefix("address:") {
-                                    Image(systemName: "mappin.and.ellipse")
-                                        .foregroundColor(.red)
-                                } else {
-                                    Image(systemName: iconName(for: station.mainType))
-                                        .foregroundColor(color(for: station.mainType))
-                                }
-                                VStack(alignment: .leading) {
-                                    Text(station.name)
-                                        .font(.headline)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack(alignment: .center, spacing: 8) {
+                                        Text(station.name)
+                                            .font(.headline)
+
+                                        if !station.id.hasPrefix("address:") {
+                                            HStack(spacing: 4) {
+                                                // Pour le picker simple, on n'a souvent pas les lignes détaillées dans l'objet MapStation,
+                                                // on affiche alors juste le mainType si disponible
+                                                if !station.lines.isEmpty {
+                                                    ForEach(station.lines.filter { $0.type != .bus }.prefix(5), id: \.id) { line in
+                                                        LineIcon(type: line.type, lineId: line.name, size: 16)
+                                                    }
+                                                } else if station.mainType != .bus {
+                                                    // Fallback si pas de lignes
+                                                    TransportTypeIcon(type: station.mainType)
+                                                        .frame(width: 16, height: 16)
+                                                }
+
+                                                if station.mainType == .bus || station.lines.contains(where: { $0.type == .bus }) {
+                                                    Image("Bus")
+                                                        .resizable()
+                                                        .scaledToFit()
+                                                        .frame(height: 16)
+                                                }
+                                            }
+                                        } else {
+                                            Image(systemName: "mappin.and.ellipse")
+                                                .font(.caption)
+                                                .foregroundColor(.red)
+                                        }
+                                    }
                                 }
                                 Spacer()
                             }
@@ -201,7 +223,7 @@ struct SimpleStationPicker: View {
         if folded.contains("rer") { return .rer }
         if folded.contains("metro") { return .metro }
         if folded.contains("tram") { return .tram }
-        if folded.contains("train") || folded.contains("transilien") { return .transilien }
+        if folded.contains("train") || folded.contains("transilien") || folded.contains("rail") { return .transilien }
         return .bus
     }
 
