@@ -66,12 +66,13 @@ struct VariableWordView: View {
     let size: CGFloat
     
     var body: some View {
-        // --- TIMINGS ACCÉLÉRÉS ---
-        let staggerDelay = 0.12 // Vitesse de propagation de mot à mot (divisée par ~2)
+        // --- TIMINGS ÉQUILIBRÉS ET TRANSPARENTS ---
+        let staggerDelay = 0.12
         let delay = Double(sequenceIndex) * staggerDelay
-        let animationDuration = 1.0 // Durée totale de la déformation d'un mot (passée de 2.0s à 1.0s)
+        let animationDuration = 1.0 // Durée de l'onde (0.2 + 0.2 + 0.3 + 0.3)
         
-        let totalLoopDuration = 2.2 // Durée totale d'une boucle complète avant répétition
+        // On baisse la durée globale à 1.5s pour enchaîner presque instantanément
+        let totalLoopDuration = 1.5
         let restDuration = totalLoopDuration - animationDuration - delay
         
         Text(text)
@@ -82,15 +83,17 @@ struct VariableWordView: View {
                     .sfProVariableWeight(weight: value.weight, size: size)
             } keyframes: { _ in
                 KeyframeTrack(\.weight) {
+                    // Attente initiale
                     CubicKeyframe(0.40, duration: delay)
                     
-                    // --- ETAPES RAPIDES ET NERVEUSES ---
-                    CubicKeyframe(0.62, duration: 0.25)  // Black (très rapide)
-                    CubicKeyframe(0.40, duration: 0.25)  // Retour Bold
-                    CubicKeyframe(-0.60, duration: 0.30) // Ultra Light profond
-                    CubicKeyframe(0.40, duration: 0.20)  // Retour rapide au Bold de repos
+                    // --- COURBE DE VÉLOCITÉ LISSÉE ---
+                    CubicKeyframe(0.62, duration: 0.20)  // 1. Monte au Black
+                    CubicKeyframe(0.40, duration: 0.20)  // 2. Redescend au Bold
+                    CubicKeyframe(-0.60, duration: 0.30) // 3. Plonge doucement dans l'Ultra Light
+                    CubicKeyframe(0.40, duration: 0.30)  // 4. Remonte au Bold à la même vitesse (0.30s)
                     
-                    CubicKeyframe(0.40, duration: restDuration)
+                    // Phase de repos ultra-courte avant le prochain reset
+                    CubicKeyframe(0.40, duration: max(0, restDuration))
                 }
             }
     }
