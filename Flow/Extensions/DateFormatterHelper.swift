@@ -7,6 +7,8 @@ enum DateFormat {
     static let navitia: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd'T'HHmmss"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Europe/Paris")
         return formatter
     }()
 
@@ -14,6 +16,7 @@ enum DateFormat {
     static let navitiaParisTimezone: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd'T'HHmmss"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(identifier: "Europe/Paris")
         return formatter
     }()
@@ -22,6 +25,8 @@ enum DateFormat {
     static let shortTime: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Europe/Paris")
         return formatter
     }()
 

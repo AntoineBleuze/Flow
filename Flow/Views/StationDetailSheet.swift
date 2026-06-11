@@ -248,7 +248,7 @@ struct StationDetailSheet: View {
                                             Text(line.name.count < 3 ? "\(line.type.rawValue) Ligne \(line.name)" : line.name)
                                                 .font(.subheadline)
                                                 .fontWeight(.semibold)
-                                            Text(isNight ? "Service de jour terminé • Reprise à 05:30" : "Aucun départ planifié actuellement")
+                                            Text(isNight ? "Service de jour terminé • Reprise à 05:30" : "Aucun départ imminent")
                                                 .font(.caption)
                                                 .foregroundColor(.secondary)
                                         }
@@ -595,6 +595,9 @@ struct StationDetailSheet: View {
                     ?? resolveLineColor(localLine.name, type: localLine.type).toHex() 
                     ?? "000000"
                 
+                let hour = Calendar.current.component(.hour, from: Date())
+                let isNight = hour >= 1 && hour < 5
+
                 groups[lineKey] = LineGroup(
                     id: lineKey,
                     label: lineKey,
@@ -603,7 +606,7 @@ struct StationDetailSheet: View {
                     network: modeName,
                     mode: modeName,
                     directions: [],
-                    resumeTime: defaultResumeTime
+                    resumeTime: isNight ? defaultResumeTime : nil
                 )
             }
         }
@@ -679,23 +682,19 @@ struct StationDetailSheet: View {
 
         var queryIds = Set<String>()
         for platform in activeStation.platforms {
-            let cleanId = platform.id
-                .replacingOccurrences(of: "stop_point:", with: "")
-                .replacingOccurrences(of: "stop_area:", with: "")
-            
             if platform.type == .bus {
-                queryIds.insert("stop_point:\(cleanId)")
+                let id = platform.id.contains("stop_point:") ? platform.id : "stop_point:\(platform.id)"
+                queryIds.insert(id)
             } else {
                 // Pour le métro/RER/train, si le stopAreaId contient la lettre "C" (ex: IDFM:C01374),
                 // Navitia ne supporte pas cet ID logique de regroupement et renvoie 404.
                 // On utilise alors directement le stopPointId (physique) de la plateforme.
                 if !platform.stopAreaId.isEmpty && !platform.stopAreaId.contains("IDFM:C") && !platform.stopAreaId.contains(":C") {
-                    let cleanAreaId = platform.stopAreaId
-                        .replacingOccurrences(of: "stop_point:", with: "")
-                        .replacingOccurrences(of: "stop_area:", with: "")
-                    queryIds.insert("stop_area:\(cleanAreaId)")
+                    let areaId = platform.stopAreaId.contains("stop_area:") ? platform.stopAreaId : "stop_area:\(platform.stopAreaId)"
+                    queryIds.insert(areaId)
                 } else {
-                    queryIds.insert("stop_point:\(cleanId)")
+                    let pointId = platform.id.contains("stop_point:") ? platform.id : "stop_point:\(platform.id)"
+                    queryIds.insert(pointId)
                 }
             }
         }
@@ -709,8 +708,17 @@ struct StationDetailSheet: View {
             return
         }
 
-        // Limiter à 15 requêtes max pour économiser le quota
-        let limitedIds = Array(queryIds.prefix(15))
+        // Prioriser les arrêts ferrés sur les bus pour ne pas rater les lignes majeures
+        let sortedIds = Array(queryIds).sorted { id1, id2 in
+            let isRail1 = id1.contains("stop_area") || !id1.contains("bus")
+            let isRail2 = id2.contains("stop_area") || !id2.contains("bus")
+            if isRail1 != isRail2 { return isRail1 }
+            return id1 < id2
+        }
+
+        // Limiter à 25 requêtes max pour économiser le quota
+        let limitedIds = Array(sortedIds.prefix(25))
+        print("📡 Fetching departures for \(limitedIds.count) IDs: \(limitedIds)")
         
         if FlowServerService.shared.isEnabled && FlowServerService.shared.isConnected {
             print("📡 WebSocket connectée : Souscription aux horaires temps réel pour \(limitedIds.count) IDs")
@@ -1022,15 +1030,18 @@ private struct LineGroupRowSheet: View {
 
     @ViewBuilder
     private func nightServiceView(resume: String) -> some View {
+        let hour = Calendar.current.component(.hour, from: Date())
+        let isNight = hour >= 1 && hour < 5
+
         HStack(spacing: 10) {
-            Image(systemName: "moon.zzz.fill")
+            Image(systemName: isNight ? "moon.zzz.fill" : "clock.badge.exclamationmark")
                 .font(.body)
                 .foregroundColor(.secondary)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Hors service")
+                Text(isNight ? "Hors service" : "Aucun départ imminent")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
-                Text("Reprise du service à \(resume)")
+                Text(isNight ? "Reprise du service à \(resume)" : "Prochain passage à \(resume)")
                     .font(.subheadline).bold()
                     .foregroundColor(.primary)
             }
@@ -1038,12 +1049,26 @@ private struct LineGroupRowSheet: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
+        .background(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.03))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
     private var directionsView: some View {
         VStack(spacing: 0) {
-            ForEach(Array(group.directions.enumerated()), id: \.element.id) { index, direction in
-                directionRow(direction: direction, index: index)
+            if group.directions.isEmpty {
+                HStack {
+                    Text("Aucune information en temps réel")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.03))
+            } else {
+                ForEach(Array(group.directions.enumerated()), id: \.element.id) { index, direction in
+                    directionRow(direction: direction, index: index)
+                }
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 16))
