@@ -197,7 +197,7 @@ struct StationDetailScreen: View {
                 // En-tête de ligne (Icone + Réseau)
                 HStack {
                     let assetName = TransportType.getAssetName(mode: group.mode, label: group.label)
-                    if UIImage(named: assetName) != nil {
+                    if !assetName.isEmpty, UIImage(named: assetName) != nil {
                         Image(assetName)
                             .resizable()
                             .scaledToFit()

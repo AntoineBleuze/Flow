@@ -71,6 +71,8 @@ enum TransportType: String, CaseIterable, Identifiable, Codable {
             // Pour le Cable 1, on utilisera probablement "Cable1" si dispo, ou "Cable"
             // Ici c'est pour l'affichage statique d'un logo mode
             return "Cable"
+        } else if normalizedMode.contains("bus") {
+            return "bus\(label)"
         }
         return ""
     }
