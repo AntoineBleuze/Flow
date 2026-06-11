@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 @MainActor
-struct SFProVariableWeightModifier: ViewModifier {
+fileprivate struct SFProVariableWeightModifier: ViewModifier {
     let weight: CGFloat
     let size: CGFloat
 
@@ -25,12 +25,12 @@ struct SFProVariableWeightModifier: ViewModifier {
 
 extension View {
     @MainActor
-    func sfProVariableWeight(weight: CGFloat, size: CGFloat) -> some View {
+    fileprivate func sfProVariableWeight(weight: CGFloat, size: CGFloat) -> some View {
         self.modifier(SFProVariableWeightModifier(weight: weight, size: size))
     }
 }
 
-struct VariableWaveProperties {
+fileprivate struct VariableWaveProperties {
     var weight: CGFloat = 0.40 // Ligne de base : Bold
 }
 

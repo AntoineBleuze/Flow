@@ -63,9 +63,6 @@ const wss = new WebSocketServer({ server });
 app.use(cors());
 app.use(express.json());
 
-// Serve the web dashboard (for browser access)
-const path = require("path");
-app.use(express.static(path.join(__dirname, "public")));
 
 // Logger simple
 app.use((req, res, next) => {
@@ -82,6 +79,30 @@ const cache = {
   lastFullUpdate: null,
   departures: {}, // stopId -> { data: [], timestamp: Date }
 };
+
+const recentlyRequestedStops = new Map(); // stopId -> timestamp
+const API_DELAY_MS = parseInt(process.env.API_DELAY_MS || "200", 10);
+
+// Chargement des arrêts de stops.json
+const fs = require("fs");
+const path = require("path");
+
+let railwayStops = [];
+let busStops = [];
+
+try {
+  const stopsPath = path.join(__dirname, "stops.json");
+  if (fs.existsSync(stopsPath)) {
+    const stopsData = JSON.parse(fs.readFileSync(stopsPath, "utf8"));
+    railwayStops = stopsData.railway || [];
+    busStops = stopsData.bus || [];
+    console.log(`   ✅ stops.json chargé : ${railwayStops.length} ferroviaires et ${busStops.length} bus.`);
+  } else {
+    console.warn("   ⚠️ stops.json introuvable. Aucun arrêt ne sera pré-chargé.");
+  }
+} catch (err) {
+  console.error("   ❌ Erreur lors du chargement de stops.json :", err.message);
+}
 
 // ============================================================
 // Gestion des abonnements globaux
@@ -103,7 +124,6 @@ function removeStopInterest(stopIds) {
       activeStopCounts.set(id, current - 1);
     } else {
       activeStopCounts.delete(id);
-      delete cache.departures[id]; // Cleanup cache
     }
   });
 }
@@ -145,18 +165,18 @@ async function processNavitiaQueue() {
     const data = await response.json();
     resolve(data);
 
-    // Petit délai de 200ms après un appel réussi pour respecter les limites
+    // Petit délai configurable après un appel réussi
     setTimeout(() => {
       isProcessingQueue = false;
       processNavitiaQueue();
-    }, 200);
+    }, API_DELAY_MS);
   } catch (err) {
     reject(err);
-    // En cas d'erreur (autre que 429), on passe à la suite après 100ms
+    // En cas d'erreur (autre que 429), on passe à la suite après un petit délai
     setTimeout(() => {
       isProcessingQueue = false;
       processNavitiaQueue();
-    }, 100);
+    }, Math.max(100, API_DELAY_MS / 2));
   }
 }
 
@@ -313,18 +333,9 @@ async function autoRefresh() {
       data: slimData,
     });
 
-    // 2. Refresh & Push Départs (Global Cache)
-    console.log(`   🔍 Mise à jour des départs globaux...`);
-    await refreshActiveDepartures();
-
-    console.log(`   📤 Diffusion aux abonnés...`);
-    wss.clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN && client.departureSubscription) {
-        pushCachedDepartures(client);
-      }
-    });
+    // Les départs sont désormais gérés séparément par le worker de pré-chargement.
   } catch (error) {
-    console.error(`   ❌ Erreur auto-refresh: ${error.message}`);
+    console.error(`   ❌ Erreur auto-refresh perturbations: ${error.message}`);
   }
 }
 
@@ -428,44 +439,142 @@ wss.on("connection", (ws, req) => {
 });
 
 // ============================================================
-// Helper : Fetch global des départs actifs
+// Système de Cache et de Pré-chargement en arrière-plan
 // ============================================================
-async function refreshActiveDepartures() {
-  const uniqueStopIds = Array.from(activeStopCounts.keys());
-  if (uniqueStopIds.length === 0) return;
 
-  console.log(`   🌍 Fetching ${uniqueStopIds.length} active stops...`);
+function updateCache(stopId, departures) {
+  cache.departures[stopId] = {
+    data: departures,
+    timestamp: Date.now()
+  };
 
-  for (const stopId of uniqueStopIds) {
-    try {
-      let data;
-      // 1. Essai principal
-      try {
-        const endpoint = stopId.includes("stop_point") ? "stop_points" : "stop_areas";
-        const url = `${NAVITIA_BASE}/${endpoint}/${stopId}/departures?count=20`;
-        data = await navitiaFetch(url);
-      } catch (err) {
-        // 2. Retry automatique : si 404 sur stop_areas, on tente stop_points avec préfixe
-        if ((err.message.includes("404") || err.message.includes("unknown_object")) && !stopId.includes("stop_point")) {
-          const retryId = stopId.startsWith("stop_point:") ? stopId : `stop_point:${stopId}`;
-          const url = `${NAVITIA_BASE}/stop_points/${retryId}/departures?count=20`;
-          data = await navitiaFetch(url);
-        } else {
-          throw err;
-        }
+  // Si c'est un stop_area, on extrait et met également à jour le cache des stop_point individuels
+  if (stopId.startsWith("stop_area:") && departures && departures.length > 0) {
+    const grouped = {};
+    for (const dep of departures) {
+      const spId = dep.stop_point?.id;
+      if (spId) {
+        if (!grouped[spId]) grouped[spId] = [];
+        grouped[spId].push(dep);
       }
-
-      if (data.departures) {
-        cache.departures[stopId] = {
-          data: data.departures,
-          timestamp: Date.now()
-        };
-      }
-      // Petit délai pour éviter de spammer l'API (50ms)
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    } catch (e) {
-      console.error(`   ⚠️ Erreur fetch ${stopId}: ${e.message}`);
     }
+    for (const [spId, deps] of Object.entries(grouped)) {
+      cache.departures[spId] = {
+        data: deps,
+        timestamp: Date.now()
+      };
+    }
+  }
+
+  // Push immédiat aux abonnés WebSocket concernés
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN && client.departureSubscription) {
+      const sub = client.departureSubscription;
+      if (sub.stopIds.includes(stopId)) {
+        pushCachedDepartures(client);
+      }
+    }
+  });
+}
+
+let railwayIndex = 0;
+let busIndex = 0;
+let intercalateCount = 0;
+
+async function getNextStopToFetch() {
+  const now = Date.now();
+  
+  // 1. Priorité aux arrêts actifs (WebSocket)
+  for (const stopId of activeStopCounts.keys()) {
+    const cached = cache.departures[stopId];
+    if (!cached || (now - cached.timestamp > 60000)) {
+      return stopId;
+    }
+  }
+  
+  // 2. Priorité aux arrêts récemment demandés (REST)
+  for (const [stopId, timestamp] of recentlyRequestedStops.entries()) {
+    if (now - timestamp > 300000) {
+      recentlyRequestedStops.delete(stopId);
+      continue;
+    }
+    const cached = cache.departures[stopId];
+    if (!cached || (now - cached.timestamp > 60000)) {
+      return stopId;
+    }
+  }
+  
+  // 3. Boucle générale (Ratio 4 railway pour 1 bus)
+  if (railwayStops.length === 0 && busStops.length === 0) {
+    return null;
+  }
+  
+  if (railwayStops.length > 0 && (intercalateCount < 4 || busStops.length === 0)) {
+    intercalateCount++;
+    const stopId = railwayStops[railwayIndex];
+    railwayIndex = (railwayIndex + 1) % railwayStops.length;
+    return stopId;
+  } else if (busStops.length > 0) {
+    intercalateCount = 0;
+    const stopId = busStops[busIndex];
+    busIndex = (busIndex + 1) % busStops.length;
+    return stopId;
+  }
+  return null;
+}
+
+async function refreshStop(stopId) {
+  if (stopId.includes("stop_area:") && stopId.includes(":C")) {
+    return;
+  }
+  
+  try {
+    let data;
+    const endpoint = stopId.includes("stop_point") ? "stop_points" : "stop_areas";
+    const url = `${NAVITIA_BASE}/${endpoint}/${stopId}/departures?count=20`;
+    
+    data = await navitiaFetch(url);
+    if (data && data.departures) {
+      const isActive = activeStopCounts.has(stopId) || recentlyRequestedStops.has(stopId);
+      if (isActive) {
+        console.log(`   🌍 [Priority Fetch] Pré-chargé départs pour l'arrêt actif ${stopId} (${data.departures.length} départs)`);
+      }
+      updateCache(stopId, data.departures);
+    }
+  } catch (err) {
+    if ((err.message.includes("404") || err.message.includes("unknown_object")) && !stopId.includes("stop_point")) {
+      try {
+        const retryId = stopId.startsWith("stop_point:") ? stopId : `stop_point:${stopId}`;
+        const url = `${NAVITIA_BASE}/stop_points/${retryId}/departures?count=20`;
+        const data = await navitiaFetch(url);
+        if (data && data.departures) {
+          const isActive = activeStopCounts.has(stopId) || recentlyRequestedStops.has(stopId);
+          if (isActive) {
+            console.log(`   🌍 [Priority Fetch Retry] Pré-chargé départs pour l'arrêt actif ${stopId} (${data.departures.length} départs)`);
+          }
+          updateCache(stopId, data.departures);
+          return;
+        }
+      } catch (retryErr) {
+        // Enregistrer cache vide
+      }
+    }
+    updateCache(stopId, []);
+  }
+}
+
+async function startPrefetchLoop() {
+  console.log("🚀 Lancement du worker de pré-chargement en tâche de fond...");
+  while (true) {
+    try {
+      const stopId = await getNextStopToFetch();
+      if (stopId) {
+        await refreshStop(stopId);
+      }
+    } catch (err) {
+      console.error("❌ Erreur dans le cycle principal de pré-chargement:", err.message);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }
 
@@ -545,7 +654,7 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// GET /api/departures/:stationId — Prochains départs
+// GET /api/departures/:stationId — Prochains départs (Service depuis le cache uniquement)
 app.get("/api/departures/:stationId", async (req, res) => {
   try {
     let stationId = decodeURIComponent(req.params.stationId);
@@ -557,29 +666,24 @@ app.get("/api/departures/:stationId", async (req, res) => {
       if (!stationId.startsWith("stop_point:")) stationId = `stop_point:${stationId}`;
     }
 
-    // 1. Vérifier le cache global d'abord (si frais < 30s)
+    // Bloquer les requêtes sur les zones d'arrêt logiques IDFM
+    if (stationId.includes("stop_area:") && stationId.includes(":C")) {
+      return res.json({ departures: [] });
+    }
+
+    // Enregistrer comme récemment demandé pour actualisation prioritaire
+    recentlyRequestedStops.set(stationId, Date.now());
+
+    // Servir uniquement depuis le cache
     const cached = cache.departures[stationId];
-    if (cached && (Date.now() - cached.timestamp < 30000)) {
-      console.log(`   💾 Départs pour ${stationId} servis depuis le cache`);
+    if (cached) {
+      const ageSec = Math.round((Date.now() - cached.timestamp) / 1000);
+      console.log(`   💾 Départs pour ${stationId} servis depuis le cache (âge: ${ageSec}s)`);
       return res.json({ departures: cached.data });
     }
 
-    // 2. Sinon, fetch via la queue
-    let endpoint = stationId.includes("stop_area") ? "stop_areas" : "stop_points";
-    const encodedId = encodeURIComponent(stationId).replace(/%3A/g, ":");
-    const url = `${NAVITIA_BASE}/${endpoint}/${encodedId}/departures`;
-
-    const data = await navitiaFetch(url);
-
-    // Mettre à jour le cache
-    if (data.departures) {
-      cache.departures[stationId] = {
-        data: data.departures,
-        timestamp: Date.now()
-      };
-    }
-
-    res.json(data);
+    console.log(`   ⚠️ Départs pour ${stationId} non trouvés en cache (vide)`);
+    res.json({ departures: [] });
   } catch (error) {
     console.error("❌ Departures error:", error.message);
     res.status(500).json({ error: error.message });
@@ -623,10 +727,10 @@ app.get("/api/itinerary", async (req, res) => {
 });
 
 // ============================================================
-// Catch-all : renvoie le dashboard HTML pour toute route non-API
+// Catch-all : route non trouvée
 // ============================================================
-app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
+app.use((req, res) => {
+  res.status(404).json({ error: "Not Found" });
 });
 
 // ============================================================
@@ -651,4 +755,7 @@ server.listen(PORT, "0.0.0.0", () => {
 
   // Puis toutes les minutes
   setInterval(autoRefresh, REFRESH_INTERVAL_MS);
+
+  // Lancement du cycle de pré-chargement continu en arrière-plan
+  startPrefetchLoop();
 });

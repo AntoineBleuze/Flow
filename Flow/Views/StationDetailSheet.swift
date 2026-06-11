@@ -92,12 +92,10 @@ struct StationDetailSheet: View {
             }
             .toolbar(.hidden, for: .navigationBar)
             .onAppear {
-                loadNearbyBusesAndMerge()
-                let current = mergedStation ?? station
-                let hasActiveLines = current.lines.contains { !["15", "16", "17", "18"].contains($0.name) }
-                if hasActiveLines {
-                    loadDepartures()
-                }
+                setupStation()
+            }
+            .onChange(of: station.id) { _, _ in
+                setupStation()
             }
             .navigationDestination(isPresented: $showItinerary) {
                 ItineraryResultView(
@@ -113,13 +111,13 @@ struct StationDetailSheet: View {
         VStack(spacing: 0) {
             // Header — Station name + close
             HStack(alignment: .center) {
-                WWDCTextAnimator(
-                    text: currentStation.name,
-                    fontSize: 22,
-                    animationType: .pulseOnce,
-                    speed: 1.0
-                )
-                .foregroundColor(.primary)
+                let words = currentStation.name.components(separatedBy: " ")
+                HStack(spacing: 4) {
+                    ForEach(Array(words.enumerated()), id: \.offset) { index, word in
+                        AnimatedStationWordView(text: word, sequenceIndex: index, size: 22)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 Spacer()
 
@@ -159,7 +157,7 @@ struct StationDetailSheet: View {
                 // Action buttons — individual glass circles
                 let hasActiveLines = currentStation.lines.contains { !["15", "16", "17", "18"].contains($0.name) }
                 if hasActiveLines {
-                    Button(action: { loadDepartures() }) {
+                    Button(action: { loadDepartures(force: true) }) {
                         Image(systemName: "arrow.clockwise")
                             .font(.body)
                             .fontWeight(.semibold)
@@ -379,10 +377,23 @@ struct StationDetailSheet: View {
         }
     }
 
-    private func loadNearbyBusesAndMerge() {
+    private func setupStation() {
+        self.errorMessage = nil
+        self.departures = []
+        
+        let merged = loadNearbyBusesAndMerge()
+        
+        let hasActiveLines = merged.lines.contains { !["15", "16", "17", "18"].contains($0.name) }
+        if hasActiveLines {
+            loadDepartures(for: merged)
+        }
+    }
+
+    @discardableResult
+    private func loadNearbyBusesAndMerge() -> MapStation {
         if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" || station.mainType == .bus {
             self.mergedStation = station
-            return
+            return station
         }
         
         let context = PersistenceController.shared.container.viewContext
@@ -404,7 +415,7 @@ struct StationDetailSheet: View {
             let entities = try context.fetch(request)
             if entities.isEmpty {
                 self.mergedStation = station
-                return
+                return station
             }
             
             let centerLoc = CLLocation(latitude: station.latitude, longitude: station.longitude)
@@ -415,7 +426,7 @@ struct StationDetailSheet: View {
             
             if filteredEntities.isEmpty {
                 self.mergedStation = station
-                return
+                return station
             }
             
             var newPlatforms = station.platforms
@@ -453,7 +464,7 @@ struct StationDetailSheet: View {
                 return a.name.localizedStandardCompare(b.name) == .orderedAscending
             }
             
-            self.mergedStation = MapStation(
+            let merged = MapStation(
                 id: station.id,
                 name: station.name,
                 coordinate: station.coordinate,
@@ -463,9 +474,12 @@ struct StationDetailSheet: View {
                 lines: existingLines,
                 city: station.city
             )
+            self.mergedStation = merged
+            return merged
         } catch {
             print("❌ Error fetching nearby buses: \(error)")
             self.mergedStation = station
+            return station
         }
     }
 
@@ -592,7 +606,9 @@ struct StationDetailSheet: View {
         }
     }
 
-    private func loadDepartures() {
+    private func loadDepartures(for targetStation: MapStation? = nil, force: Bool = false) {
+        let activeStation = targetStation ?? currentStation
+        
         if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" {
             let nowStr = DateFormat.navitia.string(from: Date())
             let minutesLater = DateFormat.navitia.string(from: Date().addingTimeInterval(300))
@@ -648,7 +664,7 @@ struct StationDetailSheet: View {
         errorMessage = nil
 
         var queryIds = Set<String>()
-        for platform in currentStation.platforms {
+        for platform in activeStation.platforms {
             let cleanId = platform.id
                 .replacingOccurrences(of: "stop_point:", with: "")
                 .replacingOccurrences(of: "stop_area:", with: "")
@@ -656,7 +672,10 @@ struct StationDetailSheet: View {
             if platform.type == .bus {
                 queryIds.insert("stop_point:\(cleanId)")
             } else {
-                if !platform.stopAreaId.isEmpty {
+                // Pour le métro/RER/train, si le stopAreaId contient la lettre "C" (ex: IDFM:C01374),
+                // Navitia ne supporte pas cet ID logique de regroupement et renvoie 404.
+                // On utilise alors directement le stopPointId (physique) de la plateforme.
+                if !platform.stopAreaId.isEmpty && !platform.stopAreaId.contains("IDFM:C") && !platform.stopAreaId.contains(":C") {
                     let cleanAreaId = platform.stopAreaId
                         .replacingOccurrences(of: "stop_point:", with: "")
                         .replacingOccurrences(of: "stop_area:", with: "")
@@ -667,7 +686,7 @@ struct StationDetailSheet: View {
             }
         }
         
-        print("🏪 Station: \(currentStation.name)")
+        print("🏪 Station: \(activeStation.name)")
         print("📡 Constructed Query IDs: \(queryIds)")
         
         if queryIds.isEmpty {
@@ -681,7 +700,7 @@ struct StationDetailSheet: View {
         print("📡 Fetching departures for \(limitedIds.count) IDs: \(limitedIds)")
         
         let publishers = limitedIds.map { id in
-            IDFMService.shared.fetchDepartures(for: id)
+            IDFMService.shared.fetchDepartures(for: id, force: force)
                 .catch { error -> Just<[Departure]> in
                     print("⚠️ Error for departures query \(id): \(error)")
                     return Just([])
@@ -739,11 +758,10 @@ struct StationDetailSheet: View {
         let relevantPlatforms = currentStation.platforms.filter { $0.lineName == lineName }
         
         let optimizedIds: Set<String> = Set(relevantPlatforms.compactMap { platform in
-            if !platform.stopAreaId.isEmpty {
+            // Fallback sur stop_point si le stopAreaId contient la lettre "C" (non supportée par l'API pour les départs)
+            if !platform.stopAreaId.isEmpty && !platform.stopAreaId.contains("IDFM:C") && !platform.stopAreaId.contains(":C") {
                 return "stop_area:\(platform.stopAreaId)"
             } else {
-                // Fallback sur stop_point.
-                // Le serveur utilise .contains("stop_point") pour choisir l'endpoint.
                 let id = platform.id
                 if !id.contains("stop_point") {
                     return "stop_point:\(id)"
@@ -1088,6 +1106,82 @@ struct StationDetailSheet_Previews: PreviewProvider {
                 city: "Paris"
             )
         )
+    }
+}
+
+// MARK: - COMPONENTS POUR L'ANIMATION DE VAGUE TYPOGRAPHIQUE
+
+@MainActor
+private struct SFProVariableWeightModifier: ViewModifier {
+    let weight: CGFloat
+    let size: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .font(Font(createVariableFont()))
+    }
+
+    private func createVariableFont() -> UIFont {
+        let baseFont = UIFont.systemFont(ofSize: size)
+        let attributes: [UIFontDescriptor.AttributeName: Any] = [
+            .traits: [
+                kCTFontWeightTrait: weight
+            ]
+        ]
+        let descriptor = baseFont.fontDescriptor.addingAttributes(attributes)
+        return UIFont(descriptor: descriptor, size: size)
+    }
+}
+
+extension View {
+    @MainActor
+    fileprivate func sfProVariableWeight(weight: CGFloat, size: CGFloat) -> some View {
+        self.modifier(SFProVariableWeightModifier(weight: weight, size: size))
+    }
+}
+
+private struct VariableWaveProperties {
+    var weight: CGFloat = 0.40 // Base en Bold
+}
+
+private struct AnimatedStationWordView: View {
+    let text: String
+    let sequenceIndex: Int
+    let size: CGFloat
+    
+    @State private var startAnimation = false
+    
+    var body: some View {
+        let staggerDelay = 0.12 
+        let delay = Double(sequenceIndex) * staggerDelay
+        let animationDuration = 1.0
+        let totalLoopDuration = 1.6 
+        let restDuration = totalLoopDuration - animationDuration - delay
+        
+        Text(text)
+            .fixedSize(horizontal: true, vertical: true)
+            .foregroundColor(.primary) // S'adapte au mode sombre/clair automatiquement
+            .keyframeAnimator(
+                initialValue: VariableWaveProperties(),
+                trigger: startAnimation
+            ) { @MainActor content, value in
+                content
+                    .sfProVariableWeight(weight: value.weight, size: size)
+            } keyframes: { _ in
+                KeyframeTrack(\.weight) {
+                    CubicKeyframe(0.40, duration: delay)
+                    
+                    CubicKeyframe(0.62, duration: 0.20)
+                    CubicKeyframe(0.40, duration: 0.20)
+                    CubicKeyframe(-0.60, duration: 0.30)
+                    CubicKeyframe(0.40, duration: 0.30)
+                    
+                    CubicKeyframe(0.40, duration: max(0, restDuration))
+                }
+            }
+            .onAppear {
+                startAnimation = true
+            }
     }
 }
 

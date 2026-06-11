@@ -9,6 +9,9 @@
 import Combine
 import CoreLocation
 import Foundation
+#if os(iOS)
+import UIKit
+#endif
 
 class FlowServerService: ObservableObject {
     static let shared = FlowServerService()
@@ -30,7 +33,7 @@ class FlowServerService: ObservableObject {
     var isEnabled: Bool = true
 
     /// Timeout pour les requêtes réseau (en secondes)
-    var requestTimeout: TimeInterval = 30
+    var requestTimeout: TimeInterval = 5.0
 
     // MARK: - État publié
 
@@ -51,30 +54,69 @@ class FlowServerService: ObservableObject {
 
     private init() {
         determineBestURL()
+        
+        #if os(iOS)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+        #endif
     }
 
     private func determineBestURL() {
-        let urlString = "https://\(primaryHost)/api/health"
-        guard let url = URL(string: urlString) else { return }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 4.0
+        let primaryURLString = "https://\(primaryHost)/api/health"
+        guard let primaryURL = URL(string: primaryURLString) else { return }
+        var request = URLRequest(url: primaryURL)
+        request.timeoutInterval = 3.0
 
+        print("📡 [FlowServer] Vérification de la santé du serveur principal (\(primaryURLString))...")
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            DispatchQueue.main.async {
-                if error != nil {
-                    let fallback = self?.fallbackIP ?? "192.168.1.190"
-                    let port = self?.fallbackPort ?? "3001"
-                    print("⚠️ [FlowServer] URL principale injoignable. Basculement sur le fallback (\(fallback)).")
-                    self?.baseURL = "http://\(fallback):\(port)"
-                    if self?.isConnected == false && self?.isEnabled == true {
-                        self?.connectWebSocket()
+            guard let self = self else { return }
+            
+            if error != nil {
+                print("⚠️ [FlowServer] URL principale injoignable. Vérification du fallback...")
+                let fallback = self.fallbackIP
+                let port = self.fallbackPort
+                let fallbackURLString = "http://\(fallback):\(port)/api/health"
+                guard let fallbackURL = URL(string: fallbackURLString) else { return }
+                var fallbackRequest = URLRequest(url: fallbackURL)
+                fallbackRequest.timeoutInterval = 3.0
+                
+                URLSession.shared.dataTask(with: fallbackRequest) { [weak self] fallbackData, fallbackResponse, fallbackError in
+                    guard let self = self else { return }
+                    DispatchQueue.main.async {
+                        if fallbackError != nil {
+                            print("❌ [FlowServer] Les deux serveurs sont injoignables. Conservation de l'URL principale pour tentatives ultérieures.")
+                            self.baseURL = "https://\(self.primaryHost)"
+                        } else {
+                            print("✅ [FlowServer] URL de fallback joignable. Basculement sur \(fallback).")
+                            self.baseURL = "http://\(fallback):\(port)"
+                        }
+                        if self.isEnabled {
+                            self.connectWebSocket()
+                        }
                     }
-                } else {
+                }.resume()
+            } else {
+                DispatchQueue.main.async {
                     print("✅ [FlowServer] URL principale joignable (HTTPS).")
+                    self.baseURL = "https://\(self.primaryHost)"
+                    if self.isEnabled {
+                        self.connectWebSocket()
+                    }
                 }
             }
         }.resume()
     }
+
+    #if os(iOS)
+    @objc private func appWillEnterForeground() {
+        print("🔄 [FlowServer] App de retour au premier plan. Vérification de la santé du serveur...")
+        determineBestURL()
+    }
+    #endif
 
     // MARK: - Session configurée
 
@@ -297,15 +339,23 @@ class FlowServerService: ObservableObject {
 
     // MARK: - Departures (REST — toujours à la demande)
 
-    func fetchDepartures(for stationId: String) -> AnyPublisher<[Departure], Error> {
+    func fetchDepartures(for stationId: String, force: Bool = false) -> AnyPublisher<[Departure], Error> {
         guard let encodedId = stationId.addingPercentEncoding(
-            withAllowedCharacters: .urlPathAllowed),
-            let url = URL(string: "\(baseURL)/api/departures/\(encodedId)")
+            withAllowedCharacters: .urlPathAllowed)
         else {
             return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
         }
+        
+        var urlString = "\(baseURL)/api/departures/\(encodedId)"
+        if force {
+            urlString += "?force=true"
+        }
+        
+        guard let url = URL(string: urlString) else {
+            return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
+        }
 
-        print("📡 [Server] Departures: \(url.absoluteString)")
+        print("📡 [Server] Departures: \(url.absoluteString) (force: \(force))")
 
         return session.dataTaskPublisher(for: url)
             .map { $0.data }

@@ -99,8 +99,8 @@ struct StationDetailScreen: View {
             }
         }
         .onAppear {
-            loadNearbyBusesAndMerge()
-            loadDepartures()
+            let merged = loadNearbyBusesAndMerge()
+            loadDepartures(for: merged)
         }
             .navigationDestination(isPresented: $showItinerary) {
                 ItineraryResultView(
@@ -447,12 +447,14 @@ struct StationDetailScreen: View {
         }
     }
 
-    private func loadDepartures() {
+    private func loadDepartures(for targetStation: MapStation? = nil, force: Bool = false) {
+        let activeStation = targetStation ?? currentStation
+        
         isLoading = true
         errorMessage = nil
 
         var queryIds = Set<String>()
-        for platform in currentStation.platforms {
+        for platform in activeStation.platforms {
             let cleanId = platform.id
                 .replacingOccurrences(of: "stop_point:", with: "")
                 .replacingOccurrences(of: "stop_area:", with: "")
@@ -460,7 +462,10 @@ struct StationDetailScreen: View {
             if platform.type == .bus {
                 queryIds.insert("stop_point:\(cleanId)")
             } else {
-                if !platform.stopAreaId.isEmpty {
+                // Pour le métro/RER/train, si le stopAreaId contient la lettre "C" (ex: IDFM:C01374),
+                // Navitia ne supporte pas cet ID logique de regroupement et renvoie 404.
+                // On utilise alors directement le stopPointId (physique) de la plateforme.
+                if !platform.stopAreaId.isEmpty && !platform.stopAreaId.contains("IDFM:C") && !platform.stopAreaId.contains(":C") {
                     let cleanAreaId = platform.stopAreaId
                         .replacingOccurrences(of: "stop_point:", with: "")
                         .replacingOccurrences(of: "stop_area:", with: "")
@@ -471,7 +476,7 @@ struct StationDetailScreen: View {
             }
         }
         
-        print("🏪 Station: \(currentStation.name)")
+        print("🏪 Station: \(activeStation.name)")
         print("📡 Constructed Query IDs: \(queryIds)")
         
         if queryIds.isEmpty {
@@ -485,7 +490,7 @@ struct StationDetailScreen: View {
         print("📡 Fetching departures for \(limitedIds.count) IDs: \(limitedIds)")
         
         let publishers = limitedIds.map { id in
-            IDFMService.shared.fetchDepartures(for: id)
+            IDFMService.shared.fetchDepartures(for: id, force: force)
                 .catch { error -> Just<[Departure]> in
                     print("⚠️ Error for departures query \(id): \(error)")
                     return Just([])
@@ -538,10 +543,10 @@ struct StationDetailScreen: View {
         let relevantPlatforms = currentStation.platforms.filter { $0.lineName == lineName }
         
         let optimizedIds: Set<String> = Set(relevantPlatforms.compactMap { platform in
-            if !platform.stopAreaId.isEmpty {
+            // Fallback sur stop_point si le stopAreaId contient la lettre "C" (non supportée par l'API pour les départs)
+            if !platform.stopAreaId.isEmpty && !platform.stopAreaId.contains("IDFM:C") && !platform.stopAreaId.contains(":C") {
                 return "stop_area:\(platform.stopAreaId)"
             } else {
-                // Fallback sur stop_point
                 let id = platform.id
                 if !id.contains("stop_point") {
                     return "stop_point:\(id)"
@@ -561,10 +566,11 @@ struct StationDetailScreen: View {
         )
     }
 
-    private func loadNearbyBusesAndMerge() {
+    @discardableResult
+    private func loadNearbyBusesAndMerge() -> MapStation {
         if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" || station.mainType == .bus {
             self.mergedStation = station
-            return
+            return station
         }
         
         let context = PersistenceController.shared.container.viewContext
@@ -586,7 +592,7 @@ struct StationDetailScreen: View {
             let entities = try context.fetch(request)
             if entities.isEmpty {
                 self.mergedStation = station
-                return
+                return station
             }
             
             let centerLoc = CLLocation(latitude: station.latitude, longitude: station.longitude)
@@ -597,7 +603,7 @@ struct StationDetailScreen: View {
             
             if filteredEntities.isEmpty {
                 self.mergedStation = station
-                return
+                return station
             }
             
             var newPlatforms = station.platforms
@@ -635,7 +641,7 @@ struct StationDetailScreen: View {
                 return a.name.localizedStandardCompare(b.name) == .orderedAscending
             }
             
-            self.mergedStation = MapStation(
+            let merged = MapStation(
                 id: station.id,
                 name: station.name,
                 coordinate: station.coordinate,
@@ -645,9 +651,12 @@ struct StationDetailScreen: View {
                 lines: existingLines,
                 city: station.city
             )
+            self.mergedStation = merged
+            return merged
         } catch {
             print("❌ Error fetching nearby buses: \(error)")
             self.mergedStation = station
+            return station
         }
     }
 

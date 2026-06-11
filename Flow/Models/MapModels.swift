@@ -225,7 +225,7 @@ class MapDataService: ObservableObject {
 
     private var stationsCacheURL: URL {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("stationsCache_v5.json")
+            .appendingPathComponent("stationsCache_v6.json")
     }
 
     private var colorsCacheURL: URL {
@@ -641,7 +641,8 @@ class MapDataService: ObservableObject {
                         if modeStr.caseInsensitiveCompare("bus") == .orderedSame {
                             let id = columns[2]
                             let stopAreaId = columns[0]
-                            let name = columns[3]
+                            let rawName = columns[3]
+                            let name = self.cleanStationName(rawName)
                             let lonStr = columns[4]
                             let latStr = columns[5]
                             let lineName = columns[7]
@@ -674,7 +675,7 @@ class MapDataService: ObservableObject {
                     }
                 }
                 
-                UserDefaults.standard.set(true, forKey: "didImportBusStops_v6")
+                UserDefaults.standard.set(true, forKey: "didImportBusStops_v7")
                 print("✅ [Bus Import] Importation de tous les arrêts de bus terminée avec succès !")
                 
             } catch {
@@ -688,17 +689,17 @@ class MapDataService: ObservableObject {
         let fetchRequest: NSFetchRequest<StopPointEntity> = StopPointEntity.fetchRequest()
 
         // Import des bus en arrière-plan si pas encore fait
-        let didImportBus = UserDefaults.standard.bool(forKey: "didImportBusStops_v6")
+        let didImportBus = UserDefaults.standard.bool(forKey: "didImportBusStops_v7")
         if !didImportBus {
             self.importBusStopsInBackground()
         }
 
         // Migration de l'ancien CSV vers le nouveau JSON
-        let didMigrate = UserDefaults.standard.bool(forKey: "didMigrateToJSONStations_v4")
+        let didMigrate = UserDefaults.standard.bool(forKey: "didMigrateToJSONStations_v5")
         if !didMigrate {
             print("🔄 Première exécution avec JSON : purge de la base locale...")
             self.clearStopPoints(in: context)
-            UserDefaults.standard.set(true, forKey: "didMigrateToJSONStations_v4")
+            UserDefaults.standard.set(true, forKey: "didMigrateToJSONStations_v5")
         }
 
         do {
@@ -760,8 +761,9 @@ class MapDataService: ObservableObject {
             print("📊 Parsing gares-et-stations-du-reseau-ferre-dile-de-france-donnee-generalisee.json: \(items.count) stations")
 
             for item in items {
-                guard let name = item.nom_zdc ?? item.nom_long,
+                guard let rawName = item.nom_long ?? item.nom_zdc,
                       let res_com = item.res_com else { continue }
+                let name = self.cleanStationName(rawName)
                 
                 let lat = item.geo_point_2d.lat
                 let lon = item.geo_point_2d.lon
@@ -923,7 +925,8 @@ class MapDataService: ObservableObject {
                 }
                 let columns = self.parseCSVLine(row)
                 if columns.count > 10 {
-                    let name = columns[3]
+                    let rawName = columns[3]
+                    let name = self.cleanStationName(rawName)
                     let lonStr = columns[4]
                     let latStr = columns[5]
                     let modeStr = columns[8]
@@ -1007,11 +1010,13 @@ class MapDataService: ObservableObject {
                 }
             }
             guard let id = entity.id,
-                let name = entity.name,
+                let rawName = entity.name,
                 let typeStr = entity.type,
                 let rawLineName = entity.lineName,
                 let city = entity.city
             else { continue }
+
+            let name = self.cleanStationName(rawName)
 
             // Nettoyage du nom de ligne (comme dans le CSV) pour corriger les données existantes
             let lineName = rawLineName.uppercased()
@@ -1137,7 +1142,7 @@ class MapDataService: ObservableObject {
             .replacingOccurrences(of: "—", with: "-")
             .replacingOccurrences(of: "–", with: "-")
         
-        let separators = [" - ", "-", "("]
+        let separators = [" - ", "("]
         var base = cleanName
         for sep in separators {
             if let first = base.components(separatedBy: sep).first {
@@ -1145,6 +1150,44 @@ class MapDataService: ObservableObject {
             }
         }
         return base.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // Helper to clean and reduce station names to their shortest/cleanest form
+    nonisolated private func cleanStationName(_ name: String) -> String {
+        var clean = name
+            .replacingOccurrences(of: "—", with: "-")
+            .replacingOccurrences(of: "–", with: "-")
+        
+        // 1. Supprimer les arrondissements (ex: " - 4ème Arrondissement", " 4e Arrondissement", " - 4e")
+        if let regex = try? NSRegularExpression(pattern: "\\s*-\\s*\\d+(?:er|e|ème)?\\s*arrondissement.*", options: .caseInsensitive) {
+            let range = NSRange(clean.startIndex..., in: clean)
+            clean = regex.stringByReplacingMatches(in: clean, options: [], range: range, withTemplate: "")
+        }
+        if let regex = try? NSRegularExpression(pattern: "\\s+\\d+(?:er|e|ème)?\\s*arrondissement.*", options: .caseInsensitive) {
+            let range = NSRange(clean.startIndex..., in: clean)
+            clean = regex.stringByReplacingMatches(in: clean, options: [], range: range, withTemplate: "")
+        }
+        
+        // 2. Simplifier "Hôtel de Ville de Paris" -> "Hôtel de Ville"
+        if clean.lowercased().hasPrefix("hôtel de ville de paris") {
+            clean = "Hôtel de Ville"
+        }
+        
+        // 3. Traiter les barres obliques " / " décrivant des sous-noms secondaires (ex: "Auguste Perret / Cimetière Parisien de Thiais" -> "Auguste Perret")
+        if clean.contains(" / ") {
+            let parts = clean.components(separatedBy: " / ")
+            if let first = parts.first, !first.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                clean = first
+            }
+        }
+        
+        // 4. Supprimer les parenthèses de description (ex: "Aéroport CDG 1 (Terminal 3)" -> "Aéroport CDG 1")
+        if let regex = try? NSRegularExpression(pattern: "\\s*\\(.*\\)", options: []) {
+            let range = NSRange(clean.startIndex..., in: clean)
+            clean = regex.stringByReplacingMatches(in: clean, options: [], range: range, withTemplate: "")
+        }
+        
+        return clean.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // Helper to create a single merged hub from a list of stations

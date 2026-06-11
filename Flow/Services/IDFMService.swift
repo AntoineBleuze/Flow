@@ -10,19 +10,11 @@ class IDFMService {
 
     private let baseURL = "https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia"
 
-    func fetchDepartures(for stationId: String) -> AnyPublisher<[Departure], Error> {
-        // Mode serveur : passer par FlowServer si activé, avec fallback en cas d'erreur
+    func fetchDepartures(for stationId: String, force: Bool = false) -> AnyPublisher<[Departure], Error> {
+        // Mode serveur : passer par FlowServer si activé
         if FlowServerService.shared.isEnabled {
-            print("📡 [Server Mode] Departures via FlowServer for \(stationId)")
-            return FlowServerService.shared.fetchDepartures(for: stationId)
-                .catch { [weak self] error -> AnyPublisher<[Departure], Error> in
-                    print("⚠️ [Server Mode Failed] falling back to direct departures for \(stationId): \(error.localizedDescription)")
-                    guard let self = self else {
-                        return Fail(error: error).eraseToAnyPublisher()
-                    }
-                    return self.fetchDirectDepartures(for: stationId)
-                }
-                .eraseToAnyPublisher()
+            print("📡 [Server Mode] Departures via FlowServer for \(stationId) (force: \(force))")
+            return FlowServerService.shared.fetchDepartures(for: stationId, force: force)
         }
 
         print("📡 [Direct Mode] Departures direct from IDFM for \(stationId)")
