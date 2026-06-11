@@ -11,7 +11,7 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     override init() {
         super.init()
         locationManager.delegate = self
-        locationManager.desiredAccuracy = kCLLocationAccuracyHundredMeters  // Reduce battery usage
+        locationManager.desiredAccuracy = kCLLocationAccuracyBest
 
         // Prevent background updates in Previews to avoid BSActionErrorDomain crash
         if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] != "1" {

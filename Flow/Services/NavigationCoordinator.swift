@@ -34,9 +34,9 @@ class NavigationCoordinator: ObservableObject {
         case .follow:
             userTrackingMode = .followWithHeading
         case .followWithHeading:
-            userTrackingMode = .none
+            userTrackingMode = .follow
         @unknown default:
-            userTrackingMode = .none
+            userTrackingMode = .follow
         }
     }
 }

@@ -132,6 +132,9 @@ struct MapViewControllerBridge: UIViewRepresentable {
         #if canImport(UIKit)
         if mapView.userTrackingMode != userTrackingMode {
             mapView.setUserTrackingMode(userTrackingMode, animated: true)
+            if userTrackingMode != .none, let userCoord = locationManager.userLocation, isValidCoordinate(userCoord) {
+                mapView.setCenter(userCoord, animated: true)
+            }
         }
         #endif
 

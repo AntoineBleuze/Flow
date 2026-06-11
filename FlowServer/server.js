@@ -407,9 +407,12 @@ wss.on("connection", (ws, req) => {
           // On peut lancer un refresh partiel ou juste check cache
           pushCachedDepartures(ws);
 
-          // Si pas de données, on pourrait trigger un fetch spécifique, 
-          // mais pour l'instant on attend le prochain autoRefresh (recommandé pour "Global Loop")
-          // Optionnel: refreshActiveDepartures() si cache vide? Non, attendons 30s max.
+          // Lancer un refresh immédiat pour avoir les dernières données du serveur
+          stopIds.forEach((stopId) => {
+            refreshStop(stopId).catch((err) => {
+              console.error(`❌ Erreur refresh immédiat départ (${stopId}):`, err.message);
+            });
+          });
         }
       }
 
@@ -431,6 +434,13 @@ wss.on("connection", (ws, req) => {
           addStopInterest(stopIds);
           ws.stationSubscription = { stopIds };
           pushCachedDepartures(ws);
+
+          // Lancer un refresh immédiat pour avoir les dernières données du serveur
+          stopIds.forEach((stopId) => {
+            refreshStop(stopId).catch((err) => {
+              console.error(`❌ Erreur refresh immédiat station (${stopId}):`, err.message);
+            });
+          });
         }
       }
 
@@ -492,9 +502,10 @@ function updateCache(stopId, departures) {
 
   // Push immédiat aux abonnés WebSocket concernés
   wss.clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN && client.departureSubscription) {
-      const sub = client.departureSubscription;
-      if (sub.stopIds.includes(stopId)) {
+    if (client.readyState === WebSocket.OPEN) {
+      if (client.departureSubscription && client.departureSubscription.stopIds.includes(stopId)) {
+        pushCachedDepartures(client);
+      } else if (client.stationSubscription && client.stationSubscription.stopIds.includes(stopId)) {
         pushCachedDepartures(client);
       }
     }

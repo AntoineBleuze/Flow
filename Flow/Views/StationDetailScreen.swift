@@ -79,10 +79,10 @@ struct StationDetailScreen: View {
                 HStack {
                     // Bouton Favoris
                     Button(action: {
-                        FavoritesService.shared.toggleFavorite(stationId: currentStation.id)
+                        favoritesService.toggleFavorite(stationId: currentStation.id)
                     }) {
                         Image(
-                            systemName: FavoritesService.shared.isFavorite(stationId: currentStation.id)
+                            systemName: favoritesService.isFavorite(stationId: currentStation.id)
                                 ? "heart.fill" : "heart"
                         )
                         .foregroundColor(.red)
@@ -499,11 +499,13 @@ struct StationDetailScreen: View {
         // Limiter à 15 requêtes max pour économiser le quota
         let limitedIds = Array(queryIds.prefix(15))
         
-        if FlowServerService.shared.isEnabled {
+        if FlowServerService.shared.isEnabled && FlowServerService.shared.isConnected {
+            print("📡 WebSocket connectée : Souscription aux horaires temps réel pour \(limitedIds.count) IDs")
             FlowServerService.shared.sendSubscribeStation(stopIds: limitedIds)
+            return
         }
         
-        print("📡 Fetching departures for \(limitedIds.count) IDs: \(limitedIds)")
+        print("📡 Mode REST Direct IDFM : Récupération pour \(limitedIds.count) IDs: \(limitedIds)")
         
         let publishers = limitedIds.map { id in
             IDFMService.shared.fetchDepartures(for: id, force: force)
