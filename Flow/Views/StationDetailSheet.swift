@@ -915,7 +915,7 @@ private struct LineGroupRowSheet: View {
     private var lineHeader: some View {
         HStack(spacing: 10) {
             let assetName = TransportType.getAssetName(mode: group.mode, label: group.label)
-            if UIImage(named: assetName) != nil {
+            if !assetName.isEmpty, UIImage(named: assetName) != nil {
                 Image(assetName)
                     .resizable()
                     .scaledToFit()

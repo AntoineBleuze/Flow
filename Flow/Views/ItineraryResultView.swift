@@ -443,7 +443,7 @@ struct JourneyRow: View {
                                 code: display.code ?? display.label ?? "")
 
                             // Try to use real asset, fallback to colored circle
-                            if UIImage(named: assetName) != nil {
+                            if !assetName.isEmpty, UIImage(named: assetName) != nil {
                                 Image(assetName)
                                     .resizable()
                                     .scaledToFit()
@@ -552,6 +552,8 @@ struct JourneyRow: View {
             return "T\(code)"
         } else if mode.contains("train") || mode.contains("transilien") {
             return "transilien\(code)"
+        } else if mode.contains("bus") {
+            return "bus\(code)"
         }
         return ""
     }
