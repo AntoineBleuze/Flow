@@ -1,9 +1,9 @@
-import CoreData
+import SwiftData
 import Foundation
 import MapKit
 
 /// Structure locale pour éviter les problèmes d'isolation d'acteur avec le modèle global
-private struct BackgroundGeoJSONShape: Codable, Sendable {
+nonisolated private struct BackgroundGeoJSONShape: Codable, Sendable {
     let type: String
     let coordinates: [[[Double]]]
 }
@@ -13,45 +13,17 @@ public class TransportLinePersistence {
 
     static let shared = TransportLinePersistence()
 
-    // MARK: - CoreData Stack
-
-    lazy var persistentContainer: NSPersistentContainer = {
-        let container = NSPersistentContainer(name: "TransportLines")
-        container.loadPersistentStores { description, error in
-            if let error = error {
-                fatalError("❌ Erreur de chargement CoreData: \(error)")
-            }
-            print("✅ CoreData chargé: \(description)")
-        }
-        return container
-    }()
-
-    var context: NSManagedObjectContext {
-        return persistentContainer.viewContext
-    }
-
-    // MARK: - Save
-
-    func saveContext() {
-        if context.hasChanges {
-            do {
-                try context.save()
-                print("✅ Contexte CoreData sauvegardé")
-            } catch {
-                print("❌ Erreur de sauvegarde: \(error)")
-            }
-        }
-    }
+    private init() {}
 
     // MARK: - Check Migration
 
     /// Vérifie si la base de données a déjà été peuplée
     func isDatabasePopulated() -> Bool {
-        let fetchRequest: NSFetchRequest<TransportLineEntity> = TransportLineEntity.fetchRequest()
-        fetchRequest.fetchLimit = 1
+        let context = SwiftDataStack.shared.mainContext
+        let fetchDescriptor = FetchDescriptor<TransportLineModel>()
 
         do {
-            let count = try context.count(for: fetchRequest)
+            let count = try context.fetchCount(fetchDescriptor)
             return count > 0
         } catch {
             print("❌ Erreur de comptage: \(error)")
@@ -61,7 +33,7 @@ public class TransportLinePersistence {
 
     // MARK: - Migration from GeoJSON
 
-    /// Migre les données depuis les fichiers GeoJSON vers CoreData (à faire une seule fois)
+    /// Migre les données depuis les fichiers GeoJSON vers SwiftData (à faire une seule fois)
     func migrateFromGeoJSON(completion: @escaping (Bool) -> Void) {
         // Vérifie si déjà peuplé
         if isDatabasePopulated() {
@@ -70,24 +42,29 @@ public class TransportLinePersistence {
             return
         }
 
-        print("🔄 Début de la migration GeoJSON → CoreData...")
+        print("🔄 Début de la migration GeoJSON → SwiftData...")
+
+        let container = SwiftDataStack.shared.container
 
         // Utilise un contexte background pour ne pas bloquer l'UI
-        persistentContainer.performBackgroundTask { backgroundContext in
-            // Parse les fichiers GeoJSON au lieu du CSV
+        DispatchQueue.global(qos: .utility).async {
+            let backgroundContext = ModelContext(container)
+            backgroundContext.autosaveEnabled = false
+            
             let transportLines = GeoJSONTransportParser.parseAllTransportGeoJSON()
             print("📊 \(transportLines.count) lignes à migrer")
 
             var migratedCount = 0
 
             for (index, line) in transportLines.enumerated() {
-                // Crée l'entité TransportLineTrace
-                let entity = TransportLineEntity(context: backgroundContext)
-                entity.routeId = line.routeId
-                entity.routeShortName = line.routeShortName
-                entity.routeLongName = line.routeLongName
-                entity.routeType = line.routeType
-                entity.routeColor = line.routeColor
+                // Crée le modèle TransportLineModel
+                let model = TransportLineModel(
+                    routeId: line.routeId,
+                    routeShortName: line.routeShortName,
+                    routeLongName: line.routeLongName,
+                    routeType: line.routeType,
+                    routeColor: line.routeColor
+                )
 
                 // Parse le GeoJSON (déjà propre depuis le parser)
                 let geoJSONString = line.shape
@@ -103,21 +80,26 @@ public class TransportLinePersistence {
                     let geoJSON = try? JSONDecoder().decode(
                         BackgroundGeoJSONShape.self, from: jsonData)
                 {
-
+                    var coordinatePoints: [CoordinatePointModel] = []
+                    
                     // Pour chaque segment (LineString) dans le MultiLineString
                     for (segmentIndex, lineString) in geoJSON.coordinates.enumerated() {
                         // Pour chaque point dans le segment
                         for point in lineString {
                             guard point.count >= 2 else { continue }
 
-                            let coordEntity = CoordinatePointEntity(context: backgroundContext)
-                            coordEntity.longitude = point[0]  // GeoJSON: [lon, lat]
-                            coordEntity.latitude = point[1]
-                            coordEntity.segmentIndex = Int32(segmentIndex)
-                            coordEntity.transportLine = entity
+                            let coord = CoordinatePointModel(
+                                latitude: point[1],
+                                longitude: point[0],
+                                segmentIndex: Int32(segmentIndex),
+                                transportLine: model
+                            )
+                            coordinatePoints.append(coord)
                         }
                     }
 
+                    model.coordinates = coordinatePoints
+                    backgroundContext.insert(model)
                     migratedCount += 1
                 } else {
                     if index < 10 {
@@ -155,13 +137,14 @@ public class TransportLinePersistence {
 
     // MARK: - Fetch
 
-    /// Récupère toutes les lignes de transport depuis CoreData
-    func fetchAllTransportLines() -> [TransportLineEntity] {
-        let fetchRequest: NSFetchRequest<TransportLineEntity> = TransportLineEntity.fetchRequest()
+    /// Récupère toutes les lignes de transport depuis SwiftData
+    func fetchAllTransportLines() -> [TransportLineModel] {
+        let context = SwiftDataStack.shared.mainContext
+        let fetchDescriptor = FetchDescriptor<TransportLineModel>()
 
         do {
-            let results = try context.fetch(fetchRequest)
-            print("✅ Récupéré \(results.count) lignes depuis CoreData")
+            let results = try context.fetch(fetchDescriptor)
+            print("✅ Récupéré \(results.count) lignes depuis SwiftData")
             return results
         } catch {
             print("❌ Erreur de fetch: \(error)")
@@ -170,13 +153,14 @@ public class TransportLinePersistence {
     }
 
     /// Récupère une ligne spécifique par son ID
-    func fetchTransportLine(byId routeId: String) -> TransportLineEntity? {
-        let fetchRequest: NSFetchRequest<TransportLineEntity> = TransportLineEntity.fetchRequest()
-        fetchRequest.predicate = NSPredicate(format: "routeId == %@", routeId)
-        fetchRequest.fetchLimit = 1
+    func fetchTransportLine(byId routeId: String) -> TransportLineModel? {
+        let context = SwiftDataStack.shared.mainContext
+        let fetchDescriptor = FetchDescriptor<TransportLineModel>(
+            predicate: #Predicate<TransportLineModel> { $0.routeId == routeId }
+        )
 
         do {
-            let results = try context.fetch(fetchRequest)
+            let results = try context.fetch(fetchDescriptor)
             return results.first
         } catch {
             print("❌ Erreur de fetch: \(error)")
@@ -185,12 +169,14 @@ public class TransportLinePersistence {
     }
 
     /// Récupère les lignes par type (ex: "Metro", "Tram", "RER")
-    func fetchTransportLines(byType type: String) -> [TransportLineEntity] {
-        let fetchRequest: NSFetchRequest<TransportLineEntity> = TransportLineEntity.fetchRequest()
-        fetchRequest.predicate = NSPredicate(format: "routeType == %@", type)
+    func fetchTransportLines(byType type: String) -> [TransportLineModel] {
+        let context = SwiftDataStack.shared.mainContext
+        let fetchDescriptor = FetchDescriptor<TransportLineModel>(
+            predicate: #Predicate<TransportLineModel> { $0.routeType == type }
+        )
 
         do {
-            let results = try context.fetch(fetchRequest)
+            let results = try context.fetch(fetchDescriptor)
             print("✅ Récupéré \(results.count) lignes de type '\(type)'")
             return results
         } catch {
@@ -203,11 +189,10 @@ public class TransportLinePersistence {
 
     /// Efface toutes les données (utile pour debugging)
     func clearAllData() {
-        let fetchRequest: NSFetchRequest<NSFetchRequestResult> = TransportLineEntity.fetchRequest()
-        let deleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
+        let context = SwiftDataStack.shared.mainContext
 
         do {
-            try context.execute(deleteRequest)
+            try context.delete(model: TransportLineModel.self)
             try context.save()
             print("🗑️ Toutes les données ont été effacées")
         } catch {

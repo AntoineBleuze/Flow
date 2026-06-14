@@ -46,24 +46,21 @@ struct LineIcon: View {
             // Fallback Text
             // Pour le texte, on ajuste la taille de police et le padding en fonction de "size"
             // approximativement
-            if type == .bus {
+            if type == .metro || type == .rer {
                 Text(lineId)
-                    .font(.system(size: size * 0.5, weight: .bold))
-                    .padding(.horizontal, size * 0.2)
-                    .padding(.vertical, size * 0.1)
-                    .background(customColor ?? type.accentColor)
+                    .font(.system(size: size * 0.45, weight: .bold))
                     .foregroundColor(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: size * 0.15, style: .continuous))
-                    .frame(minHeight: size)
+                    .frame(width: size, height: size)
+                    .background(customColor ?? type.accentColor)
+                    .clipShape(Circle())
             } else {
                 Text(lineId)
-                    .font(.system(size: size * 0.5, weight: .bold))
-                    .padding(.horizontal, size * 0.25)
-                    .padding(.vertical, size * 0.1)
-                    .background(customColor ?? type.accentColor)
+                    .font(.system(size: size * 0.45, weight: .bold))
                     .foregroundColor(.white)
-                    .clipShape(Capsule())
-                    .frame(minHeight: size)
+                    .padding(.horizontal, size * 0.2)
+                    .frame(minWidth: size, minHeight: size)
+                    .background(customColor ?? type.accentColor)
+                    .clipShape(RoundedRectangle(cornerRadius: size * 0.15, style: .continuous))
             }
         }
     }

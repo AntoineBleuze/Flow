@@ -18,9 +18,28 @@ class IDFMItineraryService: ObservableObject {
                 date: date,
                 isArrival: isArrival
             )
+            .catch { [weak self] error -> AnyPublisher<[Journey], Error> in
+                print("⚠️ [Server Mode] FlowServer failed: \(error.localizedDescription). Falling back to direct Navitia.")
+                guard let self = self else {
+                    return Fail(error: error).eraseToAnyPublisher()
+                }
+                return self.searchDirectItinerary(
+                    from: from,
+                    to: to,
+                    date: date,
+                    isArrival: isArrival
+                )
+            }
+            .eraseToAnyPublisher()
         }
 
-        return Fail(error: URLError(.cannotConnectToHost)).eraseToAnyPublisher()
+        print("📡 [Direct Mode] Itinerary direct from IDFM/Navitia")
+        return searchDirectItinerary(
+            from: from,
+            to: to,
+            date: date,
+            isArrival: isArrival
+        )
     }
 
     private func searchDirectItinerary(

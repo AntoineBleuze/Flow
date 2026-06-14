@@ -1,4 +1,4 @@
-import CoreData
+import SwiftData
 import CoreLocation
 import SwiftUI
 import MapKit
@@ -11,7 +11,7 @@ struct SimpleStationPicker: View {
     @State private var currentSearch: MKLocalSearch? = nil
 
     let currentLocation: CLLocationCoordinate2D?
-    let context = PersistenceController.shared.container.viewContext
+    @Environment(\.modelContext) private var context
 
     var body: some View {
         NavigationView {
@@ -79,7 +79,7 @@ struct SimpleStationPicker: View {
                                                 // Pour le picker simple, on n'a souvent pas les lignes détaillées dans l'objet MapStation,
                                                 // on affiche alors juste le mainType si disponible
                                                 if !station.lines.isEmpty {
-                                                    ForEach(station.lines.filter { $0.type != .bus }.prefix(5), id: \.id) { line in
+                                                    ForEach(station.lines.filter { $0.type != .bus }.prefix(8), id: \.id) { line in
                                                         LineIcon(type: line.type, lineId: line.name, size: 16)
                                                     }
                                                 } else if station.mainType != .bus {
@@ -125,20 +125,21 @@ struct SimpleStationPicker: View {
             return
         }
 
-        let request: NSFetchRequest<StopPointEntity> = StopPointEntity.fetchRequest()
-        request.predicate = NSPredicate(format: "name CONTAINS[cd] %@", query)
-        request.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
-        request.fetchLimit = 50
+        let descriptor = FetchDescriptor<StopPointModel>(
+            predicate: #Predicate<StopPointModel> { stop in
+                stop.name.contains(query)
+            },
+            sortBy: [SortDescriptor(\.name, order: .forward)]
+        )
 
         var stations: [MapStation] = []
         do {
-            let results = try context.fetch(request)
-            let grouped = Dictionary(grouping: results) { "\($0.name ?? "")_\($0.city ?? "")" }
+            let results = try context.fetch(descriptor)
+            let grouped = Dictionary(grouping: results) { "\($0.name)_\($0.city)" }
 
             stations = grouped.compactMap { (_, stops) in
-                guard let first = stops.first,
-                    let name = first.name
-                else { return nil }
+                guard let first = stops.first else { return nil }
+                let name = first.name
 
                 let totalLat = stops.reduce(0.0) { $0 + $1.latitude }
                 let totalLon = stops.reduce(0.0) { $0 + $1.longitude }
@@ -146,7 +147,7 @@ struct SimpleStationPicker: View {
                 let center = CLLocationCoordinate2D(
                     latitude: totalLat / count, longitude: totalLon / count)
 
-                let types = stops.compactMap { $0.type }
+                let types = stops.map { $0.type }
                 let mainTypeStr =
                     types.first(where: { $0 == "RER" }) ?? types.first(where: { $0 == "Transilien" }
                     ) ?? types.first(where: { $0 == "Metro" }) ?? types.first ?? "Bus"
@@ -154,7 +155,7 @@ struct SimpleStationPicker: View {
                 let type = mapType(mainTypeStr)
 
                 return MapStation(
-                    id: first.id ?? UUID().uuidString,
+                    id: first.stopAreaId.isEmpty ? first.id : first.stopAreaId,
                     name: name,
                     coordinate: center,
                     platforms: [],
@@ -188,16 +189,14 @@ struct SimpleStationPicker: View {
                 return
             }
             
-            let addressStations: [MapStation] = response.mapItems.compactMap { item in
-                guard let coordinate = item.placemark.location?.coordinate else { return nil }
+            let addressStations: [MapStation] = response.mapItems.map { item in
+                let coordinate = item.location.coordinate
                 
                 let name = item.name ?? ""
-                let subtitle = item.placemark.title ?? ""
-                let displayName = subtitle.isEmpty ? name : subtitle
                 
                 return MapStation(
                     id: "address:\(coordinate.latitude),\(coordinate.longitude)",
-                    name: displayName,
+                    name: name,
                     coordinate: coordinate,
                     platforms: [],
                     isHub: false,

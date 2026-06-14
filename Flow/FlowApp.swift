@@ -6,12 +6,14 @@
 //
 
 import SwiftUI
+import SwiftData
 
 @main
 struct FlowApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .modelContainer(SwiftDataStack.shared.container)
         }
     }
 }

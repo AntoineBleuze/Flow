@@ -31,7 +31,14 @@ class NavigationManager: NSObject, ObservableObject {
     
     // Advanced Tracking
     @Published var progress: Double = 0.0 // 0.0 to 1.0 along the current segment (station to station)
-    @Published var currentLegIndex: Int = 0 // Index of the leg *within* the section (index in stop_date_times)
+    @Published var currentLegIndex: Int = 0 { // Index of the leg *within* the section (index in stop_date_times)
+        didSet {
+            if currentLegIndex != oldValue {
+                print("🔄 [NavigationManager] currentLegIndex changed from \(oldValue) to \(currentLegIndex). Force updating Live Activity.")
+                forceLiveActivityUpdate()
+            }
+        }
+    }
     @Published var showBoardingPrompt: Bool = false
     @Published var adjustedTimetableDelay: TimeInterval = 0.0
     @Published var activeRameId: String? = nil
@@ -161,6 +168,7 @@ class NavigationManager: NSObject, ObservableObject {
 
         // Request location access if needed
         LocationManager.shared.requestLocation()
+        LocationManager.shared.setAccuracy(kCLLocationAccuracyBest)
         
         // Request notification permission if needed
         requestNotificationPermission()
@@ -215,6 +223,7 @@ class NavigationManager: NSObject, ObservableObject {
 
         // Disable background location updates
         LocationManager.shared.setBackgroundUpdates(enabled: false)
+        LocationManager.shared.setAccuracy(kCLLocationAccuracyNearestTenMeters)
 
         endActivity()
     }
@@ -476,9 +485,9 @@ class NavigationManager: NSObject, ObservableObject {
                     // Trigger immediate update
                     fetchRealTimeData(for: nextSection)
                     
-                    // Show Prompt
+                    // Show Prompt (disabled popup, using bottom card)
                     DispatchQueue.main.async {
-                        self.showBoardingPrompt = true
+                        self.showBoardingPrompt = false
                         
                         #if os(iOS)
                         if UIApplication.shared.applicationState != .active {
@@ -644,6 +653,25 @@ class NavigationManager: NSObject, ObservableObject {
         if section.type == "public_transport" {
             calculateProgressForCurrentLeg(section: section)
         }
+        
+        if case .waitingAtStation = state {
+            checkIfSelectedTrainDeparted()
+        }
+    }
+    
+    private func checkIfSelectedTrainDeparted() {
+        guard case .waitingAtStation = state else { return }
+        guard let selected = selectedDeparture else { return }
+        
+        let formatter = DateFormat.navitia
+        if let depDate = formatter.date(from: selected.stopDateTime.departureDateTime) {
+            if Date() >= depDate {
+                print("⏰ Selected train departure time reached (\(selected.stopDateTime.departureDateTime)), auto-starting navigation onboard!")
+                runOnMainThread {
+                    self.confirmBoarding()
+                }
+            }
+        }
     }
 
     private func updateLoop() {
@@ -662,7 +690,7 @@ class NavigationManager: NSObject, ObservableObject {
             // Fetch departures for the upcoming section so user knows when to hurry
             fetchRealTimeData(for: nextSection)
 
-        case .waitingAtStation(let station, let section):
+        case .waitingAtStation(_, let section):
             let lineName = section.display_informations?.label ?? "Ligne"
             let direction = section.display_informations?.direction ?? ""
             updateActivity(
@@ -677,10 +705,15 @@ class NavigationManager: NSObject, ObservableObject {
 
         case .onBoard(let section):
             let eta = calculateETA(for: section) ?? "--"
-            let destination = section.to?.name ?? "Arrêt suivant"
+            let nextStopName: String
+            if let stops = section.stop_date_times, currentLegIndex + 1 < stops.count {
+                nextStopName = stops[currentLegIndex + 1].stop_point.name ?? "Arrêt suivant"
+            } else {
+                nextStopName = section.to?.name ?? "Arrêt suivant"
+            }
             
             updateActivity(
-                instruction: "En direction de \(destination)",
+                instruction: "Prochain : \(nextStopName)",
                 nextDepartures: ["ETA: \(eta)"],
                 lineName: section.display_informations?.label,
                 direction: section.display_informations?.direction,
@@ -689,7 +722,7 @@ class NavigationManager: NSObject, ObservableObject {
             )
             
             DispatchQueue.main.async {
-                self.currentInstruction = "Prochain arrêt: \(destination)"
+                self.currentInstruction = "Prochain arrêt: \(nextStopName)"
                 self.nextDepartures = ["Arrivée dans \(eta)"]
             }
             // Update continuous progress
@@ -1227,8 +1260,6 @@ class NavigationManager: NSObject, ObservableObject {
         guard isNavigating, let journey = currentJourney, let sections = journey.sections,
               currentSectionIndex < sections.count else { return }
               
-        let section = sections[currentSectionIndex]
-        
         switch state {
         case .walkingToStation(let targetStation, let nextSection):
             let lineName = nextSection.display_informations?.label
@@ -1242,7 +1273,7 @@ class NavigationManager: NSObject, ObservableObject {
                 textColor: nextSection.display_informations?.text_color
             )
             
-        case .waitingAtStation(let station, let section):
+        case .waitingAtStation(_, let section):
             let lineName = section.display_informations?.label ?? "Ligne"
             let direction = section.display_informations?.direction ?? ""
             updateActivity(
@@ -1256,9 +1287,14 @@ class NavigationManager: NSObject, ObservableObject {
             
         case .onBoard(let section):
             let eta = calculateETA(for: section) ?? "--"
-            let destination = section.to?.name ?? "Arrêt suivant"
+            let nextStopName: String
+            if let stops = section.stop_date_times, currentLegIndex + 1 < stops.count {
+                nextStopName = stops[currentLegIndex + 1].stop_point.name ?? "Arrêt suivant"
+            } else {
+                nextStopName = section.to?.name ?? "Arrêt suivant"
+            }
             updateActivity(
-                instruction: "En direction de \(destination)",
+                instruction: "Prochain : \(nextStopName)",
                 nextDepartures: ["ETA: \(eta)"],
                 lineName: section.display_informations?.label,
                 direction: section.display_informations?.direction,
@@ -1362,8 +1398,8 @@ class NavigationManager: NSObject, ObservableObject {
             if distance > 1.0 {
                 smoothPoints.append(pA)
                 
-                // Interpolate steps of ~15 meters
-                let stepSize: Double = 15.0
+                // Interpolate steps of ~60 meters
+                let stepSize: Double = 60.0
                 if distance > stepSize {
                     let stepsCount = Int(distance / stepSize)
                     for step in 1..<stepsCount {
@@ -1382,9 +1418,9 @@ class NavigationManager: NSObject, ObservableObject {
         self.simulationPoints = smoothPoints
         self.simulationIndex = 0
         
-        // Start the timer with a faster tick (0.15s) for high fluidity
+        // Start the timer with an optimized tick (0.5s) to save resources
         simulationTimer?.invalidate()
-        simulationTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
+        simulationTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.tickSimulation()
         }
     }

@@ -1,4 +1,4 @@
-import CoreData
+import SwiftData
 import Foundation
 import MapKit
 
@@ -8,7 +8,7 @@ import MapKit
     import AppKit
 #endif
 
-/// 🐛 Utilitaire de debugging pour la migration CoreData des lignes de transport
+/// 🐛 Utilitaire de debugging pour la migration SwiftData des lignes de transport
 class TransportLineDebugger {
 
     private let persistence = TransportLinePersistence.shared
@@ -22,7 +22,7 @@ class TransportLineDebugger {
         // 1. Vérifie les dépendances
         checkDependencies()
 
-        // 2. Vérifie CoreData
+        // 2. Vérifie SwiftData
         checkCoreDataStack()
 
         // 3. Vérifie le CSV
@@ -41,10 +41,10 @@ class TransportLineDebugger {
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
         // Test UIColor extension (via PlatformColor)
-        if let testColor = PlatformColor(hex: "FF0000") {
-            print("✅ UIColor/NSColor(hex:) fonctionne - Couleur test: \(testColor)")
+        if let testColor = UIColor(hex: "FF0000") {
+            print("✅ UIColor(hex:) fonctionne - Couleur test: \(testColor)")
         } else {
-            print("❌ ERREUR: UIColor/NSColor(hex:) ne fonctionne pas!")
+            print("❌ ERREUR: UIColor(hex:) ne fonctionne pas!")
         }
 
         // Test ColoredPolyline
@@ -69,28 +69,32 @@ class TransportLineDebugger {
         print()
     }
 
-    // MARK: - 2. Vérification CoreData
+    // MARK: - 2. Vérification SwiftData
 
     func checkCoreDataStack() {
-        print("💾 2. VÉRIFICATION COREDATA")
+        print("💾 2. VÉRIFICATION SWIFTDATA")
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
         // Vérifie que le contexte est accessible
-        let context = persistence.context
-        print("✅ Contexte CoreData accessible")
+        let context = SwiftDataStack.shared.mainContext
+        print("✅ Contexte SwiftData accessible")
 
-        // Vérifie que les entités sont définies
-        let entityDescriptions = persistence.persistentContainer.managedObjectModel.entities
-        print("📊 Entités CoreData disponibles:")
+        // Vérifie que les modèles sont définis
+        let entityDescriptions = SwiftDataStack.shared.container.schema.entities
+        print("📊 Modèles SwiftData disponibles:")
         for entity in entityDescriptions {
-            print("   - \(entity.name ?? "Unknown")")
+            print("   - \(entity.name)")
         }
 
         // Test de création d'entité
-        let testEntity = TransportLineEntity(context: context)
-        testEntity.routeId = "TEST_ID"
-        testEntity.routeShortName = "T0"
-        print("✅ TransportLineEntity peut être créée")
+        let _ = TransportLineModel(
+            routeId: "TEST_ID",
+            routeShortName: "T0",
+            routeLongName: "Test Line",
+            routeType: "Tram",
+            routeColor: "3C91DC"
+        )
+        print("✅ TransportLineModel peut être créé")
 
         // Rollback pour ne pas sauvegarder
         context.rollback()
@@ -177,7 +181,7 @@ class TransportLineDebugger {
             // Compte par type
             var typeCount: [String: Int] = [:]
             for line in allLines {
-                let type = line.routeType ?? "Unknown"
+                let type = line.routeType
                 typeCount[type, default: 0] += 1
             }
 
@@ -189,9 +193,9 @@ class TransportLineDebugger {
             // Affiche quelques exemples
             print("\n🔍 Exemples de lignes stockées:")
             for line in allLines.prefix(5) {
-                let coordsCount = (line.coordinates?.array as? [CoordinatePointEntity])?.count ?? 0
+                let coordsCount = line.coordinates.count
                 print(
-                    "   - \(line.routeShortName ?? "?"): Type=\(line.routeType ?? "?"), Couleur=\(line.routeColor ?? "?"), Coords=\(coordsCount)"
+                    "   - \(line.routeShortName): Type=\(line.routeType), Couleur=\(line.routeColor), Coords=\(coordsCount)"
                 )
             }
 
@@ -199,7 +203,7 @@ class TransportLineDebugger {
             if let firstLine = allLines.first {
                 print("\n🧪 Test de conversion en polylines:")
                 let polylines = firstLine.toColoredPolylines()
-                print("   Ligne: \(firstLine.routeShortName ?? "?")")
+                print("   Ligne: \(firstLine.routeShortName)")
                 print("   Polylines générées: \(polylines.count)")
                 for (index, polyline) in polylines.enumerated() {
                     print(
@@ -210,53 +214,7 @@ class TransportLineDebugger {
 
         } else {
             print("💡 La base de données est vide")
-            print("   Action requise: Lancer la migration depuis le CSV")
-        }
-
-        print()
-    }
-
-    // MARK: - Tests de migration
-
-    /// Teste la migration avec une ligne simulée
-    func testMigrationWithSampleData() {
-        print("🧪 TEST DE MIGRATION AVEC DONNÉES SIMULÉES")
-        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-
-        let sampleCSV = """
-            route_id;route_short_name;route_long_name;route_type;route_color;route_text_color;shape
-            IDFM:C02317;T9;T9;Tram;3C91DC;;"{""coordinates"": [[[2.365, 48.819], [2.368, 48.815], [2.370, 48.812]]], ""type"": ""MultiLineString""}"
-            """
-
-        print("Parsing CSV simulé...")
-        let lines = CSVParser.parseTransportLinesCSV(csvContent: sampleCSV)
-        print("✅ Nombre de lignes parsées: \(lines.count)")
-
-        if let firstLine = lines.first {
-            print("\n📝 Détails de la ligne parsée:")
-            print("   ID: \(firstLine.routeId)")
-            print("   Nom court: \(firstLine.routeShortName)")
-            print("   Type: \(firstLine.routeType)")
-            print("   Couleur: \(firstLine.routeColor)")
-            print("   GeoJSON: \(firstLine.shape.prefix(100))...")
-
-            // Test parsing GeoJSON
-            let cleanedJSON = firstLine.shape
-                .replacingOccurrences(of: "\"\"", with: "\"")
-                .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-
-            if let jsonData = cleanedJSON.data(using: .utf8),
-                let geoJSON = try? JSONDecoder().decode(GeoJSONShape.self, from: jsonData)
-            {
-                print("\n✅ GeoJSON parsé avec succès!")
-                print("   Type: \(geoJSON.type)")
-                print("   Nombre de segments: \(geoJSON.coordinates.count)")
-                for (index, segment) in geoJSON.coordinates.enumerated() {
-                    print("      Segment \(index): \(segment.count) points")
-                }
-            } else {
-                print("\n❌ Échec du parsing GeoJSON")
-            }
+            print("   Action requise: Lancer la migration depuis GeoJSON")
         }
 
         print()

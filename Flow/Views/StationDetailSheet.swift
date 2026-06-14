@@ -1,6 +1,6 @@
 import Combine
 import CoreLocation
-import CoreData
+import SwiftData
 import MapKit
 import SwiftUI
 
@@ -22,6 +22,10 @@ struct StationDetailSheet: View {
     @State private var showItinerary = false
     @ObservedObject var locationManager = LocationManager.shared
     @ObservedObject var liveActivityManager = LiveActivityManager.shared
+
+    // Buffer pour accumuler les pushes WebSocket avant affichage
+    @State private var departureBuffer: [String: Departure] = [:]
+    @State private var bufferTask: Task<Void, Never>?
 
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
@@ -83,7 +87,7 @@ struct StationDetailSheet: View {
                         .ignoresSafeArea()
                 } else {
                     // iPad panel: background is handled by the MapView container
-                    (colorScheme == .dark ? Color.black.opacity(0.05) : Color.white.opacity(0.05))
+                    Color.clear
                         .ignoresSafeArea()
                 }
                 
@@ -104,10 +108,37 @@ struct StationDetailSheet: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .flowServerStationUpdate)) { notification in
                 if let newDepartures = notification.userInfo?["departures"] as? [Departure] {
-                    // Update only if it's for our current station's IDs
-                    // Simplified: just accept the update since we only subscribe to one station at a time
-                    self.departures = newDepartures
-                    self.isLoading = false
+                    guard !newDepartures.isEmpty else { return }
+                    
+                    // Accumuler dans le buffer (dédupliqué par ID)
+                    for dep in newDepartures {
+                        departureBuffer[dep.id] = dep
+                    }
+                    
+                    // Annuler le debounce précédent et en planifier un nouveau.
+                    // On attend 500ms sans nouveau push avant d'afficher,
+                    // pour que tous les arrêts arrivent en un seul paquet.
+                    bufferTask?.cancel()
+                    bufferTask = Task {
+                        try? await Task.sleep(for: .milliseconds(500))
+                        guard !Task.isCancelled else { return }
+                        
+                        // Fusionner le buffer avec les départs existants
+                        // (les entrées du buffer écrasent les anciennes)
+                        var mergedDict: [String: Departure] = [:]
+                        for dep in self.departures { mergedDict[dep.id] = dep }
+                        for (id, dep) in departureBuffer { mergedDict[id] = dep }
+                        
+                        let batched = Array(mergedDict.values).sorted {
+                            $0.stopDateTime.departureDateTime < $1.stopDateTime.departureDateTime
+                        }
+                        
+                        withAnimation(.easeInOut(duration: 0.35)) {
+                            self.departures = batched
+                            self.isLoading = false
+                        }
+                        departureBuffer.removeAll()
+                    }
                 }
             }
             .navigationDestination(isPresented: $showItinerary) {
@@ -164,37 +195,9 @@ struct StationDetailSheet: View {
                 }
                 .buttonStyle(.glassProminent)
                 .glassEffect(.regular.interactive(), in: .capsule)
+                
 
                 Spacer()
-
-                // Action buttons — individual glass circles
-                let hasActiveLines = currentStation.lines.contains { !["15", "16", "17", "18"].contains($0.name) }
-                if hasActiveLines {
-                    Button(action: { loadDepartures(force: true) }) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.body)
-                            .fontWeight(.semibold)
-                            .frame(width: 44, height: 44)
-                    }
-                    .buttonStyle(.plain)
-                    .glassEffect(.regular.interactive(), in: .circle)
-                }
-
-                // Favorite Button
-                Button {
-                    favoritesService.toggleFavorite(stationId: currentStation.id)
-                } label: {
-                    Image(
-                        systemName: favoritesService.isFavorite(stationId: currentStation.id)
-                            ? "heart.fill" : "heart"
-                    )
-                    .font(.body)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.red)
-                    .frame(width: 44, height: 44)
-                }
-                .buttonStyle(.plain)
-                .glassEffect(.regular.interactive(), in: .circle)
             }
             .padding(.horizontal)
             .padding(.top, 8)
@@ -394,107 +397,169 @@ struct StationDetailSheet: View {
     private func setupStation() {
         self.errorMessage = nil
         self.departures = []
+        self.mergedStation = station
         
-        let merged = loadNearbyBusesAndMerge()
+        // Vider le buffer WebSocket pour la nouvelle station
+        bufferTask?.cancel()
+        departureBuffer.removeAll()
         
-        let hasActiveLines = merged.lines.contains { !["15", "16", "17", "18"].contains($0.name) }
+        // Charger immédiatement les départs pour la station d'origine (Métro / RER)
+        let hasActiveLines = station.lines.contains { !["15", "16", "17", "18"].contains($0.name) }
         if hasActiveLines {
-            loadDepartures(for: merged)
+            loadDepartures(for: station)
+        }
+        
+        // Lancer la recherche des bus proches et la fusion en arrière-plan
+        loadNearbyBusesAndMerge()
+    }
+
+    private func loadNearbyBusesAndMerge() {
+        if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" || station.mainType == .bus {
+            self.mergedStation = station
+            return
+        }
+        
+        let stationId = station.id
+        let stationLat = station.latitude
+        let stationLon = station.longitude
+        let stationPlatforms = station.platforms
+        let stationLines = station.lines
+        let stationName = station.name
+        let stationCoordinate = station.coordinate
+        let stationMainType = station.mainType
+        let stationCity = station.city
+        
+        Task {
+            let container = SwiftDataStack.shared.container
+            let backgroundContext = ModelContext(container)
+            
+            let latDelta = 0.0032
+            let lonDelta = 0.0048
+            let minLat = stationLat - latDelta
+            let maxLat = stationLat + latDelta
+            let minLon = stationLon - lonDelta
+            let maxLon = stationLon + lonDelta
+            
+            let descriptor = FetchDescriptor<StopPointModel>(
+                predicate: #Predicate<StopPointModel> { stop in
+                    stop.type == "Bus" &&
+                    stop.latitude >= minLat && stop.latitude <= maxLat &&
+                    stop.longitude >= minLon && stop.longitude <= maxLon
+                }
+            )
+            
+            do {
+                let entities = try backgroundContext.fetch(descriptor)
+                if entities.isEmpty {
+                    await MainActor.run {
+                        if self.station.id == stationId {
+                            self.mergedStation = self.station
+                        }
+                    }
+                    return
+                }
+                
+                let centerLoc = CLLocation(latitude: stationLat, longitude: stationLon)
+                let filteredEntities = entities.filter { entity in
+                    let entityLoc = CLLocation(latitude: entity.latitude, longitude: entity.longitude)
+                    return centerLoc.distance(from: entityLoc) <= 350.0
+                }
+                
+                if filteredEntities.isEmpty {
+                    await MainActor.run {
+                        if self.station.id == stationId {
+                            self.mergedStation = self.station
+                        }
+                    }
+                    return
+                }
+                
+                var newPlatforms = stationPlatforms
+                var existingLines = stationLines
+                
+                for entity in filteredEntities {
+                    let id = entity.id
+                    let name = entity.name
+                    let lineName = entity.lineName
+                    
+                    if !newPlatforms.contains(where: { $0.id == id }) {
+                        newPlatforms.append(
+                            StopPoint(
+                                id: id,
+                                stopAreaId: entity.stopAreaId,
+                                name: name,
+                                coordinate: CLLocationCoordinate2D(latitude: entity.latitude, longitude: entity.longitude),
+                                type: .bus,
+                                lineName: lineName
+                            )
+                        )
+                    }
+                    
+                    if !existingLines.contains(where: { $0.name == lineName && $0.type == .bus }) {
+                        existingLines.append(StationLine(name: lineName, type: .bus))
+                    }
+                }
+                
+                existingLines.sort { a, b in
+                    let priorityA = a.type.priority
+                    let priorityB = b.type.priority
+                    if priorityA != priorityB {
+                        return priorityA > priorityB
+                    }
+                    return a.name.localizedStandardCompare(b.name) == .orderedAscending
+                }
+                
+                let merged = MapStation(
+                    id: stationId,
+                    name: stationName,
+                    coordinate: stationCoordinate,
+                    platforms: newPlatforms,
+                    isHub: true,
+                    mainType: stationMainType,
+                    lines: existingLines,
+                    city: stationCity
+                )
+                
+                await MainActor.run {
+                    if self.station.id == stationId {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            self.mergedStation = merged
+                        }
+                        
+                        // Re-fetch departures if new bus lines were added
+                        let hasActiveLines = merged.lines.contains { !["15", "16", "17", "18"].contains($0.name) }
+                        if hasActiveLines {
+                            loadDepartures(for: merged)
+                        }
+                    }
+                }
+            } catch {
+                print("❌ Error fetching nearby buses in background: \(error)")
+                await MainActor.run {
+                    if self.station.id == stationId {
+                        self.mergedStation = self.station
+                    }
+                }
+            }
         }
     }
 
-    @discardableResult
-    private func loadNearbyBusesAndMerge() -> MapStation {
-        if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" || station.mainType == .bus {
-            self.mergedStation = station
-            return station
+    private func normalizeLineName(_ name: String) -> String {
+        let upper = name.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        if upper.hasPrefix("T") && upper.count > 1, upper.contains(where: { $0.isNumber }) {
+            return String(upper.dropFirst())
         }
-        
-        let context = PersistenceController.shared.container.viewContext
-        let request: NSFetchRequest<StopPointEntity> = StopPointEntity.fetchRequest()
-        
-        let latDelta = 0.0032
-        let lonDelta = 0.0048
-        let minLat = station.latitude - latDelta
-        let maxLat = station.latitude + latDelta
-        let minLon = station.longitude - lonDelta
-        let maxLon = station.longitude + lonDelta
-        
-        request.predicate = NSPredicate(
-            format: "type == %@ AND latitude >= %f AND latitude <= %f AND longitude >= %f AND longitude <= %f",
-            "Bus", minLat, maxLat, minLon, maxLon
-        )
-        
-        do {
-            let entities = try context.fetch(request)
-            if entities.isEmpty {
-                self.mergedStation = station
-                return station
-            }
-            
-            let centerLoc = CLLocation(latitude: station.latitude, longitude: station.longitude)
-            let filteredEntities = entities.filter { entity in
-                let entityLoc = CLLocation(latitude: entity.latitude, longitude: entity.longitude)
-                return centerLoc.distance(from: entityLoc) <= 350.0
-            }
-            
-            if filteredEntities.isEmpty {
-                self.mergedStation = station
-                return station
-            }
-            
-            var newPlatforms = station.platforms
-            var existingLines = station.lines
-            
-            for entity in filteredEntities {
-                guard let id = entity.id,
-                      let name = entity.name,
-                      let lineName = entity.lineName else { continue }
-                
-                if !newPlatforms.contains(where: { $0.id == id }) {
-                    newPlatforms.append(
-                        StopPoint(
-                            id: id,
-                            stopAreaId: entity.stopAreaId ?? "",
-                            name: name,
-                            coordinate: CLLocationCoordinate2D(latitude: entity.latitude, longitude: entity.longitude),
-                            type: .bus,
-                            lineName: lineName
-                        )
-                    )
-                }
-                
-                if !existingLines.contains(where: { $0.name == lineName && $0.type == .bus }) {
-                    existingLines.append(StationLine(name: lineName, type: .bus))
-                }
-            }
-            
-            existingLines.sort { a, b in
-                let priorityA = a.type.priority
-                let priorityB = b.type.priority
-                if priorityA != priorityB {
-                    return priorityA > priorityB
-                }
-                return a.name.localizedStandardCompare(b.name) == .orderedAscending
-            }
-            
-            let merged = MapStation(
-                id: station.id,
-                name: station.name,
-                coordinate: station.coordinate,
-                platforms: newPlatforms,
-                isHub: true,
-                mainType: station.mainType,
-                lines: existingLines,
-                city: station.city
-            )
-            self.mergedStation = merged
-            return merged
-        } catch {
-            print("❌ Error fetching nearby buses: \(error)")
-            self.mergedStation = station
-            return station
-        }
+        return upper
+    }
+    
+    private func getTransportType(from mode: String?) -> TransportType {
+        guard let mode = mode?.lowercased().folding(options: .diacriticInsensitive, locale: .current) else { return .bus }
+        if mode.contains("metro") || mode.contains("subway") { return .metro }
+        if mode.contains("rer") || mode.contains("rapidtransit") { return .rer }
+        if mode.contains("tram") { return .tram }
+        if mode.contains("train") || mode.contains("transilien") || mode.contains("localtrain") { return .transilien }
+        if mode.contains("cable") { return .cable }
+        return .bus
     }
 
     private func groupDepartures(_ departures: [Departure]) -> [LineGroup] {
@@ -503,7 +568,9 @@ struct StationDetailSheet: View {
 
         for dep in departures {
             let info = dep.displayInformations
-            guard let lineKey = info.label, !lineKey.isEmpty else { continue }
+            guard let label = info.label, !label.isEmpty else { continue }
+            let type = getTransportType(from: info.commercial_mode)
+            let lineKey = "\(label)-\(type.rawValue)"
             guard let date = DateFormat.navitia.date(from: dep.stopDateTime.departureDateTime) else { continue }
 
             let minutesAway = Int(date.timeIntervalSinceNow / 60)
@@ -511,7 +578,7 @@ struct StationDetailSheet: View {
             if groups[lineKey] == nil {
                 groups[lineKey] = LineGroup(
                     id: lineKey,
-                    label: lineKey,
+                    label: label,
                     color: info.color ?? "000000",
                     text_color: info.textColor,
                     network: info.network,
@@ -529,7 +596,7 @@ struct StationDetailSheet: View {
                 }
             }
 
-            // N'afficher que les départs dans les 120 prochaines minutes
+            // N'afficher que les départs dans les 120 prochains minutes
             guard minutesAway >= 0 && minutesAway < 120 else { continue }
             let timeStr = "\(minutesAway) min"
 
@@ -543,7 +610,7 @@ struct StationDetailSheet: View {
                 }
             } else {
                 groups[lineKey]?.directions.append(
-                    DirectionGroup(id: UUID().uuidString, direction: dirName, times: [timeStr]))
+                    DirectionGroup(id: "\(lineKey)-\(dirName)", direction: dirName, times: [timeStr]))
             }
         }
 
@@ -558,9 +625,24 @@ struct StationDetailSheet: View {
         // Add local lines that have no departures at all (to show they serve the station but are out of service)
         let allLocalLines = currentStation.lines
         for localLine in allLocalLines {
-            let lineKey = localLine.name
+            if localLine.type == .bus {
+                let isReplacement = allLocalLines.contains { other in
+                    other.name == localLine.name && other.type != .bus
+                }
+                if isReplacement {
+                    continue
+                }
+            }
             
-            if groups[lineKey] == nil {
+            let lineKey = "\(localLine.name)-\(localLine.type.rawValue)"
+            
+            let normalizedLocal = normalizeLineName(localLine.name)
+            let alreadyExists = groups.values.contains { group in
+                let groupType = getTransportType(from: group.mode)
+                return normalizeLineName(group.label) == normalizedLocal && groupType == localLine.type
+            }
+            
+            if !alreadyExists {
                 let modeName: String
                 switch localLine.type {
                 case .metro: modeName = "Métro"
@@ -600,7 +682,7 @@ struct StationDetailSheet: View {
 
                 groups[lineKey] = LineGroup(
                     id: lineKey,
-                    label: lineKey,
+                    label: localLine.name,
                     color: colorHex,
                     text_color: "FFFFFF",
                     network: modeName,
@@ -681,21 +763,34 @@ struct StationDetailSheet: View {
         errorMessage = nil
 
         var queryIds = Set<String>()
+        var queryIdTypes = [String: TransportType]()
+        
         for platform in activeStation.platforms {
+            let id: String
             if platform.type == .bus {
-                let id = platform.id.contains("stop_point:") ? platform.id : "stop_point:\(platform.id)"
-                queryIds.insert(id)
+                id = platform.id.contains("stop_point:") ? platform.id : "stop_point:\(platform.id)"
             } else {
                 // Pour le métro/RER/train, si le stopAreaId contient la lettre "C" (ex: IDFM:C01374),
                 // Navitia ne supporte pas cet ID logique de regroupement et renvoie 404.
                 // On utilise alors directement le stopPointId (physique) de la plateforme.
                 if !platform.stopAreaId.isEmpty && !platform.stopAreaId.contains("IDFM:C") && !platform.stopAreaId.contains(":C") {
-                    let areaId = platform.stopAreaId.contains("stop_area:") ? platform.stopAreaId : "stop_area:\(platform.stopAreaId)"
-                    queryIds.insert(areaId)
+                    id = platform.stopAreaId.contains("stop_area:") ? platform.stopAreaId : "stop_area:\(platform.stopAreaId)"
+                } else if platform.id.contains("IDFM:") {
+                    id = platform.id.contains("stop_point:") ? platform.id : "stop_point:\(platform.id)"
                 } else {
-                    let pointId = platform.id.contains("stop_point:") ? platform.id : "stop_point:\(platform.id)"
-                    queryIds.insert(pointId)
+                    print("⚠️ Impossible de requêter les départs pour une plateforme locale sans référence IDFM : \(platform.id)")
+                    continue
                 }
+            }
+            queryIds.insert(id)
+            
+            // Conserver le type de transport le plus prioritaire associé à cet ID
+            if let existingType = queryIdTypes[id] {
+                if platform.type.priority > existingType.priority {
+                    queryIdTypes[id] = platform.type
+                }
+            } else {
+                queryIdTypes[id] = platform.type
             }
         }
         
@@ -708,17 +803,20 @@ struct StationDetailSheet: View {
             return
         }
 
-        // Prioriser les arrêts ferrés sur les bus pour ne pas rater les lignes majeures
+        // Tri par type de transport (priorité décroissante : Métro > RER > Tram > Train > Câble > Bus)
         let sortedIds = Array(queryIds).sorted { id1, id2 in
-            let isRail1 = id1.contains("stop_area") || !id1.contains("bus")
-            let isRail2 = id2.contains("stop_area") || !id2.contains("bus")
-            if isRail1 != isRail2 { return isRail1 }
+            let priority1 = queryIdTypes[id1]?.priority ?? 0
+            let priority2 = queryIdTypes[id2]?.priority ?? 0
+            if priority1 != priority2 {
+                return priority1 > priority2
+            }
             return id1 < id2
         }
 
-        // Limiter à 25 requêtes max pour économiser le quota
-        let limitedIds = Array(sortedIds.prefix(25))
-        print("📡 Fetching departures for \(limitedIds.count) IDs: \(limitedIds)")
+        // Limiter pour économiser le quota (plus généreux si WebSocket connecté)
+        let limit = (FlowServerService.shared.isEnabled && FlowServerService.shared.isConnected) ? 50 : 25
+        let limitedIds = Array(sortedIds.prefix(limit))
+        print("📡 Fetching departures for \(limitedIds.count) IDs (limit \(limit)): \(limitedIds)")
         
         if FlowServerService.shared.isEnabled && FlowServerService.shared.isConnected {
             print("📡 WebSocket connectée : Souscription aux horaires temps réel pour \(limitedIds.count) IDs")
@@ -925,6 +1023,7 @@ private struct LineGroupRowSheet: View {
     let liveActivityManager: LiveActivityManager
     let onLiveActivity: (String, String, [String], String, String) -> Void
     @Environment(\.colorScheme) var colorScheme
+    @ObservedObject var favoritesService = FavoritesService.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -950,21 +1049,23 @@ private struct LineGroupRowSheet: View {
                     .scaledToFit()
                     .frame(width: 36, height: 36)
             } else {
-                ZStack {
-                    let isBus = group.mode?.lowercased().contains("bus") == true
-                    let badgeColor = isBus ? (group.color.isEmpty || group.color == "000000" ? Color(hex: "008B5E") : Color(hex: group.color)) : Color(hex: group.color)
-                    if group.mode == "RER" || group.mode == "Train" || isBus {
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(badgeColor)
-                            .frame(width: isBus ? 45 : 36, height: 36)
-                    } else {
-                        Circle()
-                            .fill(badgeColor)
-                            .frame(width: 30, height: 30)
-                    }
+                let isBus = group.mode?.lowercased().contains("bus") == true
+                let badgeColor = isBus ? (group.color.isEmpty || group.color == "000000" ? Color(hex: "008B5E") : Color(hex: group.color)) : Color(hex: group.color)
+                
+                if group.mode == "RER" || group.mode == "Train" || isBus || group.label.count > 3 {
                     Text(group.label)
                         .font(.subheadline).bold()
                         .foregroundColor(Color(hex: group.text_color ?? "FFFFFF"))
+                        .padding(.horizontal, (isBus || group.label.count > 3) ? 8 : 4)
+                        .frame(minWidth: isBus ? 45 : 36)
+                        .frame(height: 36)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(badgeColor))
+                } else {
+                    Text(group.label)
+                        .font(.subheadline).bold()
+                        .foregroundColor(Color(hex: group.text_color ?? "FFFFFF"))
+                        .frame(width: 30, height: 30)
+                        .background(Circle().fill(badgeColor))
                 }
             }
             if let network = group.network {
@@ -973,27 +1074,59 @@ private struct LineGroupRowSheet: View {
             
             Spacer()
             
-            if group.mode?.lowercased().contains("bus") == true {
-                Button(action: {
-                    locateBusStops()
-                }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "mappin.and.ellipse")
-                            .font(.system(size: 13, weight: .bold))
-                        Text("Localiser")
-                            .font(.caption)
-                            .fontWeight(.semibold)
+            HStack(spacing: 8) {
+                if group.mode?.lowercased().contains("bus") == true {
+                    Button(action: {
+                        locateBusStops()
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "mappin.and.ellipse")
+                                .font(.system(size: 13, weight: .bold))
+                            Text("Localiser")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                        }
+                        .foregroundColor(.blue)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.06))
+                        .clipShape(Capsule())
                     }
-                    .foregroundColor(.blue)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.06))
-                    .clipShape(Capsule())
+                    .buttonStyle(.plain)
+                }
+                
+                let lineType = mapModeToType(group.mode)
+                let isFav = favoritesService.isFavoriteLine(lineId: group.label, type: lineType, stationId: station.id)
+                Button(action: {
+                    favoritesService.toggleFavoriteLine(
+                        lineId: group.label,
+                        type: lineType,
+                        stationId: station.id,
+                        stationName: station.name,
+                        color: group.color,
+                        textColor: group.text_color
+                    )
+                }) {
+                    Image(systemName: isFav ? "heart.fill" : "heart")
+                        .foregroundColor(.red)
+                        .font(.system(size: 14, weight: .bold))
+                        .frame(width: 32, height: 32)
+                        .background(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.06), in: Circle())
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(.horizontal)
+    }
+
+    private func mapModeToType(_ mode: String?) -> TransportType {
+        guard let mode = mode?.lowercased().folding(options: .diacriticInsensitive, locale: .current) else { return .bus }
+        if mode.contains("metro") || mode.contains("subway") { return .metro }
+        if mode.contains("rer") || mode.contains("rapidtransit") { return .rer }
+        if mode.contains("tram") { return .tram }
+        if mode.contains("train") || mode.contains("transilien") || mode.contains("localtrain") { return .transilien }
+        if mode.contains("cable") { return .cable }
+        return .bus
     }
 
     private func locateBusStops() {
@@ -1082,11 +1215,23 @@ private struct LineGroupRowSheet: View {
                         .font(.subheadline)
                         .foregroundColor(.primary)
                         .lineLimit(2)
-                    HStack(spacing: 0) {
+                    HStack(spacing: 4) {
                         ForEach(Array(direction.times.enumerated()), id: \.offset) { tIndex, time in
-                            Text(verbatim: time + (tIndex < direction.times.count - 1 ? ", " : ""))
-                                .font(.subheadline).bold()
-                                .foregroundColor(.green)
+                            let parts = time.split(separator: " ", maxSplits: 1)
+                            let minuteValue = Int(String(parts.first ?? "0")) ?? 0
+                            let suffix = parts.count > 1 ? " \(parts.last!)" : ""
+                            
+                            HStack(spacing: 0) {
+                                Text("\(minuteValue)")
+                                    .contentTransition(.numericText())
+                                    .animation(.spring(duration: 0.2), value: minuteValue)
+                                Text(suffix)
+                                if tIndex < direction.times.count - 1 {
+                                    Text(", ")
+                                }
+                            }
+                            .font(.subheadline).bold()
+                            .foregroundColor(.green)
                         }
                         Image(systemName: "wifi")
                             .font(.caption2)
@@ -1157,7 +1302,6 @@ struct StationDetailSheet_Previews: PreviewProvider {
 
 // MARK: - COMPONENTS POUR L'ANIMATION DE VAGUE TYPOGRAPHIQUE
 
-@MainActor
 private struct SFProVariableWeightModifier: ViewModifier {
     let weight: CGFloat
     let size: CGFloat
@@ -1180,8 +1324,7 @@ private struct SFProVariableWeightModifier: ViewModifier {
 }
 
 extension View {
-    @MainActor
-    fileprivate func sfProVariableWeight(weight: CGFloat, size: CGFloat) -> some View {
+    nonisolated fileprivate func sfProVariableWeight(weight: CGFloat, size: CGFloat) -> some View {
         self.modifier(SFProVariableWeightModifier(weight: weight, size: size))
     }
 }
@@ -1210,7 +1353,7 @@ private struct AnimatedStationWordView: View {
             .keyframeAnimator(
                 initialValue: VariableWaveProperties(),
                 trigger: startAnimation
-            ) { @MainActor content, value in
+            ) { content, value in
                 content
                     .sfProVariableWeight(weight: value.weight, size: size)
             } keyframes: { _ in

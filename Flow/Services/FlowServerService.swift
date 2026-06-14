@@ -349,7 +349,8 @@ class FlowServerService: ObservableObject {
     // MARK: - Reconnexion automatique
 
     private func scheduleReconnect() {
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
             self.reconnectTimer?.invalidate()
             self.reconnectTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) {
                 [weak self] _ in

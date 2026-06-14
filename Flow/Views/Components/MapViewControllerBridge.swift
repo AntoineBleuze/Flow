@@ -71,6 +71,7 @@ struct MapViewControllerBridge: UIViewRepresentable {
     @ObservedObject var data: MapDataService
     @Binding var selectedStation: MapStation?
     @Binding var userTrackingMode: MKUserTrackingMode
+    var recenterTrigger: Bool
     
     @ObservedObject var locationManager = LocationManager.shared
     @ObservedObject var navigationManager = NavigationManager.shared
@@ -83,6 +84,7 @@ struct MapViewControllerBridge: UIViewRepresentable {
         data: MapDataService,
         selectedStation: Binding<MapStation?>,
         userTrackingMode: Binding<MKUserTrackingMode>,
+        recenterTrigger: Bool = false,
         journey: Journey? = nil,
         focusedSectionId: String? = nil,
         useMainMap: Bool = false,
@@ -91,6 +93,7 @@ struct MapViewControllerBridge: UIViewRepresentable {
         self._data = ObservedObject(wrappedValue: data)
         self._selectedStation = selectedStation
         self._userTrackingMode = userTrackingMode
+        self.recenterTrigger = recenterTrigger
         self.journey = journey
         self.focusedSectionId = focusedSectionId
         self.useMainMap = useMainMap
@@ -122,18 +125,46 @@ struct MapViewControllerBridge: UIViewRepresentable {
         // Ensure location request happens (idempotent usually)
         LocationManager.shared.requestLocation()
 
+        // Ajouter un geste pour détecter le déplacement manuel de l'utilisateur
+        let panGesture = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePanGesture(_:)))
+        panGesture.delegate = context.coordinator
+        mapView.addGestureRecognizer(panGesture)
+
         return mapView
     }
 
     private func updateMapView(_ mapView: MKMapView, context: Context) {
         context.coordinator.parent = self
 
+        // Handle Recenter Trigger (forced recenter)
+        if context.coordinator.lastRecenterTrigger != recenterTrigger {
+            context.coordinator.lastRecenterTrigger = recenterTrigger
+            if let userCoord = locationManager.userLocation, isValidCoordinate(userCoord) {
+                mapView.setCenter(userCoord, animated: true)
+            }
+            #if canImport(UIKit)
+            if !locationManager.isSimulating {
+                mapView.setUserTrackingMode(userTrackingMode, animated: true)
+            }
+            #endif
+        }
+
         // Handle Tracking Mode
         #if canImport(UIKit)
-        if mapView.userTrackingMode != userTrackingMode {
-            mapView.setUserTrackingMode(userTrackingMode, animated: true)
-            if userTrackingMode != .none, let userCoord = locationManager.userLocation, isValidCoordinate(userCoord) {
-                mapView.setCenter(userCoord, animated: true)
+        if !locationManager.isSimulating {
+            if mapView.userTrackingMode != userTrackingMode {
+                mapView.setUserTrackingMode(userTrackingMode, animated: true)
+                if userTrackingMode != .none, let userCoord = locationManager.userLocation, isValidCoordinate(userCoord) {
+                    mapView.setCenter(userCoord, animated: true)
+                }
+            }
+        } else {
+            // In simulation, if userTrackingMode changes, we force-center immediately
+            if context.coordinator.lastSimulatedTrackingMode != userTrackingMode {
+                context.coordinator.lastSimulatedTrackingMode = userTrackingMode
+                if userTrackingMode != .none, let userCoord = locationManager.userLocation, isValidCoordinate(userCoord) {
+                    mapView.setCenter(userCoord, animated: true)
+                }
             }
         }
         #endif
@@ -193,7 +224,12 @@ struct MapViewControllerBridge: UIViewRepresentable {
             if context.coordinator.lastSelectedStationId != station.id {
                 context.coordinator.lastSelectedStationId = station.id
                 context.coordinator.lastSelectedStationCoordinate = station.coordinate
-                let targetCenter = coordinate(from: station.coordinate, distance: 250, bearing: mapView.camera.heading + 180)
+                #if canImport(UIKit)
+                let isIPad = UIDevice.current.userInterfaceIdiom == .pad
+                #else
+                let isIPad = false
+                #endif
+                let targetCenter = isIPad ? station.coordinate : coordinate(from: station.coordinate, distance: 250, bearing: mapView.camera.heading + 180)
                 let camera = MKMapCamera(lookingAtCenter: targetCenter, fromDistance: 1200, pitch: 45, heading: mapView.camera.heading)
                 mapView.setCamera(camera, animated: true)
             }
@@ -230,7 +266,9 @@ struct MapViewControllerBridge: UIViewRepresentable {
                 let simUser = SimulatedUserAnnotation(coordinate: userCoord)
                 mapView.addAnnotation(simUser)
             }
-            mapView.setCenter(userCoord, animated: true)
+            if userTrackingMode != .none {
+                mapView.setCenter(userCoord, animated: true)
+            }
         } else {
             mapView.showsUserLocation = true
             let simAnnotations = mapView.annotations.filter { $0 is SimulatedUserAnnotation }
@@ -240,7 +278,10 @@ struct MapViewControllerBridge: UIViewRepresentable {
         }
         
         // Refresh annotations when active categories change
-        context.coordinator.updateAnnotations(in: mapView.region, for: mapView)
+        if context.coordinator.lastActiveCategories != data.activeCategories {
+            context.coordinator.lastActiveCategories = data.activeCategories
+            context.coordinator.updateAnnotations(in: mapView.region, for: mapView)
+        }
     }
 
     private func isValidCoordinate(_ coordinate: CLLocationCoordinate2D) -> Bool {
@@ -295,6 +336,49 @@ struct MapViewControllerBridge: UIViewRepresentable {
                         coordinate: fromCoord, platforms: [], isHub: false, mainType: .metro,
                         lines: []))
                 mapView.addAnnotation(annotation)
+                
+                // Add Entry Exits
+                if let stationId = fromPlace.id {
+                    let exits = StationExitsService.shared.exitsForStation(id: stationId)
+                    for exit in exits where exit.is_entry {
+                        if let coords = exit.coordinates {
+                            let exitCoord = CLLocationCoordinate2D(latitude: coords.lat, longitude: coords.lon)
+                            let exitAnnotation = ExitMarkerAnnotation(
+                                coordinate: exitCoord,
+                                title: "Accès \(exit.exit_number ?? 0): \(exit.exit_name ?? "Entrée")",
+                                subtitle: "Entrée pour la station \(fromPlace.name ?? "")",
+                                isEntry: true
+                            )
+                            mapView.addAnnotation(exitAnnotation)
+                        }
+                    }
+                }
+            }
+            
+            if let toPlace = section.to, let toCoord = toPlace.coordinate, isValidCoordinate(toCoord) {
+                let annotation = StationAnnotation(
+                    station: MapStation(
+                        id: toPlace.id ?? UUID().uuidString, name: toPlace.name ?? "",
+                        coordinate: toCoord, platforms: [], isHub: false, mainType: .metro,
+                        lines: []))
+                mapView.addAnnotation(annotation)
+                
+                // Add Exit Exits
+                if let stationId = toPlace.id {
+                    let exits = StationExitsService.shared.exitsForStation(id: stationId)
+                    for exit in exits where exit.is_exit {
+                        if let coords = exit.coordinates {
+                            let exitCoord = CLLocationCoordinate2D(latitude: coords.lat, longitude: coords.lon)
+                            let exitAnnotation = ExitMarkerAnnotation(
+                                coordinate: exitCoord,
+                                title: "Sortie \(exit.exit_number ?? 0): \(exit.exit_name ?? "Sortie")",
+                                subtitle: "Sortie de la station \(toPlace.name ?? "")",
+                                isEntry: false
+                            )
+                            mapView.addAnnotation(exitAnnotation)
+                        }
+                    }
+                }
             }
         }
 
@@ -389,10 +473,7 @@ struct MapViewControllerBridge: UIViewRepresentable {
         if MapDataService.shared.isLineTypeEnabled(type) {
             return true
         }
-        return FavoritesService.shared.favoriteLineKeys.contains { key in
-            let parts = key.components(separatedBy: "|")
-            return parts.count > 1 && parts[1] == lineName
-        }
+        return FavoritesService.shared.isFavoriteLine(lineId: lineName, type: type)
     }
 
     private func updateStandardOverlays(_ mapView: MKMapView, data: MapDataService) {
@@ -595,7 +676,7 @@ struct MapViewControllerBridge: UIViewRepresentable {
         Coordinator(self)
     }
 
-    class Coordinator: NSObject, MKMapViewDelegate {
+    class Coordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDelegate {
         var parent: MapViewControllerBridge
         var currentTask: Task<Void, Never>?
         var lastSelectedStationId: String?
@@ -603,6 +684,9 @@ struct MapViewControllerBridge: UIViewRepresentable {
         var lastZoomedJourneyId: String?
         var lastZoomedSectionId: String?
         var lastSelectionTime: Date?
+        var lastActiveCategories: Set<String> = []
+        var lastRecenterTrigger = false
+        var lastSimulatedTrackingMode: MKUserTrackingMode = .none
 
         init(_ parent: MapViewControllerBridge) {
             self.parent = parent
@@ -612,6 +696,30 @@ struct MapViewControllerBridge: UIViewRepresentable {
 
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
             if annotation is MKUserLocation { return nil }
+
+            if let exitAnno = annotation as? ExitMarkerAnnotation {
+                let reuseId = "exitMarker"
+                let markerView = mapView.dequeueReusableAnnotationView(withIdentifier: reuseId) as? MKMarkerAnnotationView
+                    ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: reuseId)
+                markerView.canShowCallout = true
+                markerView.displayPriority = .required
+                if exitAnno.isEntry {
+                    markerView.markerTintColor = .systemGreen
+                    #if canImport(UIKit)
+                    markerView.glyphImage = UIImage(systemName: "arrow.down.circle.fill")
+                    #else
+                    markerView.glyphImage = NSImage(systemSymbolName: "arrow.down.circle.fill", accessibilityDescription: nil)
+                    #endif
+                } else {
+                    markerView.markerTintColor = .systemRed
+                    #if canImport(UIKit)
+                    markerView.glyphImage = UIImage(systemName: "arrow.up.circle.fill")
+                    #else
+                    markerView.glyphImage = NSImage(systemSymbolName: "arrow.up.circle.fill", accessibilityDescription: nil)
+                    #endif
+                }
+                return markerView
+            }
 
             if annotation is SimulatedUserAnnotation {
                 let reuseId = "simulatedUser"
@@ -746,6 +854,7 @@ struct MapViewControllerBridge: UIViewRepresentable {
 
         
         func mapView(_ mapView: MKMapView, didChange mode: MKUserTrackingMode, animated: Bool) {
+            guard !parent.locationManager.isSimulating else { return }
             DispatchQueue.main.async {
                 self.parent.userTrackingMode = mode
             }
@@ -782,6 +891,20 @@ struct MapViewControllerBridge: UIViewRepresentable {
                     }
                 }
             }
+        }
+        
+        // MARK: - UIGestureRecognizerDelegate
+        
+        @objc func handlePanGesture(_ gesture: UIPanGestureRecognizer) {
+            if gesture.state == .began {
+                DispatchQueue.main.async {
+                    self.parent.userTrackingMode = .none
+                }
+            }
+        }
+        
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            return true
         }
     }
 }

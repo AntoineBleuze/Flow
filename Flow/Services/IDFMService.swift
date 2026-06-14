@@ -28,9 +28,14 @@ class IDFMService {
 
         let endpoint = stationId.contains("stop_area") ? "stop_areas" : "stop_points"
         
-        // S'assurer que l'ID n'a pas déjà de préfixe avant d'en ajouter un autre via l'URL Navitia
-        let cleanId = stationId.replacingOccurrences(of: "stop_area:", with: "")
-                             .replacingOccurrences(of: "stop_point:", with: "")
+        // Ensure the ID has the proper prefix in the path for the IDFM Marketplace API
+        let cleanId: String
+        if stationId.contains("stop_area:") || stationId.contains("stop_point:") {
+            cleanId = stationId
+        } else {
+            let prefix = endpoint == "stop_areas" ? "stop_area:" : "stop_point:"
+            cleanId = "\(prefix)\(stationId)"
+        }
 
         guard let encodedId = cleanId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
               let url = URL(string: "\(baseURL)/\(endpoint)/\(encodedId)/departures") else {

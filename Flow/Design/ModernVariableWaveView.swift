@@ -1,7 +1,6 @@
 import SwiftUI
 import UIKit
 
-@MainActor
 fileprivate struct SFProVariableWeightModifier: ViewModifier {
     let weight: CGFloat
     let size: CGFloat
@@ -24,8 +23,7 @@ fileprivate struct SFProVariableWeightModifier: ViewModifier {
 }
 
 extension View {
-    @MainActor
-    fileprivate func sfProVariableWeight(weight: CGFloat, size: CGFloat) -> some View {
+    nonisolated fileprivate func sfProVariableWeight(weight: CGFloat, size: CGFloat) -> some View {
         self.modifier(SFProVariableWeightModifier(weight: weight, size: size))
     }
 }
@@ -78,7 +76,7 @@ struct VariableWordView: View {
         Text(text)
             .fixedSize(horizontal: true, vertical: true)
             .foregroundColor(.black)
-            .keyframeAnimator(initialValue: VariableWaveProperties(), repeating: true) { @MainActor content, value in
+            .keyframeAnimator(initialValue: VariableWaveProperties(), repeating: true) { content, value in
                 content
                     .sfProVariableWeight(weight: value.weight, size: size)
             } keyframes: { _ in

@@ -7,6 +7,7 @@ struct NearbyStationsView: View {
     @ObservedObject private var mapData = MapDataService.shared
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.colorScheme) var colorScheme
+    @EnvironmentObject var coordinator: NavigationCoordinator
 
     var body: some View {
         NavigationStack {
@@ -100,9 +101,10 @@ struct NearbyStationsView: View {
 
                 List {
                     ForEach(viewModel.nearbyStations) { station in
-                        NavigationLink(
-                            destination: StationDetailScreen(station: station)
-                        ) {
+                        Button(action: {
+                            coordinator.selectedStation = station
+                            coordinator.switchToExplore()
+                        }) {
                             NearbyStationRow(station: station)
                         }
                         .buttonStyle(.plain)
@@ -177,15 +179,20 @@ struct NearbyStationRow: View {
 
     private var displayedStationLines: [StationLine] {
         let allLines = station.lines
-        let nonBusLines = allLines.filter { $0.type != .bus }
-
-        return nonBusLines.sorted { lhs, rhs in
-            let lhsPriority = customPriority(lhs.type)
-            let rhsPriority = customPriority(rhs.type)
-            if lhsPriority != rhsPriority {
-                return lhsPriority > rhsPriority
+        if station.mainType == .bus {
+            return allLines.filter { $0.type == .bus }.sorted {
+                $0.name.localizedStandardCompare($1.name) == .orderedAscending
             }
-            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+        } else {
+            let nonBusLines = allLines.filter { $0.type != .bus }
+            return nonBusLines.sorted { lhs, rhs in
+                let lhsPriority = customPriority(lhs.type)
+                let rhsPriority = customPriority(rhs.type)
+                if lhsPriority != rhsPriority {
+                    return lhsPriority > rhsPriority
+                }
+                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+            }
         }
     }
 
@@ -207,7 +214,7 @@ struct NearbyStationRow: View {
                             LineIcon(type: line.type, lineId: line.name, size: 16)
                         }
 
-                        if station.lines.contains(where: { $0.type == .bus }) {
+                        if station.mainType != .bus && station.lines.contains(where: { $0.type == .bus }) {
                             Image("Bus")
                                 .resizable()
                                 .scaledToFit()
@@ -314,7 +321,8 @@ struct NearbyStationRow: View {
         // Utiliser les stop_area quand disponibles (1-2 requêtes au lieu de 5-15)
         let stopAreaIds = Set(station.platforms.compactMap { platform -> String? in
             let id = platform.stopAreaId
-            return id.isEmpty ? nil : id
+            if id.isEmpty || id.contains("IDFM:C") || id.contains(":C") { return nil }
+            return id
         })
 
         if !stopAreaIds.isEmpty {
@@ -342,7 +350,7 @@ struct NearbyStationRow: View {
                 .store(in: &cancellables)
         } else {
             // Fallback: limiter à 3 stop_points pour l'aperçu
-            let stopIds = Array(Set(station.platforms.map { $0.id }).prefix(3))
+            let stopIds = Array(Set(station.platforms.map { $0.id }.filter { $0.contains("IDFM:") }).prefix(3))
 
             let publishers = stopIds.map { id in
                 IDFMService.shared.fetchDepartures(for: id)

@@ -10,9 +10,9 @@ enum TransportType: String, CaseIterable, Identifiable, Codable {
     case train = "Train"
     case cable = "Câble"
 
-    var id: String { self.rawValue }
+    nonisolated var id: String { self.rawValue }
 
-    var accentColor: Color {
+    nonisolated var accentColor: Color {
         switch self {
         case .metro: return Color.yellow
         case .rer: return Color.red
@@ -23,7 +23,7 @@ enum TransportType: String, CaseIterable, Identifiable, Codable {
         }
     }
 
-    var priority: Int {
+    nonisolated var priority: Int {
         switch self {
         case .metro: return 100
         case .rer: return 90

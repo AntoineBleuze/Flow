@@ -137,7 +137,7 @@ class LiveActivityManager: ObservableObject {
     }
 
     func isActivityActive(line: String, direction: String) -> Bool {
-        guard let activity = currentActivity else { return false }
+        guard currentActivity != nil else { return false }
         return currentLineName == line && currentDirection == direction
     }
 

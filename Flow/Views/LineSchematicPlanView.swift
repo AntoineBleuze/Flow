@@ -292,7 +292,6 @@ struct SchematicMergeView: View {
                         // Branch stations
                         ForEach(Array(branch.stations.enumerated()), id: \.element.nom) { sIndex, station in
                             let isFirst = sIndex == 0
-                            let isLast = sIndex == branch.stations.count - 1
                             
                             HStack(alignment: .top, spacing: 6) {
                                 // Track & Dot

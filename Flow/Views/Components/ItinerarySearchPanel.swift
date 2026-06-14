@@ -401,7 +401,7 @@ struct PanelSectionDetailView: View {
                             Spacer()
                             
                             NavigationLink(destination: LineSchematicPlanView(line: TransportLine(
-                                type: StationDetailScreen.determineType(mode: display.commercial_mode),
+                                type: display.transportType,
                                 lineId: display.code ?? display.label ?? "?",
                                 status: .normal
                             ))) {

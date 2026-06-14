@@ -8,6 +8,8 @@ const express = require("express");
 const cors = require("cors");
 const http = require("http");
 const { WebSocketServer, WebSocket } = require("ws");
+const fs = require("fs");
+const path = require("path");
 
 // --- Système de capture des logs en mémoire ---
 const originalLog = console.log;
@@ -46,7 +48,8 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const IDFM_API_KEY = process.env.IDFM_API_KEY;
 const NAVITIA_BASE = "https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia";
-const REFRESH_INTERVAL_MS = 30 * 1000; // 30 secondes
+const TRAFFIC_REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes (300 secondes)
+const ACTIVE_REFRESH_INTERVAL_MS = 20 * 1000; // 20 secondes
 
 if (!IDFM_API_KEY) {
   console.error("❌ IDFM_API_KEY manquante ! Configurez le fichier .env");
@@ -80,29 +83,52 @@ const cache = {
   departures: {}, // stopId -> { data: [], timestamp: Date }
 };
 
-const recentlyRequestedStops = new Map(); // stopId -> timestamp
-const API_DELAY_MS = parseInt(process.env.API_DELAY_MS || "200", 10);
-
-// Chargement des arrêts de stops.json
-const fs = require("fs");
-const path = require("path");
-
-let railwayStops = [];
-let busStops = [];
-
-try {
-  const stopsPath = path.join(__dirname, "stops.json");
-  if (fs.existsSync(stopsPath)) {
-    const stopsData = JSON.parse(fs.readFileSync(stopsPath, "utf8"));
-    railwayStops = stopsData.railway || [];
-    busStops = stopsData.bus || [];
-    console.log(`   ✅ stops.json chargé : ${railwayStops.length} ferroviaires et ${busStops.length} bus.`);
-  } else {
-    console.warn("   ⚠️ stops.json introuvable. Aucun arrêt ne sera pré-chargé.");
-  }
-} catch (err) {
-  console.error("   ❌ Erreur lors du chargement de stops.json :", err.message);
+const CACHE_DIR = path.join(__dirname, "cache");
+if (!fs.existsSync(CACHE_DIR)) {
+  fs.mkdirSync(CACHE_DIR, { recursive: true });
 }
+const CACHE_FILE = path.join(CACHE_DIR, "cache_departures.json");
+
+// Charger le cache depuis le fichier au démarrage
+function loadPersistentCache() {
+  try {
+    if (fs.existsSync(CACHE_FILE)) {
+      const data = fs.readFileSync(CACHE_FILE, "utf8");
+      const parsed = JSON.parse(data);
+      // Restaurer le cache
+      cache.departures = parsed;
+      console.log(`💾 [Persistent Cache] ${Object.keys(parsed).length} arrêts restaurés depuis le cache disque.`);
+    } else {
+      console.log("💾 [Persistent Cache] Aucun cache disque trouvé, démarrage avec un cache vide.");
+    }
+  } catch (err) {
+    console.error("❌ [Persistent Cache] Erreur lors du chargement du cache:", err.message);
+  }
+}
+
+// Sauvegarder le cache sur le disque
+function savePersistentCache() {
+  try {
+    const now = Date.now();
+    const cleanCache = {};
+    let keptCount = 0;
+    
+    // Conserver uniquement les départs récents (moins de 2 heures) pour éviter un fichier trop volumineux
+    for (const [stopId, item] of Object.entries(cache.departures)) {
+      if (now - item.timestamp < 2 * 60 * 60 * 1000) {
+        cleanCache[stopId] = item;
+        keptCount++;
+      }
+    }
+    
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(cleanCache), "utf8");
+    console.log(`💾 [Persistent Cache] Sauvegarde effectuée (${keptCount} arrêts conservés).`);
+  } catch (err) {
+    console.error("❌ [Persistent Cache] Erreur lors de la sauvegarde du cache:", err.message);
+  }
+}
+
+const API_DELAY_MS = parseInt(process.env.API_DELAY_MS || "200", 10);
 
 // ============================================================
 // Gestion des abonnements globaux
@@ -131,15 +157,22 @@ function removeStopInterest(stopIds) {
 // ============================================================
 // Queue de requêtes pour éviter le 429 (Rate Limit)
 // Navitia/IDFM limite le nombre d'appels simultanés.
+// Processus à concurrence limitée pour optimiser le parallélisme
 // ============================================================
 const navitiaQueue = [];
-let isProcessingQueue = false;
+let activeRequestsCount = 0;
+const MAX_CONCURRENT_REQUESTS = 6;
 
 async function processNavitiaQueue() {
-  if (isProcessingQueue || navitiaQueue.length === 0) return;
-  isProcessingQueue = true;
+  if (activeRequestsCount >= MAX_CONCURRENT_REQUESTS || navitiaQueue.length === 0) {
+    return;
+  }
 
+  activeRequestsCount++;
   const { url, resolve, reject } = navitiaQueue.shift();
+
+  // Déclencher d'autres requêtes en parallèle si la file le permet
+  processNavitiaQueue();
 
   try {
     const timestamp = new Date().toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris" });
@@ -149,12 +182,11 @@ async function processNavitiaQueue() {
 
     if (!response.ok) {
       const text = await response.text();
-      // Si on se prend un 429 quand même, on réinjecte au début de la queue avec un délai de 2 secondes
       if (response.status === 429) {
-        console.warn(`[${timestamp}] ⚠️ 429 détecté, attente prolongée (2s)...`);
+        console.warn(`[${timestamp}] ⚠️ 429 détecté, attente et retry dans 2s...`);
         navitiaQueue.unshift({ url, resolve, reject });
         setTimeout(() => {
-          isProcessingQueue = false;
+          activeRequestsCount--;
           processNavitiaQueue();
         }, 2000);
         return;
@@ -164,19 +196,12 @@ async function processNavitiaQueue() {
 
     const data = await response.json();
     resolve(data);
-
-    // Petit délai configurable après un appel réussi
-    setTimeout(() => {
-      isProcessingQueue = false;
-      processNavitiaQueue();
-    }, API_DELAY_MS);
   } catch (err) {
     reject(err);
-    // En cas d'erreur (autre que 429), on passe à la suite après un petit délai
-    setTimeout(() => {
-      isProcessingQueue = false;
-      processNavitiaQueue();
-    }, Math.max(100, API_DELAY_MS / 2));
+  } finally {
+    activeRequestsCount--;
+    // Relancer la file
+    processNavitiaQueue();
   }
 }
 
@@ -311,7 +336,7 @@ async function fetchAllTrafficData() {
 // ============================================================
 async function autoRefresh() {
   const timestamp = new Date().toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris" });
-  console.log(`\n🔄 [${timestamp}] Auto-refresh des données...`);
+  console.log(`\n🔄 [${timestamp}] Auto-refresh des perturbations trafic...`);
 
   try {
     const trafficData = await fetchAllTrafficData();
@@ -332,8 +357,6 @@ async function autoRefresh() {
       timestamp: cache.lastFullUpdate,
       data: slimData,
     });
-
-    // Les départs sont désormais gérés séparément par le worker de pré-chargement.
   } catch (error) {
     console.error(`   ❌ Erreur auto-refresh perturbations: ${error.message}`);
   }
@@ -392,7 +415,6 @@ wss.on("connection", (ws, req) => {
       if (msg.type === "subscribe_departures") {
         const { stopIds, line, direction } = msg.data;
         if (stopIds && stopIds.length > 0) {
-          // Gérer le changement d'abonnement (désabonner l'ancien si existe)
           if (ws.departureSubscription) {
             removeStopInterest(ws.departureSubscription.stopIds);
           }
@@ -403,15 +425,18 @@ wss.on("connection", (ws, req) => {
           addStopInterest(stopIds);
           ws.departureSubscription = { stopIds, line, direction };
 
-          // Tenter un push immédiat si données en cache, sinon fetch
-          // On peut lancer un refresh partiel ou juste check cache
+          // Tenter un push immédiat depuis le cache
           pushCachedDepartures(ws);
 
-          // Lancer un refresh immédiat pour avoir les dernières données du serveur
+          // Lancer un refresh immédiat uniquement si pas de cache, cache expiré (> 15s) ou provenant du prefetch global
+          const now = Date.now();
           stopIds.forEach((stopId) => {
-            refreshStop(stopId).catch((err) => {
-              console.error(`❌ Erreur refresh immédiat départ (${stopId}):`, err.message);
-            });
+            const cached = cache.departures[stopId];
+            if (!cached || (now - cached.timestamp > 15000) || cached.source === "global") {
+              refreshStop(stopId).catch((err) => {
+                console.error(`❌ Erreur refresh immédiat départ (${stopId}):`, err.message);
+              });
+            }
           });
         }
       }
@@ -433,13 +458,19 @@ wss.on("connection", (ws, req) => {
           console.log(`   🚉 Abonnement station globale: ${stopIds.length} arrets`);
           addStopInterest(stopIds);
           ws.stationSubscription = { stopIds };
+          
+          // Tenter un push immédiat depuis le cache
           pushCachedDepartures(ws);
 
-          // Lancer un refresh immédiat pour avoir les dernières données du serveur
+          // Lancer un refresh immédiat uniquement si pas de cache, cache expiré (> 15s) ou provenant du prefetch global
+          const now = Date.now();
           stopIds.forEach((stopId) => {
-            refreshStop(stopId).catch((err) => {
-              console.error(`❌ Erreur refresh immédiat station (${stopId}):`, err.message);
-            });
+            const cached = cache.departures[stopId];
+            if (!cached || (now - cached.timestamp > 15000) || cached.source === "global") {
+              refreshStop(stopId).catch((err) => {
+                console.error(`❌ Erreur refresh immédiat station (${stopId}):`, err.message);
+              });
+            }
           });
         }
       }
@@ -459,6 +490,9 @@ wss.on("connection", (ws, req) => {
   ws.on("close", () => {
     const ts = new Date().toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris" });
     console.log(`🔌 [${ts}] Client déconnecté. Restant: ${wss.clients.size}`);
+    if (ws.pushTimeout) {
+      clearTimeout(ws.pushTimeout);
+    }
     if (ws.departureSubscription) {
       removeStopInterest(ws.departureSubscription.stopIds);
     }
@@ -476,11 +510,18 @@ wss.on("connection", (ws, req) => {
 // Système de Cache et de Pré-chargement en arrière-plan
 // ============================================================
 
+// ============================================================
+// Cache et logique d'actualisation (Global Rail & On-Demand Bus)
+// ============================================================
+
 function updateCache(stopId, departures) {
   cache.departures[stopId] = {
     data: departures,
-    timestamp: Date.now()
+    timestamp: Date.now(),
+    source: "on-demand"
   };
+
+  console.log(`   💾 [Cache] Mis à jour pour ${stopId} (${departures.length} départs)`);
 
   // Si c'est un stop_area, on extrait et met également à jour le cache des stop_point individuels
   if (stopId.startsWith("stop_area:") && departures && departures.length > 0) {
@@ -495,67 +536,105 @@ function updateCache(stopId, departures) {
     for (const [spId, deps] of Object.entries(grouped)) {
       cache.departures[spId] = {
         data: deps,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        source: "on-demand"
       };
     }
   }
 
-  // Push immédiat aux abonnés WebSocket concernés
+  // Push immédiat aux abonnés WebSocket concernés (débatté pour regrouper par station)
   wss.clients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {
       if (client.departureSubscription && client.departureSubscription.stopIds.includes(stopId)) {
-        pushCachedDepartures(client);
+        schedulePushDepartures(client);
       } else if (client.stationSubscription && client.stationSubscription.stopIds.includes(stopId)) {
-        pushCachedDepartures(client);
+        schedulePushDepartures(client);
       }
     }
   });
 }
 
-let railwayIndex = 0;
-let busIndex = 0;
-let intercalateCount = 0;
+// Ingestion globale des départs récupérés via les requêtes généralisées
+function ingestGlobalDepartures(departures) {
+  if (!departures || departures.length === 0) return;
 
-async function getNextStopToFetch() {
-  const now = Date.now();
-  
-  // 1. Priorité aux arrêts actifs (WebSocket)
-  for (const stopId of activeStopCounts.keys()) {
-    const cached = cache.departures[stopId];
-    if (!cached || (now - cached.timestamp > 60000)) {
-      return stopId;
+  const departuresByStop = {};
+
+  for (const dep of departures) {
+    const spId = dep.stop_point?.id;
+    const saId = dep.stop_point?.stop_area?.id;
+
+    if (spId) {
+      if (!departuresByStop[spId]) departuresByStop[spId] = [];
+      departuresByStop[spId].push(dep);
+    }
+    if (saId) {
+      if (!departuresByStop[saId]) departuresByStop[saId] = [];
+      departuresByStop[saId].push(dep);
     }
   }
-  
-  // 2. Priorité aux arrêts récemment demandés (REST)
-  for (const [stopId, timestamp] of recentlyRequestedStops.entries()) {
-    if (now - timestamp > 300000) {
-      recentlyRequestedStops.delete(stopId);
+
+  const now = Date.now();
+  let updatedCount = 0;
+
+  for (const [stopId, deps] of Object.entries(departuresByStop)) {
+    // Si on a déjà un cache complet (on-demand) récent (moins de 20 secondes), on ne l'écrase pas avec du global partiel !
+    const existing = cache.departures[stopId];
+    if (existing && existing.source === "on-demand" && (now - existing.timestamp < 20000)) {
       continue;
     }
-    const cached = cache.departures[stopId];
-    if (!cached || (now - cached.timestamp > 60000)) {
-      return stopId;
+
+    cache.departures[stopId] = {
+      data: deps,
+      timestamp: now,
+      source: "global"
+    };
+    updatedCount++;
+
+    // Notification immédiate des abonnés WebSocket concernés (débatté pour regrouper par station)
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        if (client.departureSubscription && client.departureSubscription.stopIds.includes(stopId)) {
+          schedulePushDepartures(client);
+        } else if (client.stationSubscription && client.stationSubscription.stopIds.includes(stopId)) {
+          schedulePushDepartures(client);
+        }
+      }
+    });
+  }
+
+  console.log(`   💾 [Global Ingest] Mis à jour de la base de cache pour ${updatedCount} arrêt(s) (${departures.length} départs traités)`);
+}
+
+// Fonction de récupération des horaires pour un mode physique spécifique (requête globale)
+async function fetchGlobalDeparturesForMode(mode, count = 1000) {
+  try {
+    const url = `${NAVITIA_BASE}/physical_modes/${mode}/departures?count=${count}`;
+    console.log(`   🌍 [Navitia Global] Récupération départs pour ${mode} (count: ${count})...`);
+    const data = await navitiaFetch(url);
+    if (data && data.departures) {
+      ingestGlobalDepartures(data.departures);
     }
+  } catch (err) {
+    console.error(`❌ [Global Fetch Error] Erreur sur ${mode}:`, err.message);
   }
-  
-  // 3. Boucle générale (Ratio 4 railway pour 1 bus)
-  if (railwayStops.length === 0 && busStops.length === 0) {
-    return null;
-  }
-  
-  if (railwayStops.length > 0 && (intercalateCount < 4 || busStops.length === 0)) {
-    intercalateCount++;
-    const stopId = railwayStops[railwayIndex];
-    railwayIndex = (railwayIndex + 1) % railwayStops.length;
-    return stopId;
-  } else if (busStops.length > 0) {
-    intercalateCount = 0;
-    const stopId = busStops[busIndex];
-    busIndex = (busIndex + 1) % busStops.length;
-    return stopId;
-  }
-  return null;
+}
+
+// Récupère globalement les horaires de tous les modes ferrés d'IDF
+async function refreshAllGlobalRailDepartures() {
+  const timestamp = new Date().toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris" });
+  console.log(`\n🔄 [${timestamp}] [Global Rail Refresh] Lancement des requêtes généralisées...`);
+
+  // Requêtes en parallèle via la queue
+  const modes = [
+    { id: "physical_mode:Metro", count: 1000 },
+    { id: "physical_mode:RapidTransit", count: 800 },
+    { id: "physical_mode:LocalTrain", count: 800 },
+    { id: "physical_mode:Tramway", count: 500 }
+  ];
+
+  const promises = modes.map((m) => fetchGlobalDeparturesForMode(m.id, m.count));
+  await Promise.all(promises);
 }
 
 async function refreshStop(stopId) {
@@ -564,53 +643,72 @@ async function refreshStop(stopId) {
   }
   
   try {
-    let data;
     const endpoint = stopId.includes("stop_point") ? "stop_points" : "stop_areas";
-    const url = `${NAVITIA_BASE}/${endpoint}/${stopId}/departures?count=150`;
+    const url = `${NAVITIA_BASE}/${endpoint}/${stopId}/departures?count=1000`;
     
-    data = await navitiaFetch(url);
+    console.log(`   🌍 [Navitia On-Demand] Requête départs pour ${stopId}`);
+    const data = await navitiaFetch(url);
     if (data && data.departures) {
-      const isActive = activeStopCounts.has(stopId) || recentlyRequestedStops.has(stopId);
-      if (isActive) {
-        console.log(`   🌍 [Priority Fetch] Pré-chargé départs pour l'arrêt actif ${stopId} (${data.departures.length} départs)`);
-      }
       updateCache(stopId, data.departures);
     }
   } catch (err) {
     if ((err.message.includes("404") || err.message.includes("unknown_object")) && !stopId.includes("stop_point")) {
       try {
         const retryId = stopId.startsWith("stop_point:") ? stopId : `stop_point:${stopId}`;
-        const url = `${NAVITIA_BASE}/stop_points/${retryId}/departures?count=150`;
+        const url = `${NAVITIA_BASE}/stop_points/${retryId}/departures?count=1000`;
+        console.log(`   🌍 [Navitia Retry] Requête départs pour ${retryId}`);
         const data = await navitiaFetch(url);
         if (data && data.departures) {
-          const isActive = activeStopCounts.has(stopId) || recentlyRequestedStops.has(stopId);
-          if (isActive) {
-            console.log(`   🌍 [Priority Fetch Retry] Pré-chargé départs pour l'arrêt actif ${stopId} (${data.departures.length} départs)`);
-          }
           updateCache(stopId, data.departures);
           return;
         }
       } catch (retryErr) {
-        // Enregistrer cache vide
+        // Ignorer
       }
     }
     updateCache(stopId, []);
   }
 }
 
-async function startPrefetchLoop() {
-  console.log("🚀 Lancement du worker de pré-chargement en tâche de fond...");
-  while (true) {
-    try {
-      const stopId = await getNextStopToFetch();
-      if (stopId) {
-        await refreshStop(stopId);
-      }
-    } catch (err) {
-      console.error("❌ Erreur dans le cycle principal de pré-chargement:", err.message);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
+// Boucle d'actualisation des arrêts actifs (uniquement si le cache a expiré de plus de 20s)
+async function refreshActiveStops() {
+  const activeIds = Array.from(activeStopCounts.keys());
+  if (activeIds.length === 0) return;
+
+  const now = Date.now();
+  // Filtrer pour ne rafraîchir que les arrêts dont le cache a expiré (> 20 secondes) ou provient du prefetch global
+  // Cela évite de ré-interroger les gares ferrées qui ont déjà été rafraîchies par la boucle globale
+  const expiredActiveIds = activeIds.filter((id) => {
+    const cached = cache.departures[id];
+    return !cached || (now - cached.timestamp > 20000) || cached.source === "global";
+  });
+
+  if (expiredActiveIds.length === 0) return;
+
+  const timestamp = new Date().toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris" });
+  console.log(`\n🔄 [${timestamp}] [Active Refresh Loop] Rafraîchissement on-demand pour ${expiredActiveIds.length} arrêt(s) actif(s)...`);
+
+  // Lancer toutes les requêtes en parallèle via la queue à concurrence limitée
+  const promises = expiredActiveIds.map((id) =>
+    refreshStop(id).catch((err) => {
+      console.error(`❌ [Active Refresh] Erreur rafraîchissement ${id}:`, err.message);
+    })
+  );
+
+  await Promise.all(promises);
+}
+
+// ============================================================
+// Helper : Push débatté (debounced) depuis le cache vers un client
+// ============================================================
+function schedulePushDepartures(ws) {
+  if (ws.pushTimeout) {
+    clearTimeout(ws.pushTimeout);
   }
+  ws.pushTimeout = setTimeout(() => {
+    pushCachedDepartures(ws);
+    delete ws.pushTimeout;
+  }, 300); // 300ms de debounce pour accumuler les rafraîchissements
 }
 
 // ============================================================
@@ -648,13 +746,26 @@ function pushCachedDepartures(ws) {
         allDepartures = allDepartures.concat(cached.data);
       }
     }
-    // Pas de filtrage par ligne/direction pour l'abonnement station complet
   }
 
   if (allDepartures.length === 0) return;
 
+  // Déduplication par clé unique (ligne - direction - heure)
+  const seen = new Set();
+  const uniqueDepartures = [];
+  for (const dep of allDepartures) {
+    const time = dep.stop_date_time?.departure_date_time;
+    const lineLabel = dep.display_informations?.label || dep.display_informations?.code || "";
+    const direction = dep.display_informations?.direction || "";
+    const key = `${lineLabel}-${direction}-${time}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueDepartures.push(dep);
+    }
+  }
+
   // Trier par heure de départ
-  allDepartures.sort((a, b) => {
+  uniqueDepartures.sort((a, b) => {
     const tA = a.stop_date_time?.departure_date_time || "";
     const tB = b.stop_date_time?.departure_date_time || "";
     return tA.localeCompare(tB);
@@ -666,7 +777,7 @@ function pushCachedDepartures(ws) {
       JSON.stringify({
         type: ws.stationSubscription ? "station_update" : "departure_update",
         timestamp: new Date().toISOString(),
-        data: { departures: allDepartures },
+        data: { departures: uniqueDepartures },
       })
     );
   }
@@ -691,11 +802,12 @@ app.get("/api/health", (req, res) => {
     cacheAge: cache.traffic.timestamp
       ? Math.round((Date.now() - cache.traffic.timestamp) / 1000) + "s"
       : "empty",
-    refreshInterval: REFRESH_INTERVAL_MS / 1000 + "s",
+    trafficInterval: TRAFFIC_REFRESH_INTERVAL_MS / 1000 + "s",
+    activeRefreshInterval: ACTIVE_REFRESH_INTERVAL_MS / 1000 + "s",
   });
 });
 
-// GET /api/departures/:stationId — Prochains départs (Service depuis le cache uniquement)
+// GET /api/departures/:stationId — Prochains départs (Service à la demande ou cache)
 app.get("/api/departures/:stationId", async (req, res) => {
   try {
     let stationId = decodeURIComponent(req.params.stationId);
@@ -712,18 +824,46 @@ app.get("/api/departures/:stationId", async (req, res) => {
       return res.json({ departures: [] });
     }
 
-    // Enregistrer comme récemment demandé pour actualisation prioritaire
-    recentlyRequestedStops.set(stationId, Date.now());
-
-    // Servir uniquement depuis le cache
     const cached = cache.departures[stationId];
-    if (cached) {
-      const ageSec = Math.round((Date.now() - cached.timestamp) / 1000);
-      console.log(`   💾 Départs pour ${stationId} servis depuis le cache (âge: ${ageSec}s)`);
-      return res.json({ departures: cached.data });
+    const now = Date.now();
+    const isForce = req.query.force === "true";
+    const isExpired = !cached || (now - cached.timestamp > 20000) || cached.source === "global";
+
+    if (isForce || !cached) {
+      // Pas de cache du tout, ou actualisation forcée : requête bloquante
+      console.log(`   📡 [REST Fetch] Requête bloquante pour ${stationId}...`);
+      await refreshStop(stationId);
+    } else if (isExpired) {
+      // Cache existant mais expiré ou global partiel : renvoi immédiat du cache + rafraîchissement asynchrone en arrière-plan
+      console.log(`   📡 [REST Fetch] Servir cache (${cached.source}) pour ${stationId} + rafraîchissement en arrière-plan`);
+      refreshStop(stationId).catch((err) => {
+        console.error(`❌ Erreur refresh arrière-plan REST (${stationId}):`, err.message);
+      });
     }
 
-    console.log(`   ⚠️ Départs pour ${stationId} non trouvés en cache (vide)`);
+    // Servir du cache
+    const updatedCached = cache.departures[stationId];
+    if (updatedCached) {
+      const ageSec = Math.round((Date.now() - updatedCached.timestamp) / 1000);
+      console.log(`   💾 Départs pour ${stationId} servis (âge: ${ageSec}s)`);
+      
+      // Dédupliquer avant de renvoyer
+      const seen = new Set();
+      const uniqueDeps = [];
+      for (const dep of updatedCached.data) {
+        const time = dep.stop_date_time?.departure_date_time;
+        const lineLabel = dep.display_informations?.label || dep.display_informations?.code || "";
+        const direction = dep.display_informations?.direction || "";
+        const key = `${lineLabel}-${direction}-${time}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          uniqueDeps.push(dep);
+        }
+      }
+      return res.json({ departures: uniqueDeps });
+    }
+
+    console.log(`   ⚠️ Départs pour ${stationId} non trouvés (vide)`);
     res.json({ departures: [] });
   } catch (error) {
     console.error("❌ Departures error:", error.message);
@@ -782,7 +922,7 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`   🌐 Local:    http://localhost:${PORT}`);
   console.log(`   📱 Réseau:   http://10.5.16.29:${PORT}`);
   console.log(`   🔌 WebSocket: ws://10.5.16.29:${PORT}`);
-  console.log(`   ⏱  Refresh:  toutes les ${REFRESH_INTERVAL_MS / 1000}s`);
+  console.log(`   ⏱  Refresh:  Perturbations toutes les ${TRAFFIC_REFRESH_INTERVAL_MS / 1000}s, Rail global toutes les 30s, Départs actifs toutes les ${ACTIVE_REFRESH_INTERVAL_MS / 1000}s`);
   console.log(`   📡 Endpoints REST:`);
   console.log(`      GET /api/health`);
   console.log(`      GET /api/departures/:stationId`);
@@ -790,13 +930,38 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`      GET /api/itinerary?from=...&to=...`);
   console.log(`   🔑 API Key: ${IDFM_API_KEY.slice(0, 6)}...${IDFM_API_KEY.slice(-4)}\n`);
 
-  // Premier fetch immédiat au démarrage
-  console.log(`🔄 Premier fetch des données...`);
+  // Charger le cache persistant
+  loadPersistentCache();
+
+  // Premier fetch immédiat au démarrage (perturbations + départs globaux)
+  console.log(`🔄 Premier fetch des perturbations...`);
   autoRefresh();
 
-  // Puis toutes les minutes
-  setInterval(autoRefresh, REFRESH_INTERVAL_MS);
+  console.log(`🔄 Premier fetch des horaires ferroviaires globaux...`);
+  refreshAllGlobalRailDepartures();
 
-  // Lancement du cycle de pré-chargement continu en arrière-plan
-  startPrefetchLoop();
+  // Boucle de mise à jour des perturbations (trafic global)
+  setInterval(autoRefresh, TRAFFIC_REFRESH_INTERVAL_MS);
+
+  // Boucle d'actualisation des départs ferroviaires globaux toutes les 30 secondes
+  setInterval(refreshAllGlobalRailDepartures, 30 * 1000);
+
+  // Boucle d'actualisation des départs pour les abonnements WebSocket actifs (on-demand bus)
+  setInterval(refreshActiveStops, ACTIVE_REFRESH_INTERVAL_MS);
+
+  // Boucle de sauvegarde automatique du cache sur le disque toutes les 10 minutes
+  setInterval(savePersistentCache, 10 * 60 * 1000);
+});
+
+// Sauvegarde lors de la fermeture propre du serveur
+process.on("SIGINT", () => {
+  console.log("\n🛑 Fermeture du serveur détectée (SIGINT). Sauvegarde du cache...");
+  savePersistentCache();
+  process.exit(0);
+});
+
+process.on("SIGTERM", () => {
+  console.log("\n🛑 Fermeture du serveur détectée (SIGTERM). Sauvegarde du cache...");
+  savePersistentCache();
+  process.exit(0);
 });

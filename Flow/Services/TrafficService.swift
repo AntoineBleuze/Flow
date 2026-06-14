@@ -390,17 +390,20 @@ class TrafficService: ObservableObject {
                 (normalizedModeName.contains("cable") || normalizedModeName.contains("funiculaire"))
         case .bus:
             return normalizedModeName.contains("bus") && line.lineId == code
-        default:
-            return false
         }
     }
 
     /// Nettoie le HTML et formate intelligemment le message
     private func smartFormatMessage(_ html: String) -> String {
-        // 1. Nettoyage HTML de base
         // 1. Nettoyage HTML de base (Regex simple pour éviter les crashs NSAttributedString)
-        // NSAttributedString peut crasher sur certains threads ou avec des données malformées
-        var text = html.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression, range: nil)
+        var text = html
+        // Remplacer les retours à la ligne et fins de paragraphes par des sauts de ligne pour éviter que le texte ne se colle
+        text = text.replacingOccurrences(of: "(?i)<br\\s*/?>", with: "\n", options: .regularExpression)
+        text = text.replacingOccurrences(of: "(?i)</p>", with: "\n", options: .regularExpression)
+        text = text.replacingOccurrences(of: "(?i)</div>", with: "\n", options: .regularExpression)
+        
+        // Supprimer les autres balises HTML
+        text = text.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression, range: nil)
         
         // Décoder les entités HTML courantes manuellement si besoin (ou juste ignorer pour l'instant pour la stabilité)
         text = text.replacingOccurrences(of: "&nbsp;", with: " ")
@@ -440,6 +443,11 @@ class TrafficService: ObservableObject {
         // S'assurer que les listes à puces (souvent avec - ou •) commencent sur une nouvelle ligne
         text = text.replacingOccurrences(of: ":-", with: ":\n-")
         text = text.replacingOccurrences(of: ":•", with: ":\n•")
+
+        // Collapse excessive blank lines (3+ newlines → 2)
+        while text.contains("\n\n\n") {
+            text = text.replacingOccurrences(of: "\n\n\n", with: "\n\n")
+        }
 
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }

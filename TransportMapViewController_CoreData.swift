@@ -1,8 +1,9 @@
 import UIKit
 import MapKit
+import SwiftData
 
-/// Version améliorée du TransportMapViewController utilisant CoreData
-class TransportMapViewControllerWithCoreData: UIViewController {
+/// Version améliorée du TransportMapViewController utilisant SwiftData
+class TransportMapViewControllerWithSwiftData: UIViewController {
     
     private let mapView = MKMapView()
     private let persistence = TransportLinePersistence.shared
@@ -61,7 +62,7 @@ class TransportMapViewControllerWithCoreData: UIViewController {
     private func checkAndMigrateData() {
         if persistence.isDatabasePopulated() {
             print("✅ Base de données déjà peuplée")
-            loadTransportLinesFromCoreData()
+            loadTransportLinesFromSwiftData()
         } else {
             print("⚠️ Base de données vide, migration nécessaire")
             showMigrationAlert()
@@ -95,7 +96,7 @@ class TransportMapViewControllerWithCoreData: UIViewController {
                 self?.activityIndicator.stopAnimating()
                 
                 if success {
-                    self?.loadTransportLinesFromCoreData()
+                    self?.loadTransportLinesFromSwiftData()
                 } else {
                     self?.showError("Erreur lors de l'importation des données")
                 }
@@ -103,22 +104,17 @@ class TransportMapViewControllerWithCoreData: UIViewController {
         }
     }
     
-    /// Charge les lignes depuis CoreData et les affiche sur la carte
-    private func loadTransportLinesFromCoreData() {
-        print("📍 Chargement des lignes depuis CoreData...")
+    /// Charge les lignes depuis SwiftData et les affiche sur la carte
+    private func loadTransportLinesFromSwiftData() {
+        print("📍 Chargement des lignes depuis SwiftData...")
         
         // Option 1: Charger toutes les lignes
         let allLines = persistence.fetchAllTransportLines()
         displayTransportLineEntities(allLines)
-        
-        // Option 2: Charger uniquement certains types (exemple)
-        // let tramLines = persistence.fetchTransportLines(byType: "Tram")
-        // let metroLines = persistence.fetchTransportLines(byType: "Metro")
-        // displayTransportLineEntities(tramLines + metroLines)
     }
     
-    /// Affiche les entités CoreData sur la carte
-    private func displayTransportLineEntities(_ entities: [TransportLineEntity]) {
+    /// Affiche les entités SwiftData sur la carte
+    private func displayTransportLineEntities(_ entities: [TransportLineModel]) {
         print("🗺️ Affichage de \(entities.count) lignes sur la carte")
         
         for entity in entities {
@@ -146,7 +142,7 @@ class TransportMapViewControllerWithCoreData: UIViewController {
 
 // MARK: - MKMapViewDelegate
 
-extension TransportMapViewControllerWithCoreData: MKMapViewDelegate {
+extension TransportMapViewControllerWithSwiftData: MKMapViewDelegate {
     
     func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
         if let coloredPolyline = overlay as? ColoredPolyline {
@@ -164,7 +160,7 @@ extension TransportMapViewControllerWithCoreData: MKMapViewDelegate {
 
 // MARK: - Debug Extension
 
-extension TransportMapViewControllerWithCoreData {
+extension TransportMapViewControllerWithSwiftData {
     
     /// Ajoute un bouton de debug dans la navbar
     func addDebugButton() {
@@ -190,10 +186,6 @@ extension TransportMapViewControllerWithCoreData {
             debugger.runFullDiagnostic()
         })
         
-        alert.addAction(UIAlertAction(title: "🧪 Test migration simulée", style: .default) { _ in
-            debugger.testMigrationWithSampleData()
-        })
-        
         alert.addAction(UIAlertAction(title: "📊 Statistiques BDD", style: .default) { _ in
             debugger.checkDatabase()
         })
@@ -215,22 +207,22 @@ extension TransportMapViewControllerWithCoreData {
 // MARK: - Usage in SceneDelegate
 
 /*
- Pour utiliser cette version avec CoreData:
+ Pour utiliser cette version avec SwiftData:
  
  1. Dans SceneDelegate.swift:
  
-    let mapVC = TransportMapViewControllerWithCoreData()
+    let mapVC = TransportMapViewControllerWithSwiftData()
     window?.rootViewController = UINavigationController(rootViewController: mapVC)
  
- 2. Assurez-vous que le fichier CSV est dans votre bundle
+ 2. Assurez-vous que le fichier GeoJSON est dans votre bundle
  
  3. Au premier lancement:
-    - L'app détecte que CoreData est vide
+    - L'app détecte que SwiftData est vide
     - Demande à l'utilisateur de lancer l'import
-    - Parse le CSV et stocke tout dans CoreData
+    - Parse le GeoJSON et stocke tout dans SwiftData
  
  4. Aux lancements suivants:
-    - Les données sont chargées directement depuis CoreData
+    - Les données sont chargées directement depuis SwiftData
     - Beaucoup plus rapide !
  
  5. Pour forcer une nouvelle migration (debug):

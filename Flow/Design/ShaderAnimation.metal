@@ -128,7 +128,6 @@ float msl_random(float x) {
     
     for (int j = 0; j < 3; j++) {
         for (int i = 0; i < 5; i++) {
-            float shift = -0.01 * float(j) + float(i) * 0.01;
             float val = t - 0.01 * float(j) + float(i) * 0.01;
             float pulse = val - floor(val); // fract function
             

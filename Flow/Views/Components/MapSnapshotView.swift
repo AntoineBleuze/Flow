@@ -96,7 +96,10 @@ struct MapSnapshotView: View {
         )
 
         #if os(iOS)
-            options.size = UIScreen.main.bounds.size
+            let screenSize = UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .first?.screen.bounds.size ?? CGSize(width: 393, height: 852)
+            options.size = screenSize
             options.traitCollection = UITraitCollection(
                 userInterfaceStyle: isDarkMode ? .dark : .light)
         #else

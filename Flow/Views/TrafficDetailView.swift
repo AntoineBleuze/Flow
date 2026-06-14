@@ -105,11 +105,8 @@ struct TrafficInfoCard: View {
     let line: TransportLine
     let info: TrafficInfo
     let isActive: Bool
-    @State private var isExpanded = false
     @State private var showPlan = false
     @Environment(\.colorScheme) var colorScheme
-    
-    private let maxCharacters = 150
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -125,31 +122,8 @@ struct TrafficInfoCard: View {
             // Message
             Group {
                 let messageText = formatMessage(info.message)
-                let shouldTruncate = messageText.count > maxCharacters && !isExpanded
-
-                VStack(alignment: .leading, spacing: 6) {
-                    if shouldTruncate {
-                        Text(.init(String(messageText.prefix(maxCharacters)) + "..."))
-                            .font(.body)
-                    } else {
-                        Text(.init(messageText))
-                            .font(.body)
-                    }
-
-                    if messageText.count > maxCharacters {
-                        Button(action: {
-                            withAnimation { isExpanded.toggle() }
-                        }) {
-                            Text(isExpanded ? "Voir moins" : "Voir plus")
-                                .font(.caption)
-                                .foregroundColor(.primary)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(colorScheme == .dark ? Color.white.opacity(0.15) : Color.black.opacity(0.08), in: Capsule())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
+                Text(.init(messageText))
+                    .font(.body)
             }
 
             // Section impactée
@@ -160,9 +134,8 @@ struct TrafficInfoCard: View {
             }
 
             // Plan de ligne
-            let hasStops = info.impactedStops?.isEmpty == false
-            let hasSection = info.impactedSection != nil
-            if hasStops || hasSection {
+            let hasLineData = LocalDataService.shared.getLineData(type: line.type, lineId: line.lineId) != nil
+            if hasLineData {
                 VStack(alignment: .leading, spacing: 8) {
                     Button(action: {
                         withAnimation { showPlan.toggle() }
@@ -202,6 +175,10 @@ struct TrafficInfoCard: View {
         ]
         for phrase in redundantPhrases {
             cleaned = cleaned.replacingOccurrences(of: phrase, with: "")
+        }
+        // Collapse excessive blank lines (3+ newlines → 2)
+        while cleaned.contains("\n\n\n") {
+            cleaned = cleaned.replacingOccurrences(of: "\n\n\n", with: "\n\n")
         }
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }

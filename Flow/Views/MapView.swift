@@ -16,8 +16,14 @@ struct AppMapView: View {
     @ObservedObject var data = MapDataService.shared
     @ObservedObject var navigationManager = NavigationManager.shared
 
-    @State private var selectedStation: MapStation?
+    private var selectedStationBinding: Binding<MapStation?> {
+        Binding(
+            get: { coordinator.selectedStation },
+            set: { coordinator.selectedStation = $0 }
+        )
+    }
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.colorScheme) private var colorScheme
 
     @EnvironmentObject var coordinator: NavigationCoordinator
     @State private var visibleRegion: MKCoordinateRegion?
@@ -33,11 +39,9 @@ struct AppMapView: View {
     @State private var isNavigatingImmersive = false
     
     // iPad panel resize state
-    @State private var iPadPanelHeight: CGFloat = 500
+    @State private var iPadPanelHeight: CGFloat = 600
     @GestureState private var iPadPanelDragOffset: CGFloat = 0
     
-    @State private var cancellables = Set<AnyCancellable>()
-
     var showControls: Bool = true
 
     var body: some View {
@@ -45,15 +49,16 @@ struct AppMapView: View {
             ZStack {
                 MapViewControllerBridge(
                     data: data,
-                    selectedStation: $selectedStation,
+                    selectedStation: selectedStationBinding,
                     userTrackingMode: $coordinator.userTrackingMode,
+                    recenterTrigger: coordinator.recenterTrigger,
                     journey: navigationManager.isNavigating ? navigationManager.currentJourney : selectedJourney,
                     useMainMap: showControls,
                     showAnnotations: showControls
                 )
                 .ignoresSafeArea()
                 
-                if showControls {
+                if showControls && !navigationManager.isNavigating {
                     VStack {
                         Spacer()
                         HStack {
@@ -61,7 +66,7 @@ struct AppMapView: View {
                             VStack(spacing: 12) {
                                 // Recenter Button
                                 Button(action: {
-                                    coordinator.cycleUserTrackingMode()
+                                    coordinator.recenterMap()
                                 }) {
                                     Image(systemName: coordinator.userTrackingModeImageName)
                                         .font(.title3)
@@ -122,49 +127,53 @@ struct AppMapView: View {
 
 
                 // iPad: Station detail panel at bottom-left (resizable)
-                if horizontalSizeClass == .regular, let station = selectedStation {
-                    VStack {
-                        Spacer()
-                        HStack(alignment: .bottom) {
-                            VStack(spacing: 0) {
-                                // Drag handle at top for resizing
-                                Capsule()
-                                    .fill(Color.secondary.opacity(0.5))
-                                    .frame(width: 40, height: 5)
-                                    .padding(.top, 8)
-                                    .padding(.bottom, 4)
-                                    .frame(maxWidth: .infinity)
-                                    .contentShape(Rectangle().size(width: 120, height: 40))
-                                    .gesture(
-                                        DragGesture()
-                                            .updating($iPadPanelDragOffset) { value, state, _ in
-                                                state = value.translation.height
-                                            }
-                                            .onEnded { value in
-                                                let newHeight = iPadPanelHeight - value.translation.height
-                                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                                    iPadPanelHeight = min(700, max(350, newHeight))
-                                                }
-                                            }
-                                    )
-
-                                StationDetailSheet(
-                                    station: station,
-                                    onDismiss: {
-                                        withAnimation(.easeInOut(duration: 0.3)) {
-                                            selectedStation = nil
-                                        }
-                                    }
-                                )
-                            }
-                            .frame(width: 380, height: min(700, max(350, iPadPanelHeight - iPadPanelDragOffset)))
-                            .clipShape(RoundedRectangle(cornerRadius: 20))
-                            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20))
-                            .shadow(color: .black.opacity(0.2), radius: 15, x: 0, y: 5)
-                            .padding(.leading, 16)
-                            .padding(.bottom, 16)
-                            .transition(.move(edge: .leading).combined(with: .opacity))
+                if horizontalSizeClass == .regular, let station = coordinator.selectedStation {
+                    GeometryReader { geometry in
+                        let maxAvailableHeight = geometry.size.height - 96
+                        VStack {
                             Spacer()
+                            HStack(alignment: .bottom) {
+                                VStack(spacing: 0) {
+                                    // Drag handle at top for resizing
+                                    Capsule()
+                                        .fill(Color.secondary.opacity(0.5))
+                                        .frame(width: 40, height: 5)
+                                        .padding(.top, 8)
+                                        .padding(.bottom, 4)
+                                        .frame(maxWidth: .infinity)
+                                        .contentShape(Rectangle().size(width: 120, height: 40))
+                                        .gesture(
+                                            DragGesture()
+                                                .updating($iPadPanelDragOffset) { value, state, _ in
+                                                    state = value.translation.height
+                                                }
+                                                .onEnded { value in
+                                                    let newHeight = iPadPanelHeight - value.translation.height
+                                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                                        iPadPanelHeight = min(maxAvailableHeight, max(350, newHeight))
+                                                    }
+                                                }
+                                        )
+
+                                    StationDetailSheet(
+                                        station: station,
+                                        onDismiss: {
+                                             withAnimation(.easeInOut(duration: 0.3)) {
+                                                 coordinator.selectedStation = nil
+                                             }
+                                        }
+                                    )
+                                }
+                                .frame(width: 380, height: min(maxAvailableHeight, max(350, iPadPanelHeight - iPadPanelDragOffset)))
+                                .background(colorScheme == .dark ? Color.black.opacity(0.05) : Color.white.opacity(0.05))
+                                .clipShape(RoundedRectangle(cornerRadius: 20))
+                                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20))
+                                .shadow(color: .black.opacity(0.2), radius: 15, x: 0, y: 5)
+                                .padding(.leading, 16)
+                                .padding(.bottom, 16)
+                                .transition(.move(edge: .leading).combined(with: .opacity))
+                                Spacer()
+                            }
                         }
                     }
                     .zIndex(10)
@@ -173,8 +182,8 @@ struct AppMapView: View {
         }
         // iPhone: keep classic sheet behavior (iPad uses inline panel above)
         .sheet(item: Binding(
-            get: { horizontalSizeClass == .regular ? nil : selectedStation },
-            set: { selectedStation = $0 }
+            get: { horizontalSizeClass == .regular ? nil : coordinator.selectedStation },
+            set: { coordinator.selectedStation = $0 }
         )) { station in
             StationDetailSheet(station: station)
                 .presentationDetents([.medium, .large])
@@ -183,7 +192,7 @@ struct AppMapView: View {
             LocationManager.shared.requestLocation()
         }
         // Deselect map marker when panel closes
-        .onChange(of: selectedStation?.id) { oldId, newId in
+        .onChange(of: coordinator.selectedStation?.id) { oldId, newId in
             if newId == nil, oldId != nil {
                 let mapView = SharedMapView.main.mapView
                 for annotation in mapView.selectedAnnotations {
@@ -196,7 +205,7 @@ struct AppMapView: View {
                 withAnimation {
                     // Center roughly on station
                 }
-                selectedStation = station
+                coordinator.selectedStation = station
             }
         }
         // Start Navigation Trigger
@@ -212,28 +221,6 @@ struct AppMapView: View {
     }
 
 
-    
-    private func performSearch() {
-        guard let start = startStation, let end = endStation else { return }
-        
-        // Ensure start coordinate is valid or use user location
-        // ... (simplified logic)
-        
-        IDFMItineraryService.shared.searchItinerary(
-            from: start.coordinate,
-            to: end,
-            date: departureDate,
-            isArrival: isArrivalTime
-        )
-        .receive(on: DispatchQueue.main)
-        .sink(receiveCompletion: { _ in }, receiveValue: { results in
-            self.searchResults = results
-            withAnimation {
-                self.itineraryPanelState = .results
-            }
-        })
-        .store(in: &cancellables)
-    }
 }
 
 #if DEBUG

@@ -2,7 +2,7 @@
 import ActivityKit
 import Foundation
 
-struct StationActivityAttributes: ActivityAttributes {
+nonisolated struct StationActivityAttributes: ActivityAttributes {
     public struct ContentState: Codable, Hashable {
         // Dynamic stateful properties about your activity go here!
         var nextDepartures: [String] // Ex: ["12:05", "12:10"]

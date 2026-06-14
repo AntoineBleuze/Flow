@@ -1,5 +1,5 @@
 import Combine
-import CoreData
+import SwiftData
 import CoreLocation
 import Foundation
 import MapKit
@@ -14,7 +14,7 @@ import SwiftUI
 #endif
 
 // Classe personnalisée pour les polylines avec couleur et nom
-public class ColoredPolyline: MKPolyline {
+nonisolated public class ColoredPolyline: MKPolyline, @unchecked Sendable {
     var color: MapPlatformColor = .blue
     var lineName: String = ""
     var isDashed: Bool = false
@@ -26,23 +26,31 @@ public class ColoredPolyline: MKPolyline {
 // On utilise celui-là.
 
 // Modèle pour un tracé de ligne
-struct LineTrace: Identifiable {
+nonisolated struct LineTrace: Identifiable, @unchecked Sendable {
     let id: String
     let name: String
     let color: Color
     let polylines: [MKPolyline]  // Utilisation directe de MKPolyline
     let type: TransportType
+
+    nonisolated init(id: String, name: String, color: Color, polylines: [MKPolyline], type: TransportType) {
+        self.id = id
+        self.name = name
+        self.color = color
+        self.polylines = polylines
+        self.type = type
+    }
 }
 
 // Cache-friendly version of LineTrace (Codable)
-struct CacheableLineTrace: Codable {
+nonisolated struct CacheableLineTrace: Codable, Sendable {
     let id: String
     let name: String
     let colorHex: String
     let typeRawValue: String
     let coordinates: [[[Double]]]  // Array of polylines, each polyline is array of [lon, lat]
 
-    init(from lineTrace: LineTrace) {
+    nonisolated init(from lineTrace: LineTrace) {
         self.id = lineTrace.id
         self.name = lineTrace.name
         self.colorHex = lineTrace.color.toHex() ?? "0000FF"
@@ -55,7 +63,7 @@ struct CacheableLineTrace: Codable {
         }
     }
 
-    func toLineTrace() -> LineTrace {
+    nonisolated func toLineTrace() -> LineTrace {
         let polylines = coordinates.map { coords -> MKPolyline in
             let clCoords = coords.map { CLLocationCoordinate2D(latitude: $0[1], longitude: $0[0]) }
             return MKPolyline(coordinates: clCoords, count: clCoords.count)
@@ -71,12 +79,17 @@ struct CacheableLineTrace: Codable {
 }
 
 // Modèle pour une ligne passant par une station
-struct StationLine: Hashable, Identifiable, Codable {
-    var id: String { name + type.rawValue }
+nonisolated struct StationLine: Hashable, Identifiable, Codable, Sendable {
+    nonisolated var id: String { name + type.rawValue }
     let name: String
     let type: TransportType
 
-    var assetName: String {
+    nonisolated init(name: String, type: TransportType) {
+        self.name = name
+        self.type = type
+    }
+
+    nonisolated var assetName: String {
         switch type {
         case .metro:
             var fixedId = name
@@ -108,7 +121,7 @@ struct StationLine: Hashable, Identifiable, Codable {
 }
 
 // Modèle pour un arrêt (Quai individuel)
-struct StopPoint: Identifiable, Codable {
+struct StopPoint: Identifiable, Codable, Sendable {
     let id: String  // UUID (Généré pour l'arrêt physique)
     let stopAreaId: String  // ID de la zone d'arrêt (pour API)
     let name: String
@@ -117,11 +130,11 @@ struct StopPoint: Identifiable, Codable {
     let type: TransportType
     let lineName: String  // Nom de la ligne (ex: "1", "A")
 
-    var coordinate: CLLocationCoordinate2D {
+    nonisolated var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     }
 
-    init(id: String, stopAreaId: String, name: String, coordinate: CLLocationCoordinate2D, type: TransportType, lineName: String) {
+    nonisolated init(id: String, stopAreaId: String, name: String, coordinate: CLLocationCoordinate2D, type: TransportType, lineName: String) {
         self.id = id
         self.stopAreaId = stopAreaId
         self.name = name
@@ -133,7 +146,7 @@ struct StopPoint: Identifiable, Codable {
 }
 
 // Modèle pour une Station (Regroupement d'arrêts)
-struct MapStation: Identifiable, Equatable, Codable {
+struct MapStation: Identifiable, Equatable, Codable, Sendable {
     let id: String  // ID de la zone d'arrêt (IDFM:Cxxxxx)
     let name: String
     let latitude: Double
@@ -144,11 +157,11 @@ struct MapStation: Identifiable, Equatable, Codable {
     let lines: [StationLine]  // Lignes desservant la station
     let city: String? // Ville de la station
 
-    var coordinate: CLLocationCoordinate2D {
+    nonisolated var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     }
 
-    init(id: String, name: String, coordinate: CLLocationCoordinate2D, platforms: [StopPoint], isHub: Bool, mainType: TransportType, lines: [StationLine], city: String? = nil) {
+    nonisolated init(id: String, name: String, coordinate: CLLocationCoordinate2D, platforms: [StopPoint], isHub: Bool, mainType: TransportType, lines: [StationLine], city: String? = nil) {
         self.id = id
         self.name = name
         self.latitude = coordinate.latitude
@@ -212,33 +225,33 @@ class MapDataService: ObservableObject {
     // Cache des overlays complets (Calculés une seule fois pour éviter le freeze au chargement)
     @Published var cachedOverlays: [ColoredPolyline] = []
 
+    nonisolated private var cacheURL: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("lineTraces.json")
+    }
+
+    nonisolated private var stationsCacheURL: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("stationsCache_SwiftData_v1.json")
+    }
+
+    nonisolated private var colorsCacheURL: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("lineColorsCache.json")
+    }
+
     private init() {
         // loadData() is called explicitly from the loading screen
     }
 
     // MARK: - Cache
 
-    private var cacheURL: URL {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("lineTraces.json")
-    }
-
-    private var stationsCacheURL: URL {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("stationsCache_v6.json")
-    }
-
-    private var colorsCacheURL: URL {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("lineColorsCache.json")
-    }
-
-    struct CacheableStations: Codable {
+    nonisolated struct CacheableStations: Codable {
         let unmergedStations: [MapStation]
         let allStations: [MapStation]
     }
 
-    private func loadStationsFromCache() -> Bool {
+    nonisolated private func loadStationsFromCache() -> Bool {
         guard FileManager.default.fileExists(atPath: stationsCacheURL.path) else { return false }
         do {
             let data = try Data(contentsOf: stationsCacheURL)
@@ -266,9 +279,12 @@ class MapDataService: ObservableObject {
             guard let label = dep.displayInformations.label ?? dep.displayInformations.code,
                   let colorHex = dep.displayInformations.color else { continue }
             
-            let cleanHex = colorHex.replacingOccurrences(of: "#", with: "")
+            let cleanHex = colorHex.replacingOccurrences(of: "#", with: "").uppercased()
+            if cleanHex == "FFFFFF" || cleanHex == "000000" || cleanHex == "808080" || cleanHex == "CECECE" || cleanHex == "CCCCCC" {
+                continue
+            }
             let color = Color(hex: cleanHex)
-            if self.lineColorCache[label] == nil {
+            if self.lineColorCache[label] != color {
                 self.lineColorCache[label] = color
                 changed = true
             }
@@ -287,9 +303,12 @@ class MapDataService: ObservableObject {
                       let label = line.code ?? line.name,
                       let colorHex = line.color else { continue }
                 
-                let cleanHex = colorHex.replacingOccurrences(of: "#", with: "")
+                let cleanHex = colorHex.replacingOccurrences(of: "#", with: "").uppercased()
+                if cleanHex == "FFFFFF" || cleanHex == "000000" || cleanHex == "808080" || cleanHex == "CECECE" || cleanHex == "CCCCCC" {
+                    continue
+                }
                 let color = Color(hex: cleanHex)
-                if self.lineColorCache[label] == nil {
+                if self.lineColorCache[label] != color {
                     self.lineColorCache[label] = color
                     changed = true
                 }
@@ -300,18 +319,32 @@ class MapDataService: ObservableObject {
         }
     }
 
-    private func loadColorsFromCache() {
-        guard FileManager.default.fileExists(atPath: colorsCacheURL.path) else { return }
-        do {
-            let data = try Data(contentsOf: colorsCacheURL)
-            let dict = try JSONDecoder().decode([String: String].self, from: data)
-            for (name, hex) in dict {
-                self.lineColorCache[name] = Color(hex: hex)
+    nonisolated private func loadColorsFromCache() {
+        if FileManager.default.fileExists(atPath: colorsCacheURL.path) {
+            do {
+                let data = try Data(contentsOf: colorsCacheURL)
+                let dict = try JSONDecoder().decode([String: String].self, from: data)
+                var parsedColors: [String: Color] = [:]
+                for (name, hex) in dict {
+                    let cleanHex = hex.replacingOccurrences(of: "#", with: "").uppercased()
+                    if cleanHex == "FFFFFF" || cleanHex == "000000" || cleanHex == "808080" || cleanHex == "CECECE" || cleanHex == "CCCCCC" {
+                        continue
+                    }
+                    parsedColors[name] = Color(hex: hex)
+                }
+                DispatchQueue.main.async {
+                    for (name, color) in parsedColors {
+                        self.lineColorCache[name] = color
+                    }
+                    print("✅ Loaded \(dict.count) colors from cache")
+                }
+            } catch {
+                print("⚠️ Colors cache read error: \(error)")
             }
-            print("✅ Loaded \(dict.count) colors from cache")
-        } catch {
-            print("⚠️ Colors cache read error: \(error)")
         }
+        
+        // Toujours précharger les couleurs des bus
+        self.preloadBusColors()
     }
 
     private func saveColorsToCache() {
@@ -327,6 +360,117 @@ class MapDataService: ObservableObject {
             print("✅ Saved \(dict.count) colors to cache")
         } catch {
             print("⚠️ Colors cache write error: \(error)")
+        }
+    }
+
+    nonisolated private func preloadBusColors() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            guard let url = Bundle.main.url(forResource: "referentiel-des-lignes", withExtension: "geojson") else {
+                print("⚠️ Fichier referentiel-des-lignes.geojson introuvable.")
+                return
+            }
+            
+            do {
+                let data = try Data(contentsOf: url)
+                let referentiel = try JSONDecoder().decode(ReferentielLignes.self, from: data)
+                
+                // Groupes de couleurs prédéfinis
+                struct PredefinedColor {
+                    let hex: String
+                    let color: Color
+                    let r: Double
+                    let g: Double
+                    let b: Double
+                    
+                    init(hex: String) {
+                        self.hex = hex
+                        self.color = Color(hex: hex)
+                        
+                        let cleanHex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+                        var int: UInt64 = 0
+                        Scanner(string: cleanHex).scanHexInt64(&int)
+                        self.r = Double((int >> 16) & 0xFF) / 255.0
+                        self.g = Double((int >> 8) & 0xFF) / 255.0
+                        self.b = Double(int & 0xFF) / 255.0
+                    }
+                }
+                
+                let colorGroups = [
+                    PredefinedColor(hex: "008B5E"), // Bus Vert RATP (Standard)
+                    PredefinedColor(hex: "0A1C3F"), // Bus Bleu Foncé (Noctilien)
+                    PredefinedColor(hex: "3C91DC"), // Bus Bleu Clair (Express)
+                    PredefinedColor(hex: "FF5A00"), // Bus Orange
+                    PredefinedColor(hex: "E3051C"), // Bus Rouge
+                    PredefinedColor(hex: "662583"), // Bus Violet
+                    PredefinedColor(hex: "FFCD00"), // Bus Jaune
+                    PredefinedColor(hex: "808080")  // Bus Gris
+                ]
+                
+                func closestGroupColor(r: Double, g: Double, b: Double) -> Color {
+                    var minDistance = Double.infinity
+                    var closestColor = colorGroups[0].color
+                    
+                    for predefined in colorGroups {
+                        let dr = predefined.r - r
+                        let dg = predefined.g - g
+                        let db = predefined.b - b
+                        let distance = dr*dr + dg*dg + db*db
+                        
+                        if distance < minDistance {
+                            minDistance = distance
+                            closestColor = predefined.color
+                        }
+                    }
+                    return closestColor
+                }
+                
+                func parseRGB(from hexStr: String) -> (r: Double, g: Double, b: Double)? {
+                    let cleanHex = hexStr.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+                    var int: UInt64 = 0
+                    guard Scanner(string: cleanHex).scanHexInt64(&int) else { return nil }
+                    
+                    let r, g, b: UInt64
+                    switch cleanHex.count {
+                    case 3:
+                        (r, g, b) = (((int >> 8) & 0xF) * 17, ((int >> 4) & 0xF) * 17, (int & 0xF) * 17)
+                    case 6:
+                        (r, g, b) = ((int >> 16) & 0xFF, (int >> 8) & 0xFF, int & 0xFF)
+                    default:
+                        return nil
+                    }
+                    return (Double(r) / 255.0, Double(g) / 255.0, Double(b) / 255.0)
+                }
+                
+                var tempColors: [String: Color] = [:]
+                for feature in referentiel.features {
+                    let props = feature.properties
+                    guard let mode = props.transportmode, mode.lowercased() == "bus" else { continue }
+                    guard let name = props.shortname_line, !name.isEmpty else { continue }
+                    guard let hex = props.colourweb_hexa, !hex.isEmpty else { continue }
+                    
+                    if let rgb = parseRGB(from: hex) {
+                        let upperHex = hex.uppercased().replacingOccurrences(of: "#", with: "")
+                        let isNeutral = (rgb.r == rgb.g && rgb.g == rgb.b) || upperHex == "FFFFFF" || upperHex == "000000" || upperHex == "808080" || upperHex == "CECECE" || upperHex == "CCCCCC"
+                        if !isNeutral {
+                            let groupedColor = closestGroupColor(r: rgb.r, g: rgb.g, b: rgb.b)
+                            tempColors[name] = groupedColor
+                        }
+                    }
+                }
+                
+                DispatchQueue.main.async {
+                    var count = 0
+                    for (name, color) in tempColors {
+                        if self.lineColorCache[name] == nil {
+                            self.lineColorCache[name] = color
+                            count += 1
+                        }
+                    }
+                    print("🚌 [Preload Colors] \(count) couleurs de lignes de bus préchargées et regroupées depuis le référentiel.")
+                }
+            } catch {
+                print("⚠️ Erreur lors du préchargement des couleurs de bus: \(error)")
+            }
         }
     }
 
@@ -355,7 +499,7 @@ class MapDataService: ObservableObject {
         return clusters
     }
 
-    private func loadTracesFromCache() -> Bool {
+    nonisolated private func loadTracesFromCache() -> Bool {
         guard FileManager.default.fileExists(atPath: cacheURL.path) else { return false }
         do {
             let data = try Data(contentsOf: cacheURL)
@@ -400,6 +544,11 @@ class MapDataService: ObservableObject {
     func loadData() {
         loadingProgress = 0.0
         
+        // Précharger les couleurs de bus
+        self.preloadBusColors()
+        
+        let container = SwiftDataStack.shared.container
+        
         let appVersion = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
         let cachedVersion = UserDefaults.standard.string(forKey: "cached_data_version")
         if cachedVersion != appVersion {
@@ -436,22 +585,21 @@ class MapDataService: ObservableObject {
             DispatchQueue.main.async {
                 MapDataService.shared.loadingProgress = 0.3
             }
-            self.loadStopsCold()
+            self.loadStopsCold(container: container)
         }
     }
 
-    // Couleurs en dur pour RER/Transilien (Fallback car CSV souvent incomplet pour ces modes)
     private let hardcodedColors: [String: String] = [
         "A": "E3051C", "B": "5291CE", "C": "FFCE00", "D": "00643C", "E": "B2559C",
-        "H": "8D5E2A", "J": "B58800", "K": "B58800", "L": "CECECE", "N": "00B092",
-        "P": "F28E42", "R": "E4B4D1", "U": "DE4086", "V": "9F9825",
+        "H": "8D5E2A", "J": "D5C900", "K": "9F9825", "L": "C9AED0", "N": "00A88F",
+        "P": "F28E42", "R": "F3A4BA", "U": "B90845", "V": "9F9825",
         "1": "FFCD00", "2": "003CA6", "3": "837902", "3bis": "6EC4E8", "4": "CF009E",
         "5": "FF7E2E", "6": "6ECA97", "7": "FA9ABA", "7bis": "6ECA97", "8": "E19BDF",
         "9": "B6BD00", "10": "C9910D", "11": "704B1C", "12": "007852", "13": "6EC4E8",
         "14": "62259D",
     ]
 
-    private func loadTracesCold() {
+    nonisolated private func loadTracesCold() {
         // Cache miss - parse from GeoJSON
         struct Feature: Codable {
             let geometry: Geometry
@@ -521,17 +669,13 @@ class MapDataService: ObservableObject {
                     }
                 }
 
-                // Récupérer la couleur (PRIORITÉ au GeoJSON)
-                var hexColor = feature.properties.colourweb_hexa ?? ""
-
-                // Nettoyer la couleur (enlever # si présent)
-                hexColor = hexColor.replacingOccurrences(of: "#", with: "")
-
-                // Si pas de couleur dans le GeoJSON, utiliser le hardcodé (mais seulement pour métros/RER)
-                if (hexColor.isEmpty || hexColor.count < 6) && lineType != "TRAM" {
-                    if let hardColor = hardcodedColors[lineName] {
-                        hexColor = hardColor
-                    }
+                // Récupérer la couleur (priorité au hardcodé pour garantir les couleurs officielles)
+                var hexColor = ""
+                if lineType != "TRAM", let hardColor = hardcodedColors[lineName] {
+                    hexColor = hardColor
+                } else {
+                    hexColor = feature.properties.colourweb_hexa ?? ""
+                    hexColor = hexColor.replacingOccurrences(of: "#", with: "")
                 }
 
                 // Convertir le LineString en MKPolyline
@@ -606,6 +750,7 @@ class MapDataService: ObservableObject {
 
     private func importBusStopsInBackground() {
         print("🚌 [Bus Import] Démarrage de l'import des arrêts de bus en tâche de fond...")
+        let container = SwiftDataStack.shared.container
         DispatchQueue.global(qos: .utility).async {
             guard let url = Bundle.main.url(forResource: "arrets-lignes", withExtension: "csv") else {
                 print("⚠️ [Bus Import] Fichier arrets-lignes.csv introuvable.")
@@ -619,63 +764,79 @@ class MapDataService: ObservableObject {
                 
                 print("🚌 [Bus Import] \(totalRows) lignes à analyser.")
                 
-                let backgroundContext = PersistenceController.shared.container.newBackgroundContext()
-                backgroundContext.undoManager = nil
+                let initialContext = ModelContext(container)
+                self.clearBusStopPoints(in: initialContext)
                 
                 let batchSize = 2000
-                var currentBatchCount = 0
+                var currentBatch: [StopPointModel] = []
                 
-                try backgroundContext.performAndWait {
-                    // Supprimer les anciens arrêts de bus pour repartir sur une base propre
-                    self.clearBusStopPoints(in: backgroundContext)
+                for (index, row) in rows.enumerated() {
+                    if index == 0 || row.isEmpty { continue }
                     
-                    for (index, row) in rows.enumerated() {
-                        if index == 0 || row.isEmpty { continue }
+                    let columns = row.split(separator: ";", omittingEmptySubsequences: false).map {
+                        $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                    guard columns.count > 10 else { continue }
+                    
+                    let modeStr = columns[8]
+                    if modeStr.caseInsensitiveCompare("bus") == .orderedSame {
+                        let id = columns[2]
+                        let stopAreaId = columns[0]
+                        let rawName = columns[3]
+                        let name = self.cleanStationName(rawName)
+                        let lonStr = columns[4]
+                        let latStr = columns[5]
+                        let lineName = columns[7]
+                        let city = columns[10]
                         
-                        let columns = row.split(separator: ";", omittingEmptySubsequences: false).map {
-                            $0.trimmingCharacters(in: .whitespacesAndNewlines)
-                        }
-                        guard columns.count > 10 else { continue }
-                        
-                        let modeStr = columns[8]
-                        if modeStr.caseInsensitiveCompare("bus") == .orderedSame {
-                            let id = columns[2]
-                            let stopAreaId = columns[0]
-                            let rawName = columns[3]
-                            let name = self.cleanStationName(rawName)
-                            let lonStr = columns[4]
-                            let latStr = columns[5]
-                            let lineName = columns[7]
-                            let city = columns[10]
+                        if let lat = Double(latStr), let lon = Double(lonStr) {
+                            let model = StopPointModel(
+                                id: id,
+                                stopAreaId: stopAreaId,
+                                city: city,
+                                name: name,
+                                latitude: lat,
+                                longitude: lon,
+                                type: "Bus",
+                                lineName: lineName
+                            )
+                            currentBatch.append(model)
                             
-                            if let lat = Double(latStr), let lon = Double(lonStr) {
-                                let entity = StopPointEntity(context: backgroundContext)
-                                entity.id = id
-                                entity.stopAreaId = stopAreaId
-                                entity.name = name
-                                entity.latitude = lat
-                                entity.longitude = lon
-                                entity.type = "Bus"
-                                entity.lineName = lineName
-                                entity.city = city
-                                
-                                currentBatchCount += 1
-                                
-                                if currentBatchCount >= batchSize {
-                                    try backgroundContext.save()
-                                    backgroundContext.reset()
-                                    currentBatchCount = 0
+                            if currentBatch.count >= batchSize {
+                                autoreleasepool {
+                                    let batchContext = ModelContext(container)
+                                    batchContext.autosaveEnabled = false
+                                    for item in currentBatch {
+                                        batchContext.insert(item)
+                                    }
+                                    do {
+                                        try batchContext.save()
+                                    } catch {
+                                        print("❌ [Bus Import] Batch save error: \(error)")
+                                    }
                                 }
+                                currentBatch.removeAll(keepingCapacity: true)
                             }
                         }
                     }
-                    
-                    if backgroundContext.hasChanges {
-                        try backgroundContext.save()
+                }
+                
+                if !currentBatch.isEmpty {
+                    autoreleasepool {
+                        let batchContext = ModelContext(container)
+                        batchContext.autosaveEnabled = false
+                        for item in currentBatch {
+                            batchContext.insert(item)
+                        }
+                        do {
+                            try batchContext.save()
+                        } catch {
+                            print("❌ [Bus Import] Final batch save error: \(error)")
+                        }
                     }
                 }
                 
-                UserDefaults.standard.set(true, forKey: "didImportBusStops_v7")
+                UserDefaults.standard.set(true, forKey: "didImportBusStops_SwiftData_v1")
                 print("✅ [Bus Import] Importation de tous les arrêts de bus terminée avec succès !")
                 
             } catch {
@@ -684,48 +845,47 @@ class MapDataService: ObservableObject {
         }
     }
 
-    private func loadStopsCold() {
-        let context = PersistenceController.shared.container.viewContext
-        let fetchRequest: NSFetchRequest<StopPointEntity> = StopPointEntity.fetchRequest()
+    nonisolated private func loadStopsCold(container: ModelContainer) {
+        let context = ModelContext(container)
 
         // Import des bus en arrière-plan si pas encore fait
-        let didImportBus = UserDefaults.standard.bool(forKey: "didImportBusStops_v7")
+        let didImportBus = UserDefaults.standard.bool(forKey: "didImportBusStops_SwiftData_v1")
         if !didImportBus {
-            self.importBusStopsInBackground()
+            DispatchQueue.main.async {
+                self.importBusStopsInBackground()
+            }
         }
 
         // Migration de l'ancien CSV vers le nouveau JSON
-        let didMigrate = UserDefaults.standard.bool(forKey: "didMigrateToJSONStations_v5")
+        let didMigrate = UserDefaults.standard.bool(forKey: "didMigrateToJSONStations_SwiftData_v1")
         if !didMigrate {
             print("🔄 Première exécution avec JSON : purge de la base locale...")
             self.clearStopPoints(in: context)
-            UserDefaults.standard.set(true, forKey: "didMigrateToJSONStations_v5")
+            UserDefaults.standard.set(true, forKey: "didMigrateToJSONStations_SwiftData_v1")
         }
 
         do {
-            // Pour le comptage, exclure également les bus
-            fetchRequest.predicate = NSPredicate(format: "type != %@", "Bus")
-            let count = try context.count(for: fetchRequest)
+            let fetchDescriptor = FetchDescriptor<StopPointModel>(
+                predicate: #Predicate<StopPointModel> { $0.type != "Bus" }
+            )
+            let count = try context.fetchCount(fetchDescriptor)
             if count > 0 {
-                // Tenter le chargement CoreData, avec fallback JSON si les données sont corrompues
-                print("💾 Chargement des arrêts depuis CoreData (\(count) entités)...")
-                let entities = try context.fetch(fetchRequest)
-                // Vérifier que les données sont valides (id et name requis)
-                if let first = entities.first, first.id != nil, first.name != nil {
-                    self.processEntities(entities)
+                print("💾 Chargement des arrêts depuis SwiftData (\(count) entités)...")
+                let models = try context.fetch(fetchDescriptor)
+                if let first = models.first, !first.id.isEmpty, !first.name.isEmpty {
+                    self.processEntities(models)
                 } else {
-                    // Données corrompues/anciennes — recharger depuis JSON
-                    print("⚠️ Données CoreData invalides, rechargement JSON...")
+                    print("⚠️ Données SwiftData invalides, rechargement JSON...")
                     self.clearStopPoints(in: context)
-                    self.loadStopsFromJSON()
+                    self.loadStopsFromJSON(container: container)
                 }
             } else {
-                print("📂 CoreData vide. Chargement depuis JSON...")
-                self.loadStopsFromJSON()
+                print("📂 SwiftData vide. Chargement depuis JSON...")
+                self.loadStopsFromJSON(container: container)
             }
         } catch {
-            print("❌ Erreur CoreData: \(error)")
-            self.loadStopsFromJSON()
+            print("❌ Erreur SwiftData: \(error)")
+            self.loadStopsFromJSON(container: container)
         }
     }
 
@@ -744,10 +904,10 @@ class MapDataService: ObservableObject {
         let id_ref_zdc: Int?
     }
 
-    private func loadStopsFromJSON() {
+    nonisolated private func loadStopsFromJSON(container: ModelContainer) {
         guard let url = Bundle.main.url(forResource: "gares-et-stations-du-reseau-ferre-dile-de-france-donnee-generalisee", withExtension: "json") else {
             print("⚠️ Fichier gares-et-stations-du-reseau-ferre-dile-de-france-donnee-generalisee.json introuvable.")
-            self.loadStopsFromCSV()
+            self.loadStopsFromCSV(container: container)
             return
         }
 
@@ -756,7 +916,7 @@ class MapDataService: ObservableObject {
             let items = try JSONDecoder().decode([GeneralStationItem].self, from: data)
 
             var groupedStops: [String: [StopPoint]] = [:]
-            let context = PersistenceController.shared.container.viewContext
+            let context = ModelContext(container)
 
             print("📊 Parsing gares-et-stations-du-reseau-ferre-dile-de-france-donnee-generalisee.json: \(items.count) stations")
 
@@ -829,16 +989,18 @@ class MapDataService: ObservableObject {
                     let key = "\(name)_" // Pas de commune dans le JSON
                     groupedStops[key, default: []].append(stop)
                     
-                    // Sauvegarde dans CoreData
-                    let entity = StopPointEntity(context: context)
-                    entity.id = stopId
-                    entity.stopAreaId = stopAreaIdVal
-                    entity.name = name
-                    entity.latitude = lat
-                    entity.longitude = lon
-                    entity.type = type.rawValue
-                    entity.lineName = lineName
-                    entity.city = ""
+                    // Sauvegarde dans SwiftData
+                    let model = StopPointModel(
+                        id: stopId,
+                        stopAreaId: stopAreaIdVal,
+                        city: "",
+                        name: name,
+                        latitude: lat,
+                        longitude: lon,
+                        type: type.rawValue,
+                        lineName: lineName
+                    )
+                    context.insert(model)
                 }
             }
 
@@ -846,9 +1008,9 @@ class MapDataService: ObservableObject {
                 do {
                     try context.save()
                     let totalStops = groupedStops.values.reduce(0) { $0 + $1.count }
-                    print("✅ Sauvegarde CoreData JSON terminée (\(totalStops) arrêts).")
+                    print("✅ Sauvegarde SwiftData JSON terminée (\(totalStops) arrêts).")
                 } catch {
-                    print("❌ Erreur sauvegarde CoreData JSON: \(error)")
+                    print("❌ Erreur sauvegarde SwiftData JSON: \(error)")
                 }
             }
 
@@ -858,48 +1020,31 @@ class MapDataService: ObservableObject {
 
         } catch {
             print("❌ Erreur de lecture/décodage du JSON des stations: \(error)")
-            self.loadStopsFromCSV()
+            self.loadStopsFromCSV(container: container)
         }
     }
 
-    private func clearStopPoints(in context: NSManagedObjectContext) {
-        let fetchRequest: NSFetchRequest<NSFetchRequestResult> = StopPointEntity.fetchRequest()
-        let deleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
-        deleteRequest.resultType = .resultTypeObjectIDs
-
+    nonisolated private func clearStopPoints(in context: ModelContext) {
         do {
-            let result = try context.execute(deleteRequest) as? NSBatchDeleteResult
-            if let objectIDs = result?.result as? [NSManagedObjectID] {
-                NSManagedObjectContext.mergeChanges(
-                    fromRemoteContextSave: [NSDeletedObjectsKey: objectIDs], into: [context])
-            }
+            try context.delete(model: StopPointModel.self, where: #Predicate<StopPointModel> { $0.type != "Bus" })
             try context.save()
-            print("✅ StopPointEntity cleared.")
+            print("✅ StopPointModel cleared.")
         } catch {
-            print("❌ Error clearing StopPointEntity: \(error)")
+            print("❌ Error clearing StopPointModel: \(error)")
         }
     }
 
-    private func clearBusStopPoints(in context: NSManagedObjectContext) {
-        let fetchRequest: NSFetchRequest<NSFetchRequestResult> = StopPointEntity.fetchRequest()
-        fetchRequest.predicate = NSPredicate(format: "type == %@", "Bus")
-        let deleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
-        deleteRequest.resultType = .resultTypeObjectIDs
-
+    nonisolated private func clearBusStopPoints(in context: ModelContext) {
         do {
-            let result = try context.execute(deleteRequest) as? NSBatchDeleteResult
-            if let objectIDs = result?.result as? [NSManagedObjectID] {
-                NSManagedObjectContext.mergeChanges(
-                    fromRemoteContextSave: [NSDeletedObjectsKey: objectIDs], into: [context])
-            }
+            try context.delete(model: StopPointModel.self, where: #Predicate<StopPointModel> { $0.type == "Bus" })
             try context.save()
-            print("✅ Bus StopPointEntity cleared.")
+            print("✅ Bus StopPointModel cleared.")
         } catch {
-            print("❌ Error clearing Bus StopPointEntity: \(error)")
+            print("❌ Error clearing Bus StopPointModel: \(error)")
         }
     }
 
-    private func loadStopsFromCSV() {
+    nonisolated private func loadStopsFromCSV(container: ModelContainer) {
         guard let url = Bundle.main.url(forResource: "arrets-lignes", withExtension: "csv") else {
             print("⚠️ Fichier Arrêts CSV introuvable.")
             return
@@ -910,10 +1055,7 @@ class MapDataService: ObservableObject {
             let rows = data.components(separatedBy: .newlines)
 
             var groupedStops: [String: [StopPoint]] = [:]
-            let context = PersistenceController.shared.container.viewContext
-
-            // En-tête: id;...;stop_name;stop_lon;stop_lat;...;mode;...;nom_commune
-            // Indices: 3=name, 4=lon, 5=lat, 8=mode, 10=commune
+            let context = ModelContext(container)
 
             let totalRows = rows.count
             for (index, row) in rows.enumerated() where index > 0 {
@@ -939,7 +1081,6 @@ class MapDataService: ObservableObject {
 
                         let stopId = columns[2]
                         let rawLineName = columns[7]
-                        // Nettoyage préventif du nom de ligne (ex: "RER A" -> "A")
                         let lineName = rawLineName.uppercased()
                             .replacingOccurrences(of: "RER", with: "")
                             .replacingOccurrences(of: "TRANSILIEN", with: "")
@@ -947,7 +1088,6 @@ class MapDataService: ObservableObject {
 
                         let type = self.mapTransportType(modeStr, lineName: lineName)
 
-                        // Filtrage des lignes TER/Train non-Transilien
                         let allowedTransiliens = ["H", "J", "K", "L", "N", "P", "R", "U", "V"]
                         if type == .transilien || type == .train {
                             if !allowedTransiliens.contains(lineName) {
@@ -962,16 +1102,17 @@ class MapDataService: ObservableObject {
                         let key = "\(name)_\(city)"
                         groupedStops[key, default: []].append(stop)
 
-                        // Save to CoreData
-                        let entity = StopPointEntity(context: context)
-                        entity.id = stopId
-                        entity.stopAreaId = ""
-                        entity.name = name
-                        entity.latitude = lat
-                        entity.longitude = lon
-                        entity.type = type.rawValue
-                        entity.lineName = lineName
-                        entity.city = city
+                        let model = StopPointModel(
+                            id: stopId,
+                            stopAreaId: "",
+                            city: city,
+                            name: name,
+                            latitude: lat,
+                            longitude: lon,
+                            type: type.rawValue,
+                            lineName: lineName
+                        )
+                        context.insert(model)
                     }
                 }
             }
@@ -979,9 +1120,9 @@ class MapDataService: ObservableObject {
             if context.hasChanges {
                 do {
                     try context.save()
-                    print("✅ Sauvegarde CoreData terminée.")
+                    print("✅ Sauvegarde SwiftData terminée.")
                 } catch {
-                    print("❌ Erreur sauvegarde CoreData: \(error)")
+                    print("❌ Erreur sauvegarde SwiftData: \(error)")
                 }
             }
 
@@ -989,16 +1130,12 @@ class MapDataService: ObservableObject {
                 self.finalizeStations(groupedStops)
             }
 
-            // Une fois que tout est chargé, on lance le calcul des overlays en tache de fond
-            // On attend un peu que self.lines soit peuplé si ce n'est pas synchrone (mais ici c'est appelé après processEntities)
-            // En fait, loadTraces est appelé en parallèle. On va déclencher le calcul dans loadTraces.
-
         } catch {
             print("❌ Erreur chargement arrêts CSV: \(error)")
         }
     }
 
-    private func processEntities(_ entities: [StopPointEntity]) {
+    nonisolated private func processEntities(_ entities: [StopPointModel]) {
         var groupedStops: [String: [StopPoint]] = [:]
 
         let totalEntities = entities.count
@@ -1009,30 +1146,26 @@ class MapDataService: ObservableObject {
                     MapDataService.shared.loadingProgress = progress
                 }
             }
-            guard let id = entity.id,
-                let rawName = entity.name,
-                let typeStr = entity.type,
-                let rawLineName = entity.lineName,
-                let city = entity.city
-            else { continue }
+            let id = entity.id
+            let rawName = entity.name
+            let typeStr = entity.type
+            let rawLineName = entity.lineName
+            let city = entity.city
 
             let name = self.cleanStationName(rawName)
 
-            // Nettoyage du nom de ligne (comme dans le CSV) pour corriger les données existantes
             let lineName = rawLineName.uppercased()
                 .replacingOccurrences(of: "RER", with: "")
                 .replacingOccurrences(of: "TRANSILIEN", with: "")
                 .replacingOccurrences(of: "TRAIN", with: "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
-            // On ré-évalue le type pour être sûr (ex: si c'était mal classé en Transilien au lieu de RER)
-            // On passe le typeStr stocké (ex: "RER" ou "Rail") et le nom nettoyé
             let type = self.mapTransportType(typeStr, lineName: lineName)
 
             let coordinate = CLLocationCoordinate2D(
                 latitude: entity.latitude, longitude: entity.longitude)
             let stop = StopPoint(
-                id: id, stopAreaId: entity.stopAreaId ?? "", name: name, coordinate: coordinate,
+                id: id, stopAreaId: entity.stopAreaId, name: name, coordinate: coordinate,
                 type: type, lineName: lineName)
 
             let key = "\(name)_\(city)"
@@ -1103,10 +1236,60 @@ class MapDataService: ObservableObject {
             }
         }
 
-        let finalStations = self.mergeHubs(initialStations)
+        var finalStations = self.mergeHubs(initialStations)
+        
+        // Specific user request: add RER A, B, D to Les Halles
+        for i in 0..<finalStations.count {
+            if finalStations[i].name == "Les Halles" {
+                var updatedLines = finalStations[i].lines
+                let rerA = StationLine(name: "A", type: .rer)
+                let rerB = StationLine(name: "B", type: .rer)
+                let rerD = StationLine(name: "D", type: .rer)
+                if !updatedLines.contains(where: { $0.name == "A" && $0.type == .rer }) {
+                    updatedLines.append(rerA)
+                }
+                if !updatedLines.contains(where: { $0.name == "B" && $0.type == .rer }) {
+                    updatedLines.append(rerB)
+                }
+                if !updatedLines.contains(where: { $0.name == "D" && $0.type == .rer }) {
+                    updatedLines.append(rerD)
+                }
+                updatedLines.sort { a, b in
+                    let priorityA = a.type.priority
+                    let priorityB = b.type.priority
+                    if priorityA != priorityB {
+                        return priorityA > priorityB
+                    }
+                    return a.name.localizedStandardCompare(b.name) == .orderedAscending
+                }
+                
+                var updatedPlatforms = finalStations[i].platforms
+                if let chatelet = finalStations.first(where: { $0.name == "Châtelet" }) {
+                    let rerPlatforms = chatelet.platforms.filter { $0.type == .rer }
+                    for plat in rerPlatforms {
+                        if !updatedPlatforms.contains(where: { $0.id == plat.id }) {
+                            updatedPlatforms.append(plat)
+                        }
+                    }
+                }
+                
+                finalStations[i] = MapStation(
+                    id: finalStations[i].id,
+                    name: finalStations[i].name,
+                    coordinate: finalStations[i].coordinate,
+                    platforms: updatedPlatforms,
+                    isHub: finalStations[i].isHub,
+                    mainType: .rer,
+                    lines: updatedLines,
+                    city: finalStations[i].city
+                )
+            }
+        }
 
+        let finalInitialStations = initialStations
+        let finalFinalStations = finalStations
         Task { @MainActor in
-            self.updateStationsOnMainActor(initialStations: initialStations, finalStations: finalStations)
+            self.updateStationsOnMainActor(initialStations: finalInitialStations, finalStations: finalFinalStations)
         }
     }
 
@@ -1364,7 +1547,7 @@ class MapDataService: ObservableObject {
     }
 
     // Helper pour parser le CSV proprement
-    private func parseCSVLine(_ line: String) -> [String] {
+    nonisolated private func parseCSVLine(_ line: String) -> [String] {
         var result: [String] = []
         var current = ""
         var insideQuotes = false
@@ -1393,7 +1576,7 @@ class MapDataService: ObservableObject {
     }
 
     // Parseur GeoJSON (MultiLineString ou LineString)
-    private func parseGeoJSON(_ json: String) -> [MKPolyline] {
+    nonisolated private func parseGeoJSON(_ json: String) -> [MKPolyline] {
         // Le JSON semble valide d'après les tests, mais on garde un nettoyage minimal au cas où
         let cleanJson = json.replacingOccurrences(of: "\"\"", with: "\"")
 
@@ -1444,7 +1627,7 @@ class MapDataService: ObservableObject {
     }
 
     // Mapping des strings CSV vers l'enum TransportType existant
-    private func mapTransportType(_ typeString: String, lineName: String) -> TransportType {
+    nonisolated private func mapTransportType(_ typeString: String, lineName: String) -> TransportType {
         // Nettoyage du nom pour la détection
         let cleanName = lineName.uppercased()
             .replacingOccurrences(of: "RER", with: "")
@@ -1491,7 +1674,7 @@ class MapDataService: ObservableObject {
     }
 
     // Chargement des tracés supplémentaires (ex: Câble 1) depuis le CSV
-    private func loadAdditionalTracesCold() {
+    nonisolated private func loadAdditionalTracesCold() {
         guard
             let url = Bundle.main.url(
                 forResource: "traces-des-lignes-de-transport-en-commun-idfm-2", withExtension: "csv"
@@ -1557,75 +1740,73 @@ class MapDataService: ObservableObject {
     }
 
     func fetchBusStations(in minLat: Double, maxLat: Double, minLon: Double, maxLon: Double) async -> [MapStation] {
-        let context = PersistenceController.shared.container.viewContext
-        let fetchRequest: NSFetchRequest<StopPointEntity> = StopPointEntity.fetchRequest()
+        let context = SwiftDataStack.shared.mainContext
         
-        fetchRequest.predicate = NSPredicate(
-            format: "type == %@ AND latitude >= %f AND latitude <= %f AND longitude >= %f AND longitude <= %f",
-            "Bus", minLat, maxLat, minLon, maxLon
+        let fetchDescriptor = FetchDescriptor<StopPointModel>(
+            predicate: #Predicate<StopPointModel> {
+                $0.type == "Bus" &&
+                $0.latitude >= minLat && $0.latitude <= maxLat &&
+                $0.longitude >= minLon && $0.longitude <= maxLon
+            }
         )
         
-        return await context.perform {
-            do {
-                let entities = try context.fetch(fetchRequest)
-                var grouped: [String: [StopPoint]] = [:]
-                for entity in entities {
-                    guard let id = entity.id,
-                          let name = entity.name,
-                          let lineName = entity.lineName,
-                          let city = entity.city else { continue }
-                    
-                    let coordinate = CLLocationCoordinate2D(latitude: entity.latitude, longitude: entity.longitude)
-                    let stop = StopPoint(
-                        id: id,
-                        stopAreaId: entity.stopAreaId ?? "",
-                        name: name,
-                        coordinate: coordinate,
-                        type: .bus,
-                        lineName: lineName
+        do {
+            let entities = try context.fetch(fetchDescriptor)
+            var grouped: [String: [StopPoint]] = [:]
+            for entity in entities {
+                let id = entity.id
+                let name = entity.name
+                let lineName = entity.lineName
+                let city = entity.city
+                
+                let coordinate = CLLocationCoordinate2D(latitude: entity.latitude, longitude: entity.longitude)
+                let stop = StopPoint(
+                    id: id,
+                    stopAreaId: entity.stopAreaId,
+                    name: name,
+                    coordinate: coordinate,
+                    type: .bus,
+                    lineName: lineName
+                )
+                
+                let key = "\(name)_\(city)"
+                grouped[key, default: []].append(stop)
+            }
+            
+            var busStations: [MapStation] = []
+            for (_, stops) in grouped {
+                let clusters = MapDataService.clusterStops(stops, maxDistance: 20.0)
+                for (clusterIndex, clusterStops) in clusters.enumerated() {
+                    guard let first = clusterStops.first else { continue }
+                    let totalLat = clusterStops.reduce(0.0) { $0 + $1.coordinate.latitude }
+                    let totalLon = clusterStops.reduce(0.0) { $0 + $1.coordinate.longitude }
+                    let center = CLLocationCoordinate2D(
+                        latitude: totalLat / Double(clusterStops.count),
+                        longitude: totalLon / Double(clusterStops.count)
                     )
                     
-                    let key = "\(name)_\(city)"
-                    grouped[key, default: []].append(stop)
+                    let uniqueLines = Set(clusterStops.map { StationLine(name: $0.lineName, type: .bus) })
+                    let sortedLines = Array(uniqueLines).sorted { $0.name < $1.name }
+                    
+                    let baseId = first.stopAreaId.isEmpty ? first.id : first.stopAreaId
+                    let stationId = clusters.count > 1 ? "\(baseId)_\(clusterIndex)" : baseId
+                    
+                    let station = MapStation(
+                        id: stationId,
+                        name: first.name,
+                        coordinate: center,
+                        platforms: clusterStops,
+                        isHub: false,
+                        mainType: .bus,
+                        lines: sortedLines
+                    )
+                    busStations.append(station)
                 }
-                
-                var busStations: [MapStation] = []
-                for (_, stops) in grouped {
-                    // Séparer les arrêts éloignés de plus de 20m
-                    let clusters = MapDataService.clusterStops(stops, maxDistance: 20.0)
-                    for (clusterIndex, clusterStops) in clusters.enumerated() {
-                        guard let first = clusterStops.first else { continue }
-                        let totalLat = clusterStops.reduce(0.0) { $0 + $1.coordinate.latitude }
-                        let totalLon = clusterStops.reduce(0.0) { $0 + $1.coordinate.longitude }
-                        let center = CLLocationCoordinate2D(
-                            latitude: totalLat / Double(clusterStops.count),
-                            longitude: totalLon / Double(clusterStops.count)
-                        )
-                        
-                        let uniqueLines = Set(clusterStops.map { StationLine(name: $0.lineName, type: .bus) })
-                        let sortedLines = Array(uniqueLines).sorted { $0.name < $1.name }
-                        
-                        // Utiliser un ID unique par cluster
-                        let baseId = first.stopAreaId.isEmpty ? first.id : first.stopAreaId
-                        let stationId = clusters.count > 1 ? "\(baseId)_\(clusterIndex)" : baseId
-                        
-                        let station = MapStation(
-                            id: stationId,
-                            name: first.name,
-                            coordinate: center,
-                            platforms: clusterStops,
-                            isHub: false,
-                            mainType: .bus,
-                            lines: sortedLines
-                        )
-                        busStations.append(station)
-                    }
-                }
-                return busStations
-            } catch {
-                print("❌ [Bus Fetch] Error: \(error)")
-                return []
             }
+            return busStations
+        } catch {
+            print("❌ [Bus Fetch] Error: \(error)")
+            return []
         }
     }
 
@@ -2164,7 +2345,7 @@ class MapDataService: ObservableObject {
 
 // Extension Couleur Hexadécimale (si pas déjà définie ailleurs)
 extension Color {
-    init(hex: String) {
+    nonisolated init(hex: String) {
         let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
         var int: UInt64 = 0
         Scanner(string: hex).scanHexInt64(&int)
@@ -2193,11 +2374,23 @@ extension Color {
     }
 
     /// Convert Color to hex string for caching
-    func toHex() -> String? {
+    nonisolated func toHex() -> String? {
         guard let components = MapPlatformColor(self).cgColor.components else { return nil }
         let r = components.count > 0 ? components[0] : 0
         let g = components.count > 1 ? components[1] : 0
         let b = components.count > 2 ? components[2] : 0
         return String(format: "%02X%02X%02X", Int(r * 255), Int(g * 255), Int(b * 255))
     }
+}
+
+nonisolated struct ReferentielLignes: Decodable, Sendable {
+    nonisolated struct Feature: Decodable, Sendable {
+        nonisolated struct Properties: Decodable, Sendable {
+            let shortname_line: String?
+            let transportmode: String?
+            let colourweb_hexa: String?
+        }
+        let properties: Properties
+    }
+    let features: [Feature]
 }

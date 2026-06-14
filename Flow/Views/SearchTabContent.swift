@@ -1,4 +1,4 @@
-import CoreData
+import SwiftData
 import CoreLocation
 import SwiftUI
 import Combine
@@ -15,7 +15,7 @@ struct SearchTabContent: View {
     @ObservedObject var favoritesService = FavoritesService.shared
     @ObservedObject var mapData = MapDataService.shared
 
-    let context = PersistenceController.shared.container.viewContext
+    @Environment(\.modelContext) private var context
     @State private var cancellables = Set<AnyCancellable>()
     
     // Live Map and Focus Interaction State
@@ -162,13 +162,14 @@ struct SearchTabContent: View {
                 .font(.system(size: 16, weight: .medium))
             
             if !searchText.isEmpty {
-                Button(action: {
-                    searchText = ""
-                }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundColor(.secondary)
+                    .font(.system(size: 18))
+                    .padding(8)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        searchText = ""
+                    }
             }
         }
         .padding(.horizontal, 16)
@@ -198,8 +199,6 @@ struct SearchTabContent: View {
             return
         }
 
-        let request: NSFetchRequest<StopPointEntity> = StopPointEntity.fetchRequest()
-
         // Normalize query: replace apostrophes with spaces to handle "d'Issy" -> "d Issy"
         let normalizedQuery = query.replacingOccurrences(of: "'", with: " ")
             .replacingOccurrences(of: "’", with: " ")
@@ -212,23 +211,38 @@ struct SearchTabContent: View {
             return
         }
 
-        // Create AND predicate for all tokens
-        let predicates = tokens.map { token in
-            NSPredicate(format: "name CONTAINS[cd] %@", token)
+        // 1. Filtrer les stations ferroviaires (métro, RER, tram, transilien) chargées en mémoire
+        let matchingRailStations = MapDataService.shared.allStations.filter { station in
+            tokens.allSatisfy { token in
+                station.name.localizedCaseInsensitiveContains(token)
+            }
         }
-        request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
 
-        request.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
-        request.fetchLimit = 50
+        // 2. Chercher dans SwiftData uniquement pour les bus (optimisé par premier token)
+        let token1 = tokens[0]
+        var descriptor = FetchDescriptor<StopPointModel>(
+            predicate: #Predicate<StopPointModel> { stop in
+                stop.type == "Bus" && stop.name.contains(token1)
+            },
+            sortBy: [SortDescriptor(\.name, order: .forward)]
+        )
+        descriptor.fetchLimit = 150
 
         do {
-            let results = try context.fetch(request)
-            let grouped = Dictionary(grouping: results) { "\($0.name ?? "")_\($0.city ?? "")" }
+            let busResults = try context.fetch(descriptor)
+            
+            // Filtrer en mémoire pour s'assurer que tous les tokens correspondent
+            let filteredBus = busResults.filter { stop in
+                tokens.allSatisfy { token in
+                    stop.name.localizedCaseInsensitiveContains(token)
+                }
+            }
+            
+            let groupedBus = Dictionary(grouping: filteredBus) { "\($0.name)_\($0.city)" }
 
-            let stations: [MapStation] = grouped.compactMap { (_, stops) -> MapStation? in
-                guard let first = stops.first,
-                    let name = first.name
-                else { return nil }
+            let busStations: [MapStation] = groupedBus.compactMap { (_, stops) -> MapStation? in
+                guard let first = stops.first else { return nil }
+                let name = first.name
 
                 let totalLat = stops.reduce(0.0) { $0 + $1.latitude }
                 let totalLon = stops.reduce(0.0) { $0 + $1.longitude }
@@ -236,40 +250,25 @@ struct SearchTabContent: View {
                 let center = CLLocationCoordinate2D(
                     latitude: totalLat / count, longitude: totalLon / count)
 
-                let types = stops.compactMap { $0.type }
-                let mainTypeStr =
-                    types.first(where: { $0 == "RER" }) ?? types.first(where: { $0 == "Transilien" }
-                    ) ?? types.first(where: { $0 == "Metro" }) ?? types.first ?? "Bus"
-
-                let type = mapType(mainTypeStr)
-
-                let platforms = stops.compactMap { entity -> StopPoint? in
-                    guard let id = entity.id,
-                        let name = entity.name,
-                        let typeStr = entity.type,
-                        let lineName = entity.lineName
-                    else { return nil }
-
+                let platforms = stops.map { entity -> StopPoint in
                     let coordinate = CLLocationCoordinate2D(
                         latitude: entity.latitude, longitude: entity.longitude)
-                    let type = mapType(typeStr)
+                    let type = mapType(entity.type)
 
                     return StopPoint(
-                        id: id,
-                        stopAreaId: entity.stopAreaId ?? "",
+                        id: entity.id,
+                        stopAreaId: entity.stopAreaId,
                         name: name,
                         coordinate: coordinate,
                         type: type,
-                        lineName: lineName
+                        lineName: entity.lineName
                     )
                 }
 
-                // MapStation.id is String, not UUID
-                let stationId: String = first.id ?? UUID().uuidString
+                let stationId: String = first.stopAreaId.isEmpty ? first.id : first.stopAreaId
 
-                let uniqueLines = Set(stops.compactMap { entity -> StationLine? in
-                    guard let lineName = entity.lineName, let typeStr = entity.type else { return nil }
-                    return StationLine(name: lineName, type: mapType(typeStr))
+                let uniqueLines = Set(stops.map { entity in
+                    StationLine(name: entity.lineName, type: mapType(entity.type))
                 })
                 let sortedLines = Array(uniqueLines).sorted { $0.name < $1.name }
 
@@ -279,16 +278,21 @@ struct SearchTabContent: View {
                     coordinate: center,
                     platforms: platforms,
                     isHub: false,
-                    mainType: type,
+                    mainType: .bus,
                     lines: sortedLines,
-                    city: first.city
+                    city: first.city.isEmpty ? "Paris" : first.city
                 )
             }
 
-            searchResults = stations.sorted { $0.name < $1.name }
+            // 3. Combiner et trier
+            var allResults = matchingRailStations + busStations
+            allResults.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            searchResults = allResults
 
         } catch {
             print("❌ Search error: \(error)")
+            // Fallback sur les stations ferrées trouvées en cas d'erreur CoreData
+            searchResults = matchingRailStations
         }
     }
 
@@ -366,7 +370,7 @@ struct StationRow: View {
                     
                     HStack(spacing: 4) {
                         let lines = displayedStationLines
-                        ForEach(lines.prefix(5), id: \.id) { line in
+                        ForEach(lines.prefix(8), id: \.id) { line in
                             LineIcon(type: line.type, lineId: line.name, size: 16)
                         }
                         

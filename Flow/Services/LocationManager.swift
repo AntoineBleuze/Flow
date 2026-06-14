@@ -11,7 +11,7 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     override init() {
         super.init()
         locationManager.delegate = self
-        locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        locationManager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
 
         // Prevent background updates in Previews to avoid BSActionErrorDomain crash
         if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] != "1" {
@@ -20,6 +20,11 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
 
         locationManager.pausesLocationUpdatesAutomatically = false
         self.authorizationStatus = locationManager.authorizationStatus
+    }
+
+    func setAccuracy(_ accuracy: CLLocationAccuracy) {
+        print("📍 Setting location accuracy to \(accuracy == kCLLocationAccuracyBest ? "Best" : "NearestTenMeters")")
+        locationManager.desiredAccuracy = accuracy
     }
 
     func setBackgroundUpdates(enabled: Bool) {

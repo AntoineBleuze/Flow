@@ -2,6 +2,7 @@ import Combine
 import CoreLocation
 import Foundation
 import SwiftUI
+import SwiftData
 
 class NearbyStationsViewModel: ObservableObject {
     @Published var nearbyStations: [MapStation] = []
@@ -60,31 +61,115 @@ class NearbyStationsViewModel: ObservableObject {
     private func refreshStations(userLocation: CLLocationCoordinate2D?) {
         guard let location = userLocation else { return }
 
-        let all = mapDataService.getAllStationsSync()
-        guard !all.isEmpty else { return }
-
+        let allRailStations = mapDataService.getAllStationsSync()
+        let radius = self.selectedRadius
         let userLoc = CLLocation(latitude: location.latitude, longitude: location.longitude)
 
-        // Calculer les distances et trier
-        // On le fait en background pour ne pas bloquer l'UI si beaucoup de stations
-        let radius = self.selectedRadius
+        self.isLoading = true
+        let container = SwiftDataStack.shared.container
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let sorted = all.compactMap { station -> (MapStation, Double)? in
-                let stationLoc = CLLocation(
-                    latitude: station.coordinate.latitude, longitude: station.coordinate.longitude)
+            // 1. Filter rail stations in memory
+            let filteredStations = allRailStations.compactMap { station -> (MapStation, Double)? in
+                let stationLoc = CLLocation(latitude: station.coordinate.latitude, longitude: station.coordinate.longitude)
                 let distance = userLoc.distance(from: stationLoc)
-                // Filtrer par le rayon sélectionné
                 if distance <= radius {
                     return (station, distance)
                 }
                 return nil
             }
-            .sorted { $0.1 < $1.1 }
-            .map { $0.0 }
+
+            // 2. Fetch nearby bus stops from SwiftData using a bounding box
+            let context = ModelContext(container)
+            let deltaLat = radius / 111111.0
+            let latRad = location.latitude * .pi / 180.0
+            let deltaLon = radius / (111111.0 * cos(latRad))
+
+            let minLat = location.latitude - deltaLat
+            let maxLat = location.latitude + deltaLat
+            let minLon = location.longitude - deltaLon
+            let maxLon = location.longitude + deltaLon
+
+            let descriptor = FetchDescriptor<StopPointModel>(
+                predicate: #Predicate<StopPointModel> { stop in
+                    stop.type == "Bus" &&
+                    stop.latitude >= minLat && stop.latitude <= maxLat &&
+                    stop.longitude >= minLon && stop.longitude <= maxLon
+                }
+            )
+
+            var busStations: [(MapStation, Double)] = []
+
+            do {
+                let busStops = try context.fetch(descriptor)
+                // Group bus stops by name and city to form "Bus stations"
+                let grouped = Dictionary(grouping: busStops) { "\($0.name)_\($0.city)" }
+
+                for (_, stops) in grouped {
+                    guard let first = stops.first else { continue }
+                    let name = first.name
+
+                    let totalLat = stops.reduce(0.0) { $0 + $1.latitude }
+                    let totalLon = stops.reduce(0.0) { $0 + $1.longitude }
+                    let count = Double(stops.count)
+                    let center = CLLocationCoordinate2D(latitude: totalLat / count, longitude: totalLon / count)
+
+                    let stationLoc = CLLocation(latitude: center.latitude, longitude: center.longitude)
+                    let distance = userLoc.distance(from: stationLoc)
+
+                    if distance <= radius {
+                        let platforms = stops.compactMap { entity -> StopPoint? in
+                            let coordinate = CLLocationCoordinate2D(latitude: entity.latitude, longitude: entity.longitude)
+
+                            // Map string to enum
+                            let type: TransportType = {
+                                let typeLower = entity.type.lowercased()
+                                if typeLower.contains("metro") { return .metro }
+                                if typeLower.contains("rer") { return .rer }
+                                if typeLower.contains("tram") { return .tram }
+                                if typeLower.contains("transilien") || typeLower.contains("train") { return .transilien }
+                                return .bus
+                            }()
+
+                            return StopPoint(
+                                id: entity.id,
+                                stopAreaId: entity.stopAreaId,
+                                name: name,
+                                coordinate: coordinate,
+                                type: type,
+                                lineName: entity.lineName
+                            )
+                        }
+
+                        // Extract lines
+                        let lines = Array(Set(platforms.map { $0.lineName })).map { lineName in
+                            StationLine(name: lineName, type: .bus)
+                        }
+
+                        let busStation = MapStation(
+                            id: first.stopAreaId.isEmpty ? first.id : first.stopAreaId,
+                            name: name,
+                            coordinate: center,
+                            platforms: platforms,
+                            isHub: false,
+                            mainType: .bus,
+                            lines: lines,
+                            city: first.city.isEmpty ? "Paris" : first.city
+                        )
+
+                        busStations.append((busStation, distance))
+                    }
+                }
+            } catch {
+                print("⚠️ CoreData fetch bus stations error: \(error)")
+            }
+
+            // 3. Merge and sort all by distance
+            let merged = (filteredStations + busStations).sorted { $0.1 < $1.1 }.map { $0.0 }
 
             DispatchQueue.main.async {
-                self.nearbyStations = sorted
+                self.nearbyStations = merged
+                self.isLoading = false
             }
         }
     }

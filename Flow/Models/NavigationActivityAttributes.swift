@@ -2,7 +2,7 @@
 import ActivityKit
 import Foundation
 
-struct NavigationActivityAttributes: ActivityAttributes {
+nonisolated struct NavigationActivityAttributes: ActivityAttributes {
     public struct ContentState: Codable, Hashable {
         // Dynamic state
         var currentInstruction: String  // "Walk to Mairie d'Issy"

@@ -12,6 +12,8 @@ services:
       - IDFM_API_KEY=${IDFM_API_KEY}
     env_file:
       - .env
+    volumes:
+      - ./cache:/app/cache
 
   caddy:
     image: caddy:2-alpine

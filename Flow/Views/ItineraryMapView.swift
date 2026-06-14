@@ -112,6 +112,24 @@ struct ItineraryMapViewRepresentable: UIViewRepresentable {
                     )
                     mapView.addAnnotation(fromStation)
                     allCoordinates.append(fromCoord)
+                    
+                    // Add Entry Exits
+                    if let stationId = fromPlace.id {
+                        let exits = StationExitsService.shared.exitsForStation(id: stationId)
+                        for exit in exits where exit.is_entry {
+                            if let coords = exit.coordinates {
+                                let exitCoord = CLLocationCoordinate2D(latitude: coords.lat, longitude: coords.lon)
+                                let exitAnnotation = ExitMarkerAnnotation(
+                                    coordinate: exitCoord,
+                                    title: "Accès \(exit.exit_number ?? 0): \(exit.exit_name ?? "Entrée")",
+                                    subtitle: "Entrée pour la station \(fromPlace.name ?? "")",
+                                    isEntry: true
+                                )
+                                mapView.addAnnotation(exitAnnotation)
+                                allCoordinates.append(exitCoord)
+                            }
+                        }
+                    }
                 }
                 
                 // Add end marker
@@ -123,6 +141,24 @@ struct ItineraryMapViewRepresentable: UIViewRepresentable {
                     )
                     mapView.addAnnotation(toStation)
                     allCoordinates.append(toCoord)
+                    
+                    // Add Exit Exits
+                    if let stationId = toPlace.id {
+                        let exits = StationExitsService.shared.exitsForStation(id: stationId)
+                        for exit in exits where exit.is_exit {
+                            if let coords = exit.coordinates {
+                                let exitCoord = CLLocationCoordinate2D(latitude: coords.lat, longitude: coords.lon)
+                                let exitAnnotation = ExitMarkerAnnotation(
+                                    coordinate: exitCoord,
+                                    title: "Sortie \(exit.exit_number ?? 0): \(exit.exit_name ?? "Sortie")",
+                                    subtitle: "Sortie de la station \(toPlace.name ?? "")",
+                                    isEntry: false
+                                )
+                                mapView.addAnnotation(exitAnnotation)
+                                allCoordinates.append(exitCoord)
+                            }
+                        }
+                    }
                 }
             } else if section.type == "transfer" {
                 if let transferPlace = section.from, let coord = transferPlace.coordinate {
@@ -172,6 +208,30 @@ struct ItineraryMapViewRepresentable: UIViewRepresentable {
         }
         
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+            if let exitAnno = annotation as? ExitMarkerAnnotation {
+                let reuseId = "exitMarker"
+                let markerView = mapView.dequeueReusableAnnotationView(withIdentifier: reuseId) as? MKMarkerAnnotationView
+                    ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: reuseId)
+                markerView.canShowCallout = true
+                markerView.displayPriority = .required
+                if exitAnno.isEntry {
+                    markerView.markerTintColor = .systemGreen
+                    #if canImport(UIKit)
+                    markerView.glyphImage = UIImage(systemName: "arrow.down.circle.fill")
+                    #else
+                    markerView.glyphImage = NSImage(systemSymbolName: "arrow.down.circle.fill", accessibilityDescription: nil)
+                    #endif
+                } else {
+                    markerView.markerTintColor = .systemRed
+                    #if canImport(UIKit)
+                    markerView.glyphImage = UIImage(systemName: "arrow.up.circle.fill")
+                    #else
+                    markerView.glyphImage = NSImage(systemSymbolName: "arrow.up.circle.fill", accessibilityDescription: nil)
+                    #endif
+                }
+                return markerView
+            }
+            
             guard let markerAnnotation = annotation as? StationMarkerAnnotation else { return nil }
             
             let identifier = "StationMarker"
@@ -262,18 +322,6 @@ extension MKMapRect {
             rect = rect.union(MKMapRect(x: point.x, y: point.y, width: 0, height: 0))
         }
         self = rect
-    }
-}
-
-extension ItineraryPlace {
-    var coordinate: CLLocationCoordinate2D? {
-        guard let coord = self.coord,
-              let latStr = coord.lat,
-              let lonStr = coord.lon,
-              let lat = Double(latStr),
-              let lon = Double(lonStr) else { return nil }
-        guard lat != 0.0 && lon != 0.0 else { return nil }
-        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
     }
 }
 

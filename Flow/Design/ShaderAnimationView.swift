@@ -12,25 +12,6 @@ struct ShaderAnimationView: View {
     
     @State private var isLowPowerMode: Bool
     
-    // Random parameters to ensure the mesh points move differently every time the screen loads
-    struct AnimationConfig {
-        let dx1: Float = Float.random(in: 0.0...3.0)
-        let dy1: Float = Float.random(in: 0.0...3.0)
-        let fx1: Float = Float.random(in: 0.7...1.3)
-        let fy1: Float = Float.random(in: 0.7...1.3)
-        
-        let dx2: Float = Float.random(in: 0.0...3.0)
-        let dy2: Float = Float.random(in: 0.0...3.0)
-        let fx2: Float = Float.random(in: 0.7...1.3)
-        let fy2: Float = Float.random(in: 0.7...1.3)
-        
-        let dx3: Float = Float.random(in: 0.0...3.0)
-        let dy3: Float = Float.random(in: 0.0...3.0)
-        let fx3: Float = Float.random(in: 0.7...1.3)
-        let fy3: Float = Float.random(in: 0.7...1.3)
-    }
-    @State private var config = AnimationConfig()
-    
     init(isLoading: Bool, station: MapStation? = nil, customColors: [Color]? = nil, showMeshGradient: Bool = true, forceLowPowerMode: Bool? = nil) {
         self.isLoading = isLoading
         self.station = station
@@ -132,15 +113,6 @@ struct ShaderAnimationView: View {
         withAnimation(.easeOut(duration: 1.5)) {
             waveProgress = 1.0
         }
-    }
-    
-    // Oscillation helpers
-    private func sinOSC(time: Float, d: Float, f: Float) -> Float {
-        return sin(time * f + d) * 0.15
-    }
-
-    private func cosOSC(time: Float, d: Float, f: Float) -> Float {
-        return cos(time * f + d) * 0.15
     }
     
     // Resolve and compute ambient shades of the station's line colors

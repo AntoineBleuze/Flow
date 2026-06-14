@@ -7,57 +7,81 @@ struct TimelineItem: Identifiable {
     let isGap: Bool
 }
 
-struct TimelineCell: View {
+struct HorizontalTimelineCell: View {
     let item: TimelineItem
     let isAffected: Bool
     let lineColor: Color
     let severityColor: Color
     let severityIcon: String
-    let hasLineAbove: Bool
-    let hasLineBelow: Bool
-    let isLineAboveAffected: Bool
-    let isLineBelowAffected: Bool
+    let hasLineBefore: Bool
+    let hasLineAfter: Bool
+    let isLineBeforeAffected: Bool
+    let isLineAfterAffected: Bool
     let normalOpacity: Double
     
     var body: some View {
-        HStack(alignment: .center, spacing: 0) {
-            // Left timeline graphic
+        VStack(spacing: 0) {
+            // Station name at top, rotated at -45°
+            if !item.isGap {
+                HStack(spacing: 2) {
+                    Text(item.name)
+                        .font(.system(size: 10, weight: isAffected ? .bold : .medium))
+                        .foregroundColor(isAffected ? severityColor : .primary)
+                        .lineLimit(1)
+                        .fixedSize()
+                    if isAffected {
+                        Image(systemName: severityIcon)
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundColor(severityColor)
+                    }
+                }
+                .rotationEffect(.degrees(-45), anchor: .bottomLeading)
+                .frame(width: 16, height: 70, alignment: .bottomLeading)
+                .padding(.bottom, 4)
+            } else {
+                Text("...")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.secondary)
+                    .frame(width: 16, height: 70, alignment: .bottom)
+                    .padding(.bottom, 4)
+            }
+            
+            // Horizontal timeline graphic (dot + line segments)
             ZStack {
-                // Vertical line segments
-                VStack(spacing: 0) {
-                    if hasLineAbove {
+                // Horizontal line segments
+                HStack(spacing: 0) {
+                    if hasLineBefore {
                         Rectangle()
-                            .fill(isLineAboveAffected ? severityColor : lineColor)
-                            .opacity(isLineAboveAffected ? 1.0 : normalOpacity)
-                            .frame(width: 4, height: 18)
+                            .fill(isLineBeforeAffected ? severityColor : lineColor)
+                            .opacity(isLineBeforeAffected ? 1.0 : normalOpacity)
+                            .frame(width: 14, height: 4)
                     } else {
-                        Spacer().frame(height: 18)
+                        Spacer().frame(width: 14)
                     }
                     
-                    if hasLineBelow {
+                    if hasLineAfter {
                         Rectangle()
-                            .fill(isLineBelowAffected ? severityColor : lineColor)
-                            .opacity(isLineBelowAffected ? 1.0 : normalOpacity)
-                            .frame(width: 4, height: 18)
+                            .fill(isLineAfterAffected ? severityColor : lineColor)
+                            .opacity(isLineAfterAffected ? 1.0 : normalOpacity)
+                            .frame(width: 14, height: 4)
                     } else {
-                        Spacer().frame(height: 18)
+                        Spacer().frame(width: 14)
                     }
                 }
                 
-                // Dot or Gap dots
+                // Dot
                 if item.isGap {
-                    VStack(spacing: 3) {
-                        ForEach(0..<3) { _ in
+                    HStack(spacing: 2) {
+                        ForEach(0..<3, id: \.self) { _ in
                             Circle()
                                 .fill(lineColor.opacity(normalOpacity))
                                 .frame(width: 3, height: 3)
                         }
                     }
-                    .background(Circle().fill(.white).frame(width: 12, height: 12))
                 } else {
                     ZStack {
                         Circle()
-                            .fill(.white)
+                            .fill(Color(UIColor.systemBackground))
                             .frame(width: 12, height: 12)
                         if isAffected {
                             Circle()
@@ -72,32 +96,9 @@ struct TimelineCell: View {
                     }
                 }
             }
-            .frame(width: 30)
-            
-            // Station details / gap text
-            HStack(spacing: 6) {
-                if item.isGap {
-                    Text("...")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(.secondary)
-                } else {
-                    Text(item.name)
-                        .font(.system(size: 12, weight: isAffected ? .bold : .medium))
-                        .foregroundColor(isAffected ? severityColor : .primary)
-                        .lineLimit(1)
-                    
-                    if isAffected {
-                        Image(systemName: severityIcon)
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(severityColor)
-                    }
-                }
-            }
-            .padding(.leading, 8)
-            
-            Spacer()
+            .frame(height: 16)
         }
-        .frame(height: 36)
+        .frame(width: 28)
     }
 }
 
@@ -128,36 +129,36 @@ struct MiniLinePlanView: View {
                             .font(.caption).bold()
                             .foregroundColor(.secondary)
                         
-                        ScrollView(.vertical, showsIndicators: true) {
-                            VStack(spacing: 0) {
+                        ScrollView(.horizontal, showsIndicators: true) {
+                            HStack(alignment: .bottom, spacing: 0) {
                                 ForEach(Array(timelineItems.enumerated()), id: \.element.id) { index, item in
                                     let isFirst = index == 0
                                     let isLast = index == timelineItems.count - 1
                                     
-                                    let hasLineAbove = !isFirst
-                                    let hasLineBelow = !isLast
+                                    let hasLineBefore = !isFirst
+                                    let hasLineAfter = !isLast
                                     
-                                    let isLineAboveAffected = hasLineAbove && item.isAffected && timelineItems[index - 1].isAffected
-                                    let isLineBelowAffected = hasLineBelow && item.isAffected && timelineItems[index + 1].isAffected
+                                    let isLineBeforeAffected = hasLineBefore && item.isAffected && timelineItems[index - 1].isAffected
+                                    let isLineAfterAffected = hasLineAfter && item.isAffected && timelineItems[index + 1].isAffected
                                     
-                                    TimelineCell(
+                                    HorizontalTimelineCell(
                                         item: item,
                                         isAffected: item.isAffected,
                                         lineColor: resolveLineColor(line.lineId, type: line.type),
                                         severityColor: info.severity.color,
                                         severityIcon: info.severity.icon,
-                                        hasLineAbove: hasLineAbove,
-                                        hasLineBelow: hasLineBelow,
-                                        isLineAboveAffected: isLineAboveAffected,
-                                        isLineBelowAffected: isLineBelowAffected,
+                                        hasLineBefore: hasLineBefore,
+                                        hasLineAfter: hasLineAfter,
+                                        isLineBeforeAffected: isLineBeforeAffected,
+                                        isLineAfterAffected: isLineAfterAffected,
                                         normalOpacity: 0.35
                                     )
                                 }
                             }
-                            .padding(.vertical, 10)
+                            .padding(.top, 10)
                             .padding(.horizontal, 12)
+                            .padding(.bottom, 6)
                         }
-                        .frame(maxHeight: 250)
                         .background(Color.primary.opacity(0.04))
                         .cornerRadius(10)
                         .overlay(
@@ -208,75 +209,18 @@ struct MiniLinePlanView: View {
     }
     
     private func buildTimeline(data: LocalLineData) -> [TimelineItem] {
-        var items: [TimelineItem] = []
-        
-        if let impactedSection = info.impactedSection {
-            let fromAndTo = parseSection(impactedSection)
-            if let fromName = fromAndTo.from, let toName = fromAndTo.to {
-                let graph = LineGraph(lineData: data)
-                if let path = graph.findOrderedPath(from: fromName, to: toName) {
-                    if let first = path.first {
-                        let neighbors = graph.adjList[first] ?? []
-                        if let contextBefore = neighbors.first(where: { !path.contains($0) }) {
-                            items.append(TimelineItem(id: "context-start-\(contextBefore)", name: contextBefore, isAffected: false, isGap: false))
-                        }
-                    }
-                    
-                    for stationName in path {
-                        items.append(TimelineItem(id: "station-\(stationName)", name: stationName, isAffected: true, isGap: false))
-                    }
-                    
-                    if let last = path.last {
-                        let neighbors = graph.adjList[last] ?? []
-                        if let contextAfter = neighbors.first(where: { !path.contains($0) }) {
-                            items.append(TimelineItem(id: "context-end-\(contextAfter)", name: contextAfter, isAffected: false, isGap: false))
-                        }
-                    }
-                    
-                    return items
-                }
-            }
-        }
-        
+        // Always show ALL stations of the line, marking affected ones
         let allStations = data.allStations
         if allStations.isEmpty { return [] }
         
-        var indicesToInclude = Set<Int>()
-        for i in 0..<allStations.count {
-            let stationName = allStations[i].nom
-            let isAffected = affectedStations.contains(stationName)
-            if isAffected {
-                indicesToInclude.insert(i)
-                if i > 0 { indicesToInclude.insert(i - 1) }
-                if i < allStations.count - 1 { indicesToInclude.insert(i + 1) }
-            }
-        }
+        var items: [TimelineItem] = []
+        var seen = Set<String>()
         
-        let sortedIndices = indicesToInclude.sorted()
-        if sortedIndices.isEmpty {
-            let count = min(allStations.count, 5)
-            for i in 0..<count {
-                items.append(TimelineItem(id: "station-\(allStations[i].nom)", name: allStations[i].nom, isAffected: false, isGap: false))
-            }
-            if allStations.count > 5 {
-                items.append(TimelineItem(id: "gap-end", name: "...", isAffected: false, isGap: true))
-            }
-            return items
-        }
-        
-        for idx in 0..<sortedIndices.count {
-            let currentIndex = sortedIndices[idx]
-            
-            if idx > 0 {
-                let prevIndex = sortedIndices[idx - 1]
-                if currentIndex - prevIndex > 1 {
-                    items.append(TimelineItem(id: "gap-\(prevIndex)-\(currentIndex)", name: "...", isAffected: false, isGap: true))
-                }
-            }
-            
-            let stationName = allStations[currentIndex].nom
-            let isAffected = affectedStations.contains(stationName)
-            items.append(TimelineItem(id: "station-\(stationName)", name: stationName, isAffected: isAffected, isGap: false))
+        for station in allStations {
+            guard !seen.contains(station.nom) else { continue }
+            seen.insert(station.nom)
+            let isAffected = affectedStations.contains(station.nom)
+            items.append(TimelineItem(id: "station-\(station.nom)", name: station.nom, isAffected: isAffected, isGap: false))
         }
         
         return items

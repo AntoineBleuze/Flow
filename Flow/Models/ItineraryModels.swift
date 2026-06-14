@@ -105,3 +105,35 @@ extension Journey {
         sections?.last?.to?.coordinate
     }
 }
+
+extension DisplayInformation {
+    var transportType: TransportType {
+        let mode = (commercial_mode ?? physical_mode ?? "").lowercased()
+        if mode.contains("metro") || mode.contains("subway") {
+            return .metro
+        } else if mode.contains("rer") {
+            return .rer
+        } else if mode.contains("tram") {
+            return .tram
+        } else if mode.contains("transilien") || mode.contains("train") {
+            return .transilien
+        } else if mode.contains("bus") || mode.contains("noctilien") {
+            return .bus
+        } else if mode.contains("cable") {
+            return .cable
+        }
+        return .bus // Fallback
+    }
+}
+
+extension ItineraryPlace {
+    var coordinate: CLLocationCoordinate2D? {
+        guard let coord = self.coord,
+              let latStr = coord.lat,
+              let lonStr = coord.lon,
+              let lat = Double(latStr),
+              let lon = Double(lonStr) else { return nil }
+        guard lat != 0.0 && lon != 0.0 else { return nil }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+}

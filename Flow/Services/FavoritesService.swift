@@ -22,6 +22,7 @@ class FavoritesService: ObservableObject {
 
     private init() {
         loadFavorites()
+        loadFavoriteLines()
     }
 
     func loadFavorites() {
@@ -118,6 +119,107 @@ class FavoritesService: ObservableObject {
 
     private func saveFavorites() {
         UserDefaults.standard.set(Array(favoriteLineKeys), forKey: favoritesKey)
+    }
+
+    // Transit lines favorites
+    @Published var favoriteLinesList: Set<String> = []
+    private let favoriteLinesKey = "favorite_transit_lines"
+
+    func toggleFavoriteLine(
+        lineId: String,
+        type: TransportType,
+        stationId: String? = nil,
+        stationName: String? = nil,
+        color: String? = nil,
+        textColor: String? = nil
+    ) {
+        let key: String
+        if let stationId = stationId, let stationName = stationName {
+            let col = color ?? ""
+            let textCol = textColor ?? ""
+            key = "\(lineId)|\(type.rawValue)|\(stationId)|\(stationName)|\(col)|\(textCol)"
+        } else {
+            key = "\(lineId)|\(type.rawValue)"
+        }
+        
+        if let stationId = stationId {
+            let prefix = "\(lineId)|\(type.rawValue)|\(stationId)|"
+            if let existingKey = favoriteLinesList.first(where: { $0.hasPrefix(prefix) }) {
+                favoriteLinesList.remove(existingKey)
+            } else {
+                favoriteLinesList.insert(key)
+            }
+        } else {
+            let exactKey = "\(lineId)|\(type.rawValue)"
+            if favoriteLinesList.contains(exactKey) {
+                favoriteLinesList.remove(exactKey)
+            } else {
+                favoriteLinesList.insert(exactKey)
+            }
+        }
+        saveFavoriteLines()
+    }
+
+    func isFavoriteLine(lineId: String, type: TransportType, stationId: String? = nil) -> Bool {
+        if let stationId = stationId {
+            let prefix = "\(lineId)|\(type.rawValue)|\(stationId)|"
+            return favoriteLinesList.contains(where: { $0.hasPrefix(prefix) })
+        } else {
+            let key = "\(lineId)|\(type.rawValue)"
+            return favoriteLinesList.contains(key)
+        }
+    }
+
+    func loadFavoriteLines() {
+        if let saved = UserDefaults.standard.array(forKey: favoriteLinesKey) as? [String] {
+            favoriteLinesList = Set(saved)
+        } else {
+            favoriteLinesList = []
+        }
+    }
+
+    private func saveFavoriteLines() {
+        UserDefaults.standard.set(Array(favoriteLinesList), forKey: favoriteLinesKey)
+    }
+}
+
+struct FavoriteLineEntry: Identifiable, Hashable {
+    var id: String { key }
+    let key: String
+    let lineId: String
+    let type: TransportType
+    let stationId: String?
+    let stationName: String?
+    let color: String?
+    let textColor: String?
+
+    init?(key: String) {
+        let components = key.components(separatedBy: "|")
+        guard components.count >= 2 else { return nil }
+        self.key = key
+        self.lineId = components[0]
+        guard let type = TransportType(rawValue: components[1]) else { return nil }
+        self.type = type
+        
+        if components.count >= 4 {
+            self.stationId = components[2]
+            self.stationName = components[3]
+        } else {
+            self.stationId = nil
+            self.stationName = nil
+        }
+        
+        if components.count >= 5 {
+            self.color = components[4].isEmpty ? nil : components[4]
+        } else {
+            self.color = nil
+        }
+        
+        if components.count >= 6 {
+            self.textColor = components[5].isEmpty ? nil : components[5]
+        } else {
+            self.textColor = nil
+        }
     }
 }
 

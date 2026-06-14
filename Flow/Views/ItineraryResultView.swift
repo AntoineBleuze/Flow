@@ -24,11 +24,9 @@ struct ItineraryResultView: View {
     @State private var isArrivalTime = false  // false = départ, true = arrivée
     @State private var showDateTimePicker = false
 
-    @StateObject private var itineraryService = IDFMItineraryService.shared
-    @State private var journeys: [Journey] = []
-    @State private var isLoading = false
-    @State private var errorMessage: String?
+    @StateObject private var viewModel = ItineraryViewModel()
     @Environment(\.colorScheme) var colorScheme
+    @EnvironmentObject var coordinator: NavigationCoordinator
 
     // Computed: max date = today + 7 days
     private var maxDate: Date {
@@ -38,8 +36,7 @@ struct ItineraryResultView: View {
     // Filter selection
     @State private var selectedFilter: ItineraryFilter = .fastest
 
-    // Favorites
-    @ObservedObject private var favoritesService = FavoritesService.shared
+
 
     var body: some View {
         VStack(spacing: 0) {
@@ -48,7 +45,7 @@ struct ItineraryResultView: View {
         }
         .background {
             ZStack {
-                ShaderAnimationView(isLoading: isLoading, station: destination ?? startStation)
+                ShaderAnimationView(isLoading: viewModel.isLoading, station: destination ?? startStation)
                 (colorScheme == .dark ? Color.black.opacity(0.05) : Color.white.opacity(0.05))
                     .background(.ultraThinMaterial)
             }
@@ -75,10 +72,6 @@ struct ItineraryResultView: View {
     private var headerSection: some View {
         VStack(spacing: 12) {
             stationSelectionRow
-
-            if !favoritesService.favoriteStations.isEmpty {
-                favoritesBar
-            }
 
             filterPicker
             dateTimeRow
@@ -149,24 +142,6 @@ struct ItineraryResultView: View {
         }
     }
 
-    @ViewBuilder
-    private var favoritesBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(favoritesService.favoriteStations.prefix(5)) { station in
-                    FavoriteStationButton(
-                        station: station,
-                        isSelected: endStation?.id == station.id,
-                        action: {
-                            endStation = station
-                            searchItinerary()
-                        }
-                    )
-                }
-            }
-        }
-    }
-
     private var filterPicker: some View {
         Picker("Filtre", selection: $selectedFilter) {
             Text("Rapide").tag(ItineraryFilter.fastest)
@@ -215,17 +190,17 @@ struct ItineraryResultView: View {
 
     @ViewBuilder
     private var resultsSection: some View {
-        if isLoading {
+        if viewModel.isLoading {
             Spacer()
             ProgressView("Recherche d'itinéraires...")
             Spacer()
-        } else if let error = errorMessage {
+        } else if let error = viewModel.errorMessage {
             Spacer()
             Text("Erreur : \(error)")
                 .foregroundColor(.red)
                 .padding()
             Spacer()
-        } else if journeys.isEmpty {
+        } else if viewModel.journeys.isEmpty {
             Spacer()
             Text("Aucun itinéraire trouvé.")
                 .foregroundColor(.gray)
@@ -270,7 +245,7 @@ struct ItineraryResultView: View {
         }
 
         // Initial search if both set
-        if startStation != nil && endStation != nil && journeys.isEmpty {
+        if startStation != nil && endStation != nil && viewModel.journeys.isEmpty {
             searchItinerary()
         }
     }
@@ -299,11 +274,11 @@ struct ItineraryResultView: View {
     private var filteredJourneys: [Journey] {
         switch selectedFilter {
         case .fastest:
-            return journeys.sorted { ($0.duration ?? 0) < ($1.duration ?? 0) }
+            return viewModel.journeys.sorted { ($0.duration ?? 0) < ($1.duration ?? 0) }
         case .lessWalking:
-            return journeys.sorted { walkingTime(for: $0) < walkingTime(for: $1) }
+            return viewModel.journeys.sorted { walkingTime(for: $0) < walkingTime(for: $1) }
         case .fewerTransfers:
-            return journeys.sorted { ($0.nb_transfers ?? 0) < ($1.nb_transfers ?? 0) }
+            return viewModel.journeys.sorted { ($0.nb_transfers ?? 0) < ($1.nb_transfers ?? 0) }
         }
     }
 
@@ -318,37 +293,58 @@ struct ItineraryResultView: View {
 
     private func searchItinerary() {
         guard let start = startStation, let end = endStation else {
-            // self.errorMessage = "Veuillez sélectionner un départ et une arrivée."
             return
         }
-
-        self.isLoading = true
-        self.errorMessage = nil
 
         print("🚀 Recherche itinéraire de \(start.name) à \(end.name)")
         print("📍 De: \(start.coordinate.latitude),\(start.coordinate.longitude)")
         print("📍 À: \(end.coordinate.latitude),\(end.coordinate.longitude)")
         print("🕐 Date: \(departureDate) - Type: \(isArrivalTime ? "Arrivée" : "Départ")")
 
-        itineraryService.searchItinerary(
+        viewModel.searchItinerary(
             from: start.coordinate,
             to: end,
             date: departureDate,
             isArrival: isArrivalTime
         )
+    }
+}
+
+// MARK: - ViewModel
+class ItineraryViewModel: ObservableObject {
+    @Published var journeys: [Journey] = []
+    @Published var isLoading = false
+    @Published var errorMessage: String? = nil
+
+    private var cancellables = Set<AnyCancellable>()
+
+    func searchItinerary(
+        from start: CLLocationCoordinate2D,
+        to end: MapStation,
+        date: Date,
+        isArrival: Bool
+    ) {
+        self.isLoading = true
+        self.errorMessage = nil
+
+        IDFMItineraryService.shared.searchItinerary(
+            from: start,
+            to: end,
+            date: date,
+            isArrival: isArrival
+        )
+        .receive(on: DispatchQueue.main)
         .sink(
-            receiveCompletion: { completion in
+            receiveCompletion: { [weak self] completion in
+                guard let self = self else { return }
                 self.isLoading = false
                 if case .failure(let error) = completion {
                     print("❌ Erreur itinéraire: \(error)")
-
-                    // More detailed error message
                     if let decodingError = error as? DecodingError {
                         switch decodingError {
                         case .keyNotFound(let key, let context):
                             self.errorMessage = "Clé manquante: \(key.stringValue)"
-                            print(
-                                "❌ Key '\(key.stringValue)' not found: \(context.debugDescription)")
+                            print("❌ Key '\(key.stringValue)' not found: \(context.debugDescription)")
                         case .dataCorrupted(let context):
                             self.errorMessage = "Données corrompues"
                             print("❌ Data corrupted: \(context.debugDescription)")
@@ -366,22 +362,21 @@ struct ItineraryResultView: View {
                     }
                 }
             },
-            receiveValue: { journeys in
+            receiveValue: { [weak self] journeys in
+                guard let self = self else { return }
                 print("✅ Reçu \(journeys.count) itinéraires")
                 self.journeys = journeys
             }
         )
         .store(in: &cancellables)
     }
-
-    // Need to hold cancellables
-    @State private var cancellables = Set<AnyCancellable>()
 }
 
 struct JourneyRow: View {
     let journey: Journey
     @State private var isExpanded = false
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var coordinator: NavigationCoordinator
 
     /// Temps de marche total (incluant les correspondances)
     private var walkingTime: Int {
@@ -449,16 +444,26 @@ struct JourneyRow: View {
                                     .scaledToFit()
                                     .frame(width: 28, height: 28)
                             } else {
-                                Circle()
-                                    .fill(Color(hex: display.color ?? "CCCCCC"))
-                                    .frame(width: 26, height: 26)
-                                    .overlay(
-                                        Text(display.code ?? display.label ?? "?")
-                                            .font(.system(size: 10, weight: .bold))
-                                            .foregroundColor(
-                                                Color(hex: display.text_color ?? "FFFFFF")
-                                            )
-                                    )
+                                let label = display.code ?? display.label ?? "?"
+                                let isBus = display.commercial_mode?.lowercased().contains("bus") == true || display.physical_mode?.lowercased().contains("bus") == true
+                                if isBus || label.count > 3 {
+                                    Text(label)
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundColor(Color(hex: display.text_color ?? "FFFFFF"))
+                                        .padding(.horizontal, 6)
+                                        .frame(minWidth: 26)
+                                        .frame(height: 26)
+                                        .background(RoundedRectangle(cornerRadius: 5).fill(Color(hex: display.color ?? "CCCCCC")))
+                                } else {
+                                    Circle()
+                                        .fill(Color(hex: display.color ?? "CCCCCC"))
+                                        .frame(width: 26, height: 26)
+                                        .overlay(
+                                            Text(label)
+                                                .font(.system(size: 10, weight: .bold))
+                                                .foregroundColor(Color(hex: display.text_color ?? "FFFFFF"))
+                                        )
+                                }
                             }
                         }
                     }
@@ -467,7 +472,7 @@ struct JourneyRow: View {
                 Spacer()
 
                 Button(action: {
-                    NavigationManager.shared.startNavigation(journey: journey)
+                    coordinator.startNavigation(journey: journey)
                 }) {
                     HStack(spacing: 6) {
                         Image(systemName: "location.fill")
@@ -587,15 +592,26 @@ struct SectionDetailView: View {
                     if let display = section.display_informations {
                         HStack(spacing: 8) {
                             // Line badge
-                            Circle()
-                                .fill(Color(hex: display.color ?? "CCCCCC"))
-                                .frame(width: 32, height: 32)
-                                .overlay(
-                                    Text(display.code ?? display.label ?? "?")
-                                        .font(.system(size: 12, weight: .bold))
-                                        .foregroundColor(
-                                            Color(hex: display.text_color ?? "FFFFFF"))
-                                )
+                            let label = display.code ?? display.label ?? "?"
+                            let isBus = display.commercial_mode?.lowercased().contains("bus") == true || display.physical_mode?.lowercased().contains("bus") == true
+                            if isBus || label.count > 3 {
+                                Text(label)
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundColor(Color(hex: display.text_color ?? "FFFFFF"))
+                                    .padding(.horizontal, 8)
+                                    .frame(minWidth: 32)
+                                    .frame(height: 32)
+                                    .background(RoundedRectangle(cornerRadius: 6).fill(Color(hex: display.color ?? "CCCCCC")))
+                            } else {
+                                Circle()
+                                    .fill(Color(hex: display.color ?? "CCCCCC"))
+                                    .frame(width: 32, height: 32)
+                                    .overlay(
+                                        Text(label)
+                                            .font(.system(size: 12, weight: .bold))
+                                            .foregroundColor(Color(hex: display.text_color ?? "FFFFFF"))
+                                    )
+                            }
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(
@@ -614,7 +630,7 @@ struct SectionDetailView: View {
                             Spacer()
                             
                             NavigationLink(destination: LineSchematicPlanView(line: TransportLine(
-                                type: StationDetailScreen.determineType(mode: display.commercial_mode),
+                                type: display.transportType,
                                 lineId: display.code ?? display.label ?? "?",
                                 status: .normal
                             ))) {
@@ -769,28 +785,7 @@ struct SectionDetailView: View {
     }
 }
 
-/// Bouton favori pour éviter les problèmes de type-inference
-struct FavoriteStationButton: View {
-    let station: MapStation
-    let isSelected: Bool
-    let action: () -> Void
 
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: "star.fill")
-                    .font(.system(size: 10))
-                    .foregroundColor(.yellow)
-                Text(station.name)
-                    .font(.caption)
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-        }
-        .buttonStyle(.glass)
-    }
-}
 
 #Preview {
     NavigationStack {
@@ -798,6 +793,7 @@ struct FavoriteStationButton: View {
             destination: PreviewMockData.mockStation,
             currentLocation: CLLocationCoordinate2D(latitude: 48.8239, longitude: 2.2743)
         )
+        .environmentObject(NavigationCoordinator())
     }
 }
 

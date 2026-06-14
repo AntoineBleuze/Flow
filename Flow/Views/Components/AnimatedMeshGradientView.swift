@@ -9,6 +9,7 @@ struct AnimatedMeshGradientView: View {
     @State private var relativeTimeOffset = Date().timeIntervalSinceReferenceDate
     
     @State private var isLowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
+    @State private var cachedMeshColors: [Color] = []
     
     var body: some View {
         Group {
@@ -19,13 +20,26 @@ struct AnimatedMeshGradientView: View {
             }
         }
         .ignoresSafeArea()
+        .onAppear {
+            updateCachedColors()
+        }
+        .onChange(of: colorScheme) { _, _ in
+            updateCachedColors()
+        }
+        .onChange(of: colors) { _, _ in
+            updateCachedColors()
+        }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name.NSProcessInfoPowerStateDidChange)) { _ in
             self.isLowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
         }
     }
     
+    private func updateCachedColors() {
+        cachedMeshColors = getMeshColors(for: colorScheme)
+    }
+    
     private var staticBody: some View {
-        let meshColors = getMeshColors(for: colorScheme)
+        let meshColors = cachedMeshColors.isEmpty ? getMeshColors(for: colorScheme) : cachedMeshColors
         let staticPoints: [SIMD2<Float>] = [
             SIMD2<Float>(0.0, 0.0), SIMD2<Float>(0.5, 0.0), SIMD2<Float>(1.0, 0.0),
             SIMD2<Float>(0.0, 0.5), SIMD2<Float>(0.5, 0.5), SIMD2<Float>(1.0, 0.5),
@@ -47,7 +61,7 @@ struct AnimatedMeshGradientView: View {
             let elapsed = date.timeIntervalSinceReferenceDate - relativeTimeOffset
             let timeVal = Float(elapsed) * speed
             
-            let meshColors = getMeshColors(for: colorScheme)
+            let meshColors = cachedMeshColors.isEmpty ? getMeshColors(for: colorScheme) : cachedMeshColors
             
             let animatedPoints: [SIMD2<Float>] = [
                 // Top row
@@ -66,7 +80,7 @@ struct AnimatedMeshGradientView: View {
                 SIMD2<Float>(1.0, 1.0)
             ]
             
-            MeshGradient(
+            return MeshGradient(
                 width: 3,
                 height: 3,
                 points: animatedPoints,
