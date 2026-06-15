@@ -1240,12 +1240,27 @@ class MapDataService: ObservableObject {
         // Remove punctuation (like apostrophes), lowercase, and trim
         let allowedChars = CharacterSet.letters.union(CharacterSet.whitespaces)
         let filtered = base.unicodeScalars.filter { allowedChars.contains($0) }
-        let result = String(String.UnicodeScalarView(filtered))
+        var result = String(String.UnicodeScalarView(filtered))
             .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Strip common prefixes/suffixes for transit node matching (e.g. "issy rer" -> "issy", "gare de lyon" -> "lyon")
+        if result.hasPrefix("gare de ") {
+            result = String(result.dropFirst(8))
+        } else if result.hasPrefix("gare d") {
+            result = String(result.dropFirst(6))
+        }
+        
+        result = result
+            .replacingOccurrences(of: " rer", with: "")
+            .replacingOccurrences(of: " gare", with: "")
+            .replacingOccurrences(of: " sncf", with: "")
+            .replacingOccurrences(of: " metro", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         
         return result
     }
+
 
     // Helper to get clean name for a merged hub
     nonisolated private func cleanHubName(_ name: String) -> String {
