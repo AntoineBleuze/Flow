@@ -291,8 +291,8 @@ nonisolated func resolveLineColor(_ name: String, type: TransportType) -> Color 
         .trimmingCharacters(in: .whitespacesAndNewlines)
         
     let officialColors: [String: String] = [
-        "1": "FFCD00", "2": "003CA6", "3": "837902", "3bis": "6EC4E8", "4": "CF009E",
-        "5": "FF7E2E", "6": "6ECA97", "7": "FA9ABA", "7bis": "6ECA97", "8": "E19BDF",
+        "1": "FFCD00", "2": "003CA6", "3": "837902", "3bis": "6EC4E8", "3BIS": "6EC4E8", "4": "CF009E",
+        "5": "FF7E2E", "6": "6ECA97", "7": "FA9ABA", "7bis": "6ECA97", "7BIS": "6ECA97", "8": "E19BDF",
         "9": "B6BD00", "10": "C9910D", "11": "704B1C", "12": "007852", "13": "6EC4E8",
         "14": "62259D", "15": "A81232", "16": "E47881", "17": "AEC802", "18": "0099C4",
         "A": "E3051C", "B": "5291CE", "C": "FFCE00", "D": "00643C",

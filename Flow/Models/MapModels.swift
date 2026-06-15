@@ -599,8 +599,8 @@ class MapDataService: ObservableObject {
         "A": "E3051C", "B": "5291CE", "C": "FFCE00", "D": "00643C", "E": "B2559C",
         "H": "8D5E2A", "J": "D5C900", "K": "9F9825", "L": "C9AED0", "N": "00A88F",
         "P": "F28E42", "R": "F3A4BA", "U": "B90845", "V": "9F9825",
-        "1": "FFCD00", "2": "003CA6", "3": "837902", "3bis": "6EC4E8", "4": "CF009E",
-        "5": "FF7E2E", "6": "6ECA97", "7": "FA9ABA", "7bis": "6ECA97", "8": "E19BDF",
+        "1": "FFCD00", "2": "003CA6", "3": "837902", "3bis": "6EC4E8", "3BIS": "6EC4E8", "4": "CF009E",
+        "5": "FF7E2E", "6": "6ECA97", "7": "FA9ABA", "7bis": "6ECA97", "7BIS": "6ECA97", "8": "E19BDF",
         "9": "B6BD00", "10": "C9910D", "11": "704B1C", "12": "007852", "13": "6EC4E8",
         "14": "62259D",
     ]
@@ -677,7 +677,7 @@ class MapDataService: ObservableObject {
 
                 // Récupérer la couleur (priorité au hardcodé pour garantir les couleurs officielles)
                 var hexColor = ""
-                if lineType != "TRAM", let hardColor = hardcodedColors[lineName] {
+                if lineType != "TRAM", let hardColor = hardcodedColors[lineName.uppercased()] {
                     hexColor = hardColor
                 } else {
                     hexColor = feature.properties.colourweb_hexa ?? ""
