@@ -98,6 +98,7 @@ struct FavoritesView: View {
 struct FavoriteLineRow: View {
     let entry: FavoriteLineEntry
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var favoritesService = FavoritesService.shared
     @ObservedObject var trafficService = TrafficService.shared
 
@@ -249,6 +250,13 @@ struct FavoriteLineRow: View {
         }
         .onDisappear {
             stopFetching()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background {
+                stopFetching()
+            } else if newPhase == .active {
+                startFetching()
+            }
         }
     }
 

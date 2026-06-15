@@ -136,6 +136,12 @@ struct MapViewControllerBridge: UIViewRepresentable {
     private func updateMapView(_ mapView: MKMapView, context: Context) {
         context.coordinator.parent = self
 
+        // Handle Polyline Style Change (force recreation of renderers by removing and re-adding overlays)
+        if context.coordinator.lastPolylineStyle != data.polylineStyle {
+            context.coordinator.lastPolylineStyle = data.polylineStyle
+            mapView.removeOverlays(mapView.overlays)
+        }
+
         // Handle Recenter Trigger (forced recenter)
         if context.coordinator.lastRecenterTrigger != recenterTrigger {
             context.coordinator.lastRecenterTrigger = recenterTrigger
@@ -687,6 +693,7 @@ struct MapViewControllerBridge: UIViewRepresentable {
         var lastActiveCategories: Set<String> = []
         var lastRecenterTrigger = false
         var lastSimulatedTrackingMode: MKUserTrackingMode = .none
+        var lastPolylineStyle: MapPolylineStyle?
 
         init(_ parent: MapViewControllerBridge) {
             self.parent = parent
@@ -792,9 +799,27 @@ struct MapViewControllerBridge: UIViewRepresentable {
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             if let coloredPolyline = overlay as? ColoredPolyline {
-                let renderer = BorderedPolylineRenderer(polyline: coloredPolyline)
+                let style = parent.data.polylineStyle
+                let renderer: MKPolylineRenderer
+                
+                switch style {
+                case .classic:
+                    renderer = BorderedPolylineRenderer(polyline: coloredPolyline)
+                case .neon:
+                    renderer = NeonPolylineRenderer(polyline: coloredPolyline)
+                case .glass:
+                    renderer = GlassPolylineRenderer(polyline: coloredPolyline)
+                }
+                
                 renderer.strokeColor = coloredPolyline.color
-                renderer.lineWidth = 5.0  // Thicker for readability at high zoom
+                
+                if style == .neon {
+                    renderer.lineWidth = 4.0
+                } else if style == .glass {
+                    renderer.lineWidth = 6.0
+                } else {
+                    renderer.lineWidth = 5.0
+                }
 
                 // Smoothing: arrondir les jonctions et les caps
                 renderer.lineJoin = .round
@@ -802,14 +827,14 @@ struct MapViewControllerBridge: UIViewRepresentable {
 
                 // Additional smoothing
                 renderer.shouldRasterize = false  // Keep vector rendering for smoothness
-                renderer.alpha = 0.95  // Slightly more opaque since it's thinner
+                renderer.alpha = 0.95
 
                 if ["15", "16", "17", "18"].contains(coloredPolyline.lineName) {
                     renderer.lineDashPattern = [10, 8] as [NSNumber]
-                    renderer.lineWidth = 3.5
+                    renderer.lineWidth = style == .glass ? 4.5 : (style == .neon ? 3.0 : 3.5)
                 } else if coloredPolyline.isDashed {
                     renderer.lineDashPattern = [6, 6] as [NSNumber]
-                    renderer.lineWidth = 3.5
+                    renderer.lineWidth = style == .glass ? 4.5 : (style == .neon ? 3.0 : 3.5)
                 }
 
                 return renderer

@@ -288,7 +288,7 @@ struct ImmersiveNavigationView: View {
                          }
                      } else {
                          ScrollView(.horizontal, showsIndicators: false) {
-                             HStack(spacing: 10) {
+                             LazyHStack(spacing: 10) {
                                  ForEach(navigationManager.departuresList) { departure in
                                      let timeStr = formatTime(departure.stopDateTime.departureDateTime)
                                      let remaining = DateFormat.timeRemaining(from: departure.stopDateTime.departureDateTime)

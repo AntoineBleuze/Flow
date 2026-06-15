@@ -103,6 +103,15 @@ struct LineIcon: View {
     }
 }
 
+extension LineIcon: Equatable {
+    public static func == (lhs: LineIcon, rhs: LineIcon) -> Bool {
+        return lhs.type == rhs.type &&
+               lhs.lineId == rhs.lineId &&
+               lhs.size == rhs.size &&
+               lhs.customColor == rhs.customColor
+    }
+}
+
 #Preview {
     VStack(spacing: 10) {
         LineIcon(type: .metro, lineId: "1")

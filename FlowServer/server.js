@@ -174,11 +174,18 @@ async function processNavitiaQueue() {
   // Déclencher d'autres requêtes en parallèle si la file le permet
   processNavitiaQueue();
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, 10000); // 10s timeout pour éviter le blocage infini en cas de hang de l'API
+
   try {
     const timestamp = new Date().toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris" });
     const response = await fetch(url, {
       headers: { apiKey: IDFM_API_KEY },
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const text = await response.text();
@@ -186,7 +193,6 @@ async function processNavitiaQueue() {
         console.warn(`[${timestamp}] ⚠️ 429 détecté, attente et retry dans 2s...`);
         navitiaQueue.unshift({ url, resolve, reject });
         setTimeout(() => {
-          activeRequestsCount--;
           processNavitiaQueue();
         }, 2000);
         return;
@@ -197,6 +203,7 @@ async function processNavitiaQueue() {
     const data = await response.json();
     resolve(data);
   } catch (err) {
+    clearTimeout(timeoutId);
     reject(err);
   } finally {
     activeRequestsCount--;
@@ -205,9 +212,13 @@ async function processNavitiaQueue() {
   }
 }
 
-function navitiaFetch(url) {
+function navitiaFetch(url, isHighPriority = false) {
   return new Promise((resolve, reject) => {
-    navitiaQueue.push({ url, resolve, reject });
+    if (isHighPriority) {
+      navitiaQueue.unshift({ url, resolve, reject });
+    } else {
+      navitiaQueue.push({ url, resolve, reject });
+    }
     processNavitiaQueue();
   });
 }
@@ -215,13 +226,13 @@ function navitiaFetch(url) {
 // ============================================================
 // Helper : pagination automatique pour les line_reports
 // ============================================================
-async function fetchAllPages(initialUrl, maxPages = 20) {
+async function fetchAllPages(initialUrl, isHighPriority = false, maxPages = 20) {
   let url = initialUrl;
   let allDisruptions = [];
   let page = 0;
 
   while (url && page < maxPages) {
-    const data = await navitiaFetch(url);
+    const data = await navitiaFetch(url, isHighPriority);
 
     if (data.disruptions) {
       allDisruptions = allDisruptions.concat(data.disruptions);
@@ -321,7 +332,7 @@ async function fetchAllTrafficData() {
   for (const mode of modes) {
     const url = `${NAVITIA_BASE}/line_reports/physical_modes/${mode}/line_reports?count=500&since=${formattedSince}`;
     try {
-      const disruptions = await fetchAllPages(url);
+      const disruptions = await fetchAllPages(url, false);
       allDisruptions = allDisruptions.concat(disruptions);
     } catch (err) {
       console.error(`   ⚠️ Erreur sur ${mode}: ${err.message}`);
@@ -611,7 +622,7 @@ async function fetchGlobalDeparturesForMode(mode, count = 1000) {
   try {
     const url = `${NAVITIA_BASE}/physical_modes/${mode}/departures?count=${count}`;
     console.log(`   🌍 [Navitia Global] Récupération départs pour ${mode} (count: ${count})...`);
-    const data = await navitiaFetch(url);
+    const data = await navitiaFetch(url, false);
     if (data && data.departures) {
       ingestGlobalDepartures(data.departures);
     }
@@ -622,6 +633,12 @@ async function fetchGlobalDeparturesForMode(mode, count = 1000) {
 
 // Récupère globalement les horaires de tous les modes ferrés d'IDF
 async function refreshAllGlobalRailDepartures() {
+  // Si la file d'attente est déjà chargée, on évite d'empiler des requêtes globales en arrière-plan
+  if (navitiaQueue.length > 8) {
+    console.log(`   ⚠️ [Global Rail] File d'attente trop chargée (${navitiaQueue.length} requêtes). Skip de ce refresh global.`);
+    return;
+  }
+
   const timestamp = new Date().toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris" });
   console.log(`\n🔄 [${timestamp}] [Global Rail Refresh] Lancement des requêtes généralisées...`);
 
@@ -637,7 +654,7 @@ async function refreshAllGlobalRailDepartures() {
   await Promise.all(promises);
 }
 
-async function refreshStop(stopId) {
+async function refreshStop(stopId, isHighPriority = true) {
   if (stopId.includes("stop_area:") && stopId.includes(":C")) {
     return;
   }
@@ -646,8 +663,8 @@ async function refreshStop(stopId) {
     const endpoint = stopId.includes("stop_point") ? "stop_points" : "stop_areas";
     const url = `${NAVITIA_BASE}/${endpoint}/${stopId}/departures?count=1000`;
     
-    console.log(`   🌍 [Navitia On-Demand] Requête départs pour ${stopId}`);
-    const data = await navitiaFetch(url);
+    console.log(`   🌍 [Navitia On-Demand] Requête départs pour ${stopId} (HighPriority: ${isHighPriority})`);
+    const data = await navitiaFetch(url, isHighPriority);
     if (data && data.departures) {
       updateCache(stopId, data.departures);
     }
@@ -656,8 +673,8 @@ async function refreshStop(stopId) {
       try {
         const retryId = stopId.startsWith("stop_point:") ? stopId : `stop_point:${stopId}`;
         const url = `${NAVITIA_BASE}/stop_points/${retryId}/departures?count=1000`;
-        console.log(`   🌍 [Navitia Retry] Requête départs pour ${retryId}`);
-        const data = await navitiaFetch(url);
+        console.log(`   🌍 [Navitia Retry] Requête départs pour ${retryId} (HighPriority: ${isHighPriority})`);
+        const data = await navitiaFetch(url, isHighPriority);
         if (data && data.departures) {
           updateCache(stopId, data.departures);
           return;
@@ -899,7 +916,7 @@ app.get("/api/itinerary", async (req, res) => {
 
     const url = `${NAVITIA_BASE}/journeys?${params.toString()}`;
 
-    const data = await navitiaFetch(url);
+    const data = await navitiaFetch(url, true);
     res.json(data);
   } catch (error) {
     console.error("❌ Itinerary error:", error.message);

@@ -130,7 +130,7 @@ struct MiniLinePlanView: View {
                             .foregroundColor(.secondary)
                         
                         ScrollView(.horizontal, showsIndicators: true) {
-                            HStack(alignment: .bottom, spacing: 0) {
+                            LazyHStack(alignment: .bottom, spacing: 0) {
                                 ForEach(Array(timelineItems.enumerated()), id: \.element.id) { index, item in
                                     let isFirst = index == 0
                                     let isLast = index == timelineItems.count - 1

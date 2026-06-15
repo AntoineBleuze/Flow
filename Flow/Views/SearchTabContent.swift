@@ -429,6 +429,15 @@ struct StationRow: View {
     }
 }
 
+extension StationRow: Equatable {
+    public static func == (lhs: StationRow, rhs: StationRow) -> Bool {
+        return lhs.station.id == rhs.station.id &&
+               lhs.station.name == rhs.station.name &&
+               lhs.station.city == rhs.station.city &&
+               lhs.station.lines.count == rhs.station.lines.count
+    }
+}
+
 #Preview {
     SearchTabContent(searchText: .constant(""))
         .environmentObject(NavigationCoordinator())

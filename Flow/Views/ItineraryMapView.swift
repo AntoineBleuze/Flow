@@ -192,9 +192,28 @@ struct ItineraryMapViewRepresentable: UIViewRepresentable {
         
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             if let coloredPolyline = overlay as? ColoredPolyline {
-                let renderer = BorderedPolylineRenderer(polyline: coloredPolyline)
+                let style = MapPolylineStyle.current
+                let renderer: MKPolylineRenderer
+                
+                switch style {
+                case .classic:
+                    renderer = BorderedPolylineRenderer(polyline: coloredPolyline)
+                case .neon:
+                    renderer = NeonPolylineRenderer(polyline: coloredPolyline)
+                case .glass:
+                    renderer = GlassPolylineRenderer(polyline: coloredPolyline)
+                }
+                
                 renderer.strokeColor = coloredPolyline.color
-                renderer.lineWidth = coloredPolyline.isDashed ? 3.5 : 5.0
+                
+                if style == .neon {
+                    renderer.lineWidth = coloredPolyline.isDashed ? 3.0 : 4.0
+                } else if style == .glass {
+                    renderer.lineWidth = coloredPolyline.isDashed ? 4.5 : 6.0
+                } else {
+                    renderer.lineWidth = coloredPolyline.isDashed ? 3.5 : 5.0
+                }
+                
                 renderer.lineJoin = CGLineJoin.round
                 renderer.lineCap = CGLineCap.round
                 

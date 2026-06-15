@@ -104,6 +104,30 @@ struct AppMapView: View {
                                 .buttonStyle(.plain)
                                 .glassEffect(.regular.interactive(), in: .circle)
                                 .shadow(color: Color.black.opacity(0.15), radius: 5, x: 0, y: 2)
+
+                                // Polyline Style Selector Button
+                                Menu {
+                                    ForEach(MapPolylineStyle.allCases) { style in
+                                        Button(action: {
+                                            data.polylineStyle = style
+                                        }) {
+                                            HStack {
+                                                Text(style.rawValue)
+                                                if data.polylineStyle == style {
+                                                    Image(systemName: "checkmark")
+                                                }
+                                            }
+                                        }
+                                    }
+                                } label: {
+                                    Image(systemName: data.polylineStyle.systemImageName)
+                                        .font(.title3)
+                                        .foregroundColor(data.polylineStyle != .classic ? .blue : .primary)
+                                        .frame(width: 44, height: 44)
+                                }
+                                .buttonStyle(.plain)
+                                .glassEffect(.regular.interactive(), in: .circle)
+                                .shadow(color: Color.black.opacity(0.15), radius: 5, x: 0, y: 2)
                             }
                             .padding(.trailing, 16)
                             .padding(.bottom, 16)

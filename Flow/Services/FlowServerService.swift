@@ -33,7 +33,7 @@ class FlowServerService: ObservableObject {
     var isEnabled: Bool = true
 
     /// Timeout pour les requêtes réseau (en secondes)
-    var requestTimeout: TimeInterval = 5.0
+    var requestTimeout: TimeInterval = 15.0
 
     // MARK: - État publié
 
@@ -51,6 +51,7 @@ class FlowServerService: ObservableObject {
     private var webSocketTask: URLSessionWebSocketTask?
     private var reconnectTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
+    private var isAppInBackground = false
 
     private init() {
         determineBestURL()
@@ -60,6 +61,12 @@ class FlowServerService: ObservableObject {
             self,
             selector: #selector(appWillEnterForeground),
             name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appDidEnterBackground),
+            name: UIApplication.didEnterBackgroundNotification,
             object: nil
         )
         #endif
@@ -113,8 +120,25 @@ class FlowServerService: ObservableObject {
 
     #if os(iOS)
     @objc private func appWillEnterForeground() {
+        isAppInBackground = false
         print("🔄 [FlowServer] App de retour au premier plan. Vérification de la santé du serveur...")
         determineBestURL()
+    }
+    
+    @objc private func appDidEnterBackground() {
+        isAppInBackground = true
+        print("📥 [FlowServer] App passée en arrière-plan.")
+        
+        // Si aucune Live Activity n'est active, on déconnecte le WebSocket pour économiser l'énergie
+        let hasLiveActivity: Bool
+        hasLiveActivity = LiveActivityManager.shared.activeActivityID != nil
+        
+        if !hasLiveActivity {
+            print("🔋 [FlowServer] Aucune Live Activity active. Déconnexion du WebSocket pour économiser la batterie.")
+            disconnectWebSocket()
+        } else {
+            print("📊 [FlowServer] Live Activity active en arrière-plan. Maintien de la connexion.")
+        }
     }
     #endif
 
@@ -349,10 +373,23 @@ class FlowServerService: ObservableObject {
     // MARK: - Reconnexion automatique
 
     private func scheduleReconnect() {
+        let hasLiveActivity: Bool
+        #if os(iOS)
+        hasLiveActivity = LiveActivityManager.shared.activeActivityID != nil
+        #else
+        hasLiveActivity = false
+        #endif
+        
+        // Ne pas planifier de reconnexion si l'app est en arrière-plan et sans Live Activity
+        if isAppInBackground && !hasLiveActivity {
+            print("💤 [WS] En arrière-plan sans Live Activity. Reconnexion automatique ignorée.")
+            return
+        }
+        
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.reconnectTimer?.invalidate()
-            self.reconnectTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) {
+            self.reconnectTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: false) {
                 [weak self] _ in
                 print("🔄 [WS] Tentative de reconnexion...")
                 self?.connectWebSocket()
@@ -362,12 +399,13 @@ class FlowServerService: ObservableObject {
 
     private func schedulePing() {
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 30) { [weak self] in
-            self?.webSocketTask?.sendPing { error in
+            guard let self = self, let task = self.webSocketTask else { return }
+            task.sendPing { error in
                 if let error = error {
                     print("❌ [WS] Ping échoué: \(error.localizedDescription)")
-                    self?.scheduleReconnect()
+                    self.scheduleReconnect()
                 } else {
-                    self?.schedulePing()
+                    self.schedulePing()
                 }
             }
         }

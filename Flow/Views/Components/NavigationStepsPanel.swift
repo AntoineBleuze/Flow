@@ -56,7 +56,7 @@ struct NavigationStepsPanel: View {
                     let sections = journey.sections
                 {
                     ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 4) {
+                        LazyHStack(spacing: 4) {
                             ForEach(sections.filter { $0.type == "public_transport" }) { section in
                                 if let display = section.display_informations {
                                     Circle()

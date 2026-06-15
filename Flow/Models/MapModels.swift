@@ -192,6 +192,12 @@ class MapDataService: ObservableObject {
 
     @Published var activeCategories: Set<String> = ["Métro", "RER / Train", "Tram", "Bus"]
 
+    @Published var polylineStyle: MapPolylineStyle = MapPolylineStyle.current {
+        didSet {
+            MapPolylineStyle.current = polylineStyle
+        }
+    }
+
     func isLineTypeEnabled(_ type: TransportType) -> Bool {
         switch type {
         case .metro:
@@ -748,100 +754,22 @@ class MapDataService: ObservableObject {
         }
     }
 
-    private func importBusStopsInBackground() {
-        print("🚌 [Bus Import] Démarrage de l'import des arrêts de bus en tâche de fond...")
+    private func importBusStopsViaActor() async {
+        print("🚌 [Bus Import] Démarrage de l'import des arrêts de bus via ModelActor...")
+        guard let url = Bundle.main.url(forResource: "arrets-lignes-2", withExtension: "csv") else {
+            print("⚠️ [Bus Import] Fichier arrets-lignes-2.csv introuvable.")
+            return
+        }
+        
         let container = SwiftDataStack.shared.container
-        DispatchQueue.global(qos: .utility).async {
-            guard let url = Bundle.main.url(forResource: "arrets-lignes", withExtension: "csv") else {
-                print("⚠️ [Bus Import] Fichier arrets-lignes.csv introuvable.")
-                return
-            }
-            
-            do {
-                let data = try String(contentsOf: url, encoding: .utf8)
-                let rows = data.components(separatedBy: .newlines)
-                let totalRows = rows.count
-                
-                print("🚌 [Bus Import] \(totalRows) lignes à analyser.")
-                
-                let initialContext = ModelContext(container)
-                self.clearBusStopPoints(in: initialContext)
-                
-                let batchSize = 2000
-                var currentBatch: [StopPointModel] = []
-                
-                for (index, row) in rows.enumerated() {
-                    if index == 0 || row.isEmpty { continue }
-                    
-                    let columns = row.split(separator: ";", omittingEmptySubsequences: false).map {
-                        $0.trimmingCharacters(in: .whitespacesAndNewlines)
-                    }
-                    guard columns.count > 10 else { continue }
-                    
-                    let modeStr = columns[8]
-                    if modeStr.caseInsensitiveCompare("bus") == .orderedSame {
-                        let id = columns[2]
-                        let stopAreaId = columns[0]
-                        let rawName = columns[3]
-                        let name = self.cleanStationName(rawName)
-                        let lonStr = columns[4]
-                        let latStr = columns[5]
-                        let lineName = columns[7]
-                        let city = columns[10]
-                        
-                        if let lat = Double(latStr), let lon = Double(lonStr) {
-                            let model = StopPointModel(
-                                id: id,
-                                stopAreaId: stopAreaId,
-                                city: city,
-                                name: name,
-                                latitude: lat,
-                                longitude: lon,
-                                type: "Bus",
-                                lineName: lineName
-                            )
-                            currentBatch.append(model)
-                            
-                            if currentBatch.count >= batchSize {
-                                autoreleasepool {
-                                    let batchContext = ModelContext(container)
-                                    batchContext.autosaveEnabled = false
-                                    for item in currentBatch {
-                                        batchContext.insert(item)
-                                    }
-                                    do {
-                                        try batchContext.save()
-                                    } catch {
-                                        print("❌ [Bus Import] Batch save error: \(error)")
-                                    }
-                                }
-                                currentBatch.removeAll(keepingCapacity: true)
-                            }
-                        }
-                    }
-                }
-                
-                if !currentBatch.isEmpty {
-                    autoreleasepool {
-                        let batchContext = ModelContext(container)
-                        batchContext.autosaveEnabled = false
-                        for item in currentBatch {
-                            batchContext.insert(item)
-                        }
-                        do {
-                            try batchContext.save()
-                        } catch {
-                            print("❌ [Bus Import] Final batch save error: \(error)")
-                        }
-                    }
-                }
-                
-                UserDefaults.standard.set(true, forKey: "didImportBusStops_SwiftData_v1")
-                print("✅ [Bus Import] Importation de tous les arrêts de bus terminée avec succès !")
-                
-            } catch {
-                print("❌ [Bus Import] Erreur lors de l'import des bus: \(error)")
-            }
+        let importer = TransportDataImporter(modelContainer: container)
+        
+        do {
+            try await importer.importBusStops(csvUrl: url)
+            UserDefaults.standard.set(true, forKey: "didImportBusStops_SwiftData_v2")
+            print("✅ [Bus Import] Importation via ModelActor terminée avec succès !")
+        } catch {
+            print("❌ [Bus Import] Erreur lors de l'import via ModelActor: \(error)")
         }
     }
 
@@ -849,10 +777,10 @@ class MapDataService: ObservableObject {
         let context = ModelContext(container)
 
         // Import des bus en arrière-plan si pas encore fait
-        let didImportBus = UserDefaults.standard.bool(forKey: "didImportBusStops_SwiftData_v1")
+        let didImportBus = UserDefaults.standard.bool(forKey: "didImportBusStops_SwiftData_v2")
         if !didImportBus {
-            DispatchQueue.main.async {
-                self.importBusStopsInBackground()
+            Task {
+                await self.importBusStopsViaActor()
             }
         }
 
@@ -1740,18 +1668,11 @@ class MapDataService: ObservableObject {
     }
 
     func fetchBusStations(in minLat: Double, maxLat: Double, minLon: Double, maxLon: Double) async -> [MapStation] {
-        let context = SwiftDataStack.shared.mainContext
-        
-        let fetchDescriptor = FetchDescriptor<StopPointModel>(
-            predicate: #Predicate<StopPointModel> {
-                $0.type == "Bus" &&
-                $0.latitude >= minLat && $0.latitude <= maxLat &&
-                $0.longitude >= minLon && $0.longitude <= maxLon
-            }
-        )
+        let container = SwiftDataStack.shared.container
+        let importer = TransportDataImporter(modelContainer: container)
         
         do {
-            let entities = try context.fetch(fetchDescriptor)
+            let entities = try await importer.fetchBusStops(minLat: minLat, maxLat: maxLat, minLon: minLon, maxLon: maxLon)
             var grouped: [String: [StopPoint]] = [:]
             for entity in entities {
                 let id = entity.id

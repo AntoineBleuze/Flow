@@ -11,9 +11,7 @@ class SwiftDataStack {
     private init() {
         do {
             let schema = Schema([
-                StopPointModel.self,
-                TransportLineModel.self,
-                CoordinatePointModel.self
+                StopPointModel.self
             ])
             let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
             self.container = try ModelContainer(for: schema, configurations: [config])

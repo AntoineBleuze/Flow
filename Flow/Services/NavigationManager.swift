@@ -100,6 +100,20 @@ class NavigationManager: NSObject, ObservableObject {
                 self?.forceLiveActivityUpdate()
             }
             .store(in: &cancellables)
+            
+        NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.appDidEnterBackground()
+            }
+            .store(in: &cancellables)
+            
+        NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.appWillEnterForeground()
+            }
+            .store(in: &cancellables)
         #else
         super.init()
         #endif
@@ -642,6 +656,35 @@ class NavigationManager: NSObject, ObservableObject {
         
         // Initial call
         updateLoop()
+    }
+    
+    private func stopTimer() {
+        updateTimer?.invalidate()
+        updateTimer = nil
+        animationTimer?.invalidate()
+        animationTimer = nil
+    }
+    
+    private func appDidEnterBackground() {
+        print("📥 [NavigationManager] App passée en arrière-plan.")
+        #if os(iOS)
+        // Si aucune Live Activity n'est active, on coupe le timer de mise à jour pour économiser le réseau
+        if currentActivity == nil {
+            print("🔋 [NavigationManager] Pas de Live Activity active. Suspension des timers de mise à jour.")
+            stopTimer()
+        } else {
+            print("📊 [NavigationManager] Live Activity active en arrière-plan. Maintien des timers.")
+        }
+        #endif
+    }
+    
+    private func appWillEnterForeground() {
+        print("🔄 [NavigationManager] App de retour au premier plan.")
+        if isNavigating {
+            print("🔋 [NavigationManager] Reprise des timers de mise à jour.")
+            stopTimer()
+            startTimer()
+        }
     }
     
     private func updateProgressLoop() {

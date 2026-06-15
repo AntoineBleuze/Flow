@@ -2,6 +2,7 @@
 import ActivityKit
 import Combine
 import Foundation
+import UIKit
 
 class LiveActivityManager: ObservableObject {
     static let shared = LiveActivityManager()
@@ -183,6 +184,14 @@ class LiveActivityManager: ObservableObject {
         
         // Se désabonner du WS
         FlowServerService.shared.sendUnsubscribeDepartures()
+        
+        #if os(iOS)
+        // Si l'application est en arrière-plan et qu'on arrête de monitorer, on coupe le WebSocket global
+        if UIApplication.shared.applicationState == .background {
+            print("🔋 [LiveActivity] Arrêt du monitoring en arrière-plan. Déconnexion immédiate du WebSocket.")
+            FlowServerService.shared.disconnectWebSocket()
+        }
+        #endif
         
         updateTimer?.invalidate()
         updateTimer = nil
