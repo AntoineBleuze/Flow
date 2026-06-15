@@ -503,11 +503,14 @@ class NavigationManager: NSObject, ObservableObject {
                     DispatchQueue.main.async {
                         self.showBoardingPrompt = false
                         
+                        // Disabled boarding notification as per user request
+                        /*
                         #if os(iOS)
                         if UIApplication.shared.applicationState != .active {
                             self.sendBoardingNotification()
                         }
                         #endif
+                        */
                     }
                 }
             }
@@ -697,9 +700,12 @@ class NavigationManager: NSObject, ObservableObject {
             calculateProgressForCurrentLeg(section: section)
         }
         
+        // Disabled auto-boarding when train departs as per user request
+        /*
         if case .waitingAtStation = state {
             checkIfSelectedTrainDeparted()
         }
+        */
     }
     
     private func checkIfSelectedTrainDeparted() {
@@ -1103,39 +1109,88 @@ class NavigationManager: NSObject, ObservableObject {
             return dep.displayInformations.label == lineName
         }
 
-        let nextTimes = relevant.prefix(5).compactMap {
-            timeRemaining($0.stopDateTime.departureDateTime)
-        }
-
         DispatchQueue.main.async {
-            self.departuresList = Array(relevant.prefix(5))
-            self.nextDepartures = nextTimes
+            let formatter = DateFormat.navitia
+            let now = Date()
+            
+            func depDate(for departure: Departure) -> Date? {
+                return formatter.date(from: departure.stopDateTime.departureDateTime)
+            }
+            
+            // Merge existing and new departures to retain departed trains
+            var mergedMap = [String: Departure]()
+            for dep in self.departuresList {
+                mergedMap[dep.id] = dep
+            }
+            for dep in relevant {
+                mergedMap[dep.id] = dep
+            }
+            
+            // Filter out departures older than 15 minutes
+            let fifteenMinutesAgo = now.addingTimeInterval(-900)
+            let allMerged = mergedMap.values.filter { dep in
+                if let date = depDate(for: dep) {
+                    return date >= fifteenMinutesAgo
+                }
+                return false
+            }
+            
+            // Sort chronologically
+            let sortedMerged = allMerged.sorted { dep1, dep2 in
+                let date1 = depDate(for: dep1) ?? Date.distantPast
+                let date2 = depDate(for: dep2) ?? Date.distantFuture
+                return date1 < date2
+            }
+            
+            // Split past/future
+            let pastDepartures = sortedMerged.filter { dep in
+                if let date = depDate(for: dep) {
+                    return date < now
+                }
+                return false
+            }
+            let futureDepartures = sortedMerged.filter { dep in
+                if let date = depDate(for: dep) {
+                    return date >= now
+                }
+                return false
+            }
+            
+            // Keep last 3 past departures and first 5 future departures
+            let limitedPast = Array(pastDepartures.suffix(3))
+            let limitedFuture = Array(futureDepartures.prefix(5))
+            let finalDepartures = limitedPast + limitedFuture
+            
+            self.departuresList = finalDepartures
+            
+            // Update nextDepartures with time remaining or past status
+            let finalTimes = finalDepartures.compactMap { dep in
+                return DateFormat.timeRemainingWithPast(from: dep.stopDateTime.departureDateTime)
+            }
+            self.nextDepartures = finalTimes
             
             // Set default selected departure if nil
-            if self.selectedDeparture == nil, let first = relevant.first {
-                self.selectedDeparture = first
+            if self.selectedDeparture == nil {
+                self.selectedDeparture = limitedFuture.first ?? finalDepartures.last
             }
+
+            // Update Activity
+            var instruction = ""
+            if case .walkingToStation(let station, _) = self.state {
+                instruction = "Aller à \(station.name ?? "")"
+            } else if case .waitingAtStation = self.state {
+                instruction = "Prendre \(lineName) vers \(direction)"
+            }
+
+            self.updateActivity(
+                instruction: instruction,
+                nextDepartures: finalTimes,
+                lineName: lineName,
+                direction: direction,
+                lineColor: section.display_informations?.color,
+                textColor: section.display_informations?.text_color
+            )
         }
-
-        // Update Activity
-        var instruction = ""
-        if case .walkingToStation(let station, _) = state {
-            instruction = "Aller à \(station.name ?? "")"
-        } else if case .waitingAtStation = state {
-            instruction = "Prendre \(lineName) vers \(direction)"
-
-            // Check if we should transition to OnBoard
-            // User rule: "quand l'utilisateur est a la station et que l'un des train est parti... ca lance la prochaine étape"
-            checkIfTrainDeparted(relevant)
-        }
-
-        updateActivity(
-            instruction: instruction,
-            nextDepartures: nextTimes,
-            lineName: lineName,
-            direction: direction,
-            lineColor: section.display_informations?.color,
-            textColor: section.display_informations?.text_color)
     }
 
     private func fetchOnBoardRealTimeData(for section: ItinerarySection) {

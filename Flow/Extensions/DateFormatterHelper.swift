@@ -40,6 +40,18 @@ enum DateFormat {
         return "\(diff) min"
     }
 
+    /// Calcule le temps restant ou écoulé (ex: "3 min", "Parti (3m)")
+    static func timeRemainingWithPast(from dateString: String) -> String {
+        guard let date = navitia.date(from: dateString) else { return "" }
+        let diff = Int(date.timeIntervalSinceNow / 60)
+        if diff < 0 {
+            return "Parti (\(abs(diff))m)"
+        } else if diff == 0 {
+            return "0 min"
+        }
+        return "\(diff) min"
+    }
+
     /// Formate une date Navitia en heure courte (ex: "18:30")
     static func formatTime(from dateString: String) -> String {
         guard let date = navitia.date(from: dateString) else { return dateString }

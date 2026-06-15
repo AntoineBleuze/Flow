@@ -291,7 +291,7 @@ struct ImmersiveNavigationView: View {
                              LazyHStack(spacing: 10) {
                                  ForEach(navigationManager.departuresList) { departure in
                                      let timeStr = formatTime(departure.stopDateTime.departureDateTime)
-                                     let remaining = DateFormat.timeRemaining(from: departure.stopDateTime.departureDateTime)
+                                     let remaining = DateFormat.timeRemainingWithPast(from: departure.stopDateTime.departureDateTime)
                                      let isSelected = navigationManager.selectedDeparture?.id == departure.id
                                      
                                      Button(action: {
@@ -322,8 +322,8 @@ struct ImmersiveNavigationView: View {
                          
                          HStack {
                              if let selected = navigationManager.selectedDeparture {
-                                 let remaining = DateFormat.timeRemaining(from: selected.stopDateTime.departureDateTime)
-                                 Text("Départ auto dans : \(remaining)")
+                                 let remaining = DateFormat.timeRemainingWithPast(from: selected.stopDateTime.departureDateTime)
+                                 Text("Départ : \(remaining)")
                                      .font(.caption)
                                      .foregroundColor(.green)
                                      .fontWeight(.semibold)
