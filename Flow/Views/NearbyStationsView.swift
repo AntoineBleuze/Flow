@@ -12,14 +12,7 @@ struct NearbyStationsView: View {
     var body: some View {
         NavigationStack {
             nearbyStationsContent
-                .background {
-                    ZStack {
-                        ShaderAnimationView(isLoading: true)
-                        (colorScheme == .dark ? Color.black.opacity(0.05) : Color.white.opacity(0.05))
-                            .background(.ultraThinMaterial.opacity(0.97))
-                    }
-                    .ignoresSafeArea()
-                }
+                .background(Color.black.ignoresSafeArea())
                 .navigationTitle("À Proximité")
                 .navigationBarTitleDisplayMode(.large)
         }
@@ -34,12 +27,13 @@ struct NearbyStationsView: View {
                     .foregroundColor(.orange)
                 Text("Localisation désactivée")
                     .font(.headline)
+                    .foregroundColor(.white)
                 Text(
                     "Veuillez activer la localisation dans les réglages pour voir les stations à proximité."
                 )
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
-                .foregroundColor(.secondary)
+                .foregroundColor(.gray)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if viewModel.userLocation == nil {
@@ -49,12 +43,13 @@ struct NearbyStationsView: View {
                     .foregroundColor(.blue)
                 Text("Localisation nécessaire")
                     .font(.headline)
+                    .foregroundColor(.white)
                 Text(
                     "Autorisez l'accès à votre position pour trouver les stations autour de vous."
                 )
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
-                .foregroundColor(.secondary)
+                .foregroundColor(.gray)
 
                 Button(action: {
                     viewModel.requestLocation()
@@ -63,9 +58,10 @@ struct NearbyStationsView: View {
                         .fontWeight(.bold)
                         .padding()
                         .frame(maxWidth: .infinity)
-                        .foregroundColor(.primary)
+                        .foregroundColor(.black)
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(.white)
                 .padding(.horizontal, 40)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -82,12 +78,13 @@ struct NearbyStationsView: View {
                             .foregroundColor(.gray)
                         Text("Aucune station trouvée")
                             .font(.headline)
+                            .foregroundColor(.white)
                         Text(
                             "Aucune station dans un rayon de \(Int(viewModel.selectedRadius))m."
                         )
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.gray)
                     }
                 }
                 Spacer()
@@ -150,14 +147,14 @@ struct RadiusSelector: View {
                 Text(formatRadius(viewModel.selectedRadius))
                     .font(SwiftUI.Font.subheadline)
                     .fontWeight(.bold)
-                    .foregroundColor(.primary)
+                    .foregroundColor(.white)
                 Image(systemName: "chevron.down")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.gray)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
-            .background(.ultraThinMaterial, in: Capsule())
+            .background(Color.white.opacity(0.12), in: Capsule())
         }
     }
 
@@ -201,102 +198,107 @@ struct NearbyStationRow: View {
     }
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .center, spacing: 8) {
-                    Text(station.name)
-                        .font(.headline)
-                        .foregroundColor(.primary)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .center, spacing: 8) {
+                        Text(station.name)
+                            .font(.headline)
+                            .foregroundColor(.white)
 
-                    HStack(spacing: 4) {
-                        let lines = displayedStationLines
-                        ForEach(lines.prefix(5), id: \.id) { line in
-                            LineIcon(type: line.type, lineId: line.name, size: 16)
-                        }
+                        HStack(spacing: 4) {
+                            let lines = displayedStationLines
+                            ForEach(lines.prefix(5), id: \.id) { line in
+                                LineIcon(type: line.type, lineId: line.name, size: 16)
+                            }
 
-                        if station.mainType != .bus && station.lines.contains(where: { $0.type == .bus }) {
-                            Image("Bus")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(height: 16)
+                            if station.mainType != .bus && station.lines.contains(where: { $0.type == .bus }) {
+                                Image("Bus")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(height: 16)
+                            }
                         }
                     }
-                }
 
-                if isLoading {
-                    Text("Chargement...")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                } else if groupedDepartures.isEmpty {
-                    Text("Aucun départ proche")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                } else {
-                    // Affichage groupé par ligne
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(groupedDepartures.keys.sorted { a, b in
-                            if let numA = Int(a), let numB = Int(b) { return numA < numB }
-                            if Int(a) != nil { return true }
-                            if Int(b) != nil { return false }
-                            return a.localizedStandardCompare(b) == .orderedAscending
-                        }, id: \.self) { lineKey in
-                            if let directions = groupedDepartures[lineKey] {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack(alignment: .center, spacing: 6) {
-                                        // Nom de la ligne
-                                        let firstDep = directions.values.first?.first
-                                        let type = determineType(
-                                            from: firstDep?.displayInformations)
-                                        LineIcon(type: type, lineId: lineKey, size: 18)
-                                    }
+                    if isLoading {
+                        Text("Chargement...")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    } else if groupedDepartures.isEmpty {
+                        Text("Aucun départ proche")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    } else {
+                        // Affichage groupé par ligne
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(groupedDepartures.keys.sorted { a, b in
+                                if let numA = Int(a), let numB = Int(b) { return numA < numB }
+                                if Int(a) != nil { return true }
+                                if Int(b) != nil { return false }
+                                return a.localizedStandardCompare(b) == .orderedAscending
+                            }, id: \.self) { lineKey in
+                                if let directions = groupedDepartures[lineKey] {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack(alignment: .center, spacing: 6) {
+                                            // Nom de la ligne
+                                            let firstDep = directions.values.first?.first
+                                            let type = determineType(
+                                                from: firstDep?.displayInformations)
+                                            LineIcon(type: type, lineId: lineKey, size: 18)
+                                        }
 
-                                    // Liste des directions pour cette ligne
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        ForEach(directions.keys.sorted(), id: \.self) {
-                                            directionKey in
-                                            if let deps = directions[directionKey] {
-                                                HStack(spacing: 4) {
-                                                    Text(directionKey)
-                                                        .font(.caption)
-                                                        .foregroundColor(.secondary)
-                                                        .lineLimit(1)
+                                        // Liste des directions pour cette ligne
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            ForEach(directions.keys.sorted(), id: \.self) {
+                                                directionKey in
+                                                if let deps = directions[directionKey] {
+                                                    HStack(spacing: 4) {
+                                                        Text(directionKey)
+                                                            .font(.caption)
+                                                            .foregroundColor(.gray)
+                                                            .lineLimit(1)
 
-                                                    Spacer()
+                                                        Spacer()
 
-                                                    Text(
-                                                        deps.prefix(2).map(formatDepartureTime)
-                                                            .joined(separator: ", ")
-                                                    )
-                                                    .font(.caption2)
-                                                    .fontWeight(.bold)
-                                                    .foregroundColor(.green)
+                                                        Text(
+                                                            deps.prefix(2).map(formatDepartureTime)
+                                                                .joined(separator: ", ")
+                                                        )
+                                                        .font(.caption2)
+                                                        .fontWeight(.bold)
+                                                        .foregroundColor(.green)
+                                                    }
                                                 }
                                             }
                                         }
+                                        .padding(.leading, 24)
                                     }
-                                    .padding(.leading, 24)
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            Spacer()
+                Spacer()
 
-            if let distance = distanceFromUser(station: station) {
-                Text(distance)
-                    .font(.caption)
-                    .fontWeight(.bold)
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Material.thinMaterial)
-                    .clipShape(Capsule())
+                if let distance = distanceFromUser(station: station) {
+                    Text(distance)
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .foregroundColor(.gray)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.white.opacity(0.12))
+                        .clipShape(Capsule())
+                }
             }
+            
+            Divider()
+                .background(Color.white.opacity(0.15))
+                .padding(.top, 4)
         }
-        .padding()
-        // Application de l'effet Liquid Glass via le ButtonStyle parent
+        .padding(.horizontal)
         .padding(.vertical, 8)
         .onAppear {
             loadPreview()

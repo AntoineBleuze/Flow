@@ -7,6 +7,7 @@ import SwiftUI
 struct StationDetailSheet: View {
     let station: MapStation
     var onDismiss: (() -> Void)? = nil  // For inline iPad panel
+    var selectedDetent: Binding<PresentationDetent>? = nil
     @State private var mergedStation: MapStation? = nil
     
     private var currentStation: MapStation {
@@ -80,16 +81,18 @@ struct StationDetailSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                if onDismiss == nil {
-                    // iPhone sheet: needs its own glass effect background
-                    (colorScheme == .dark ? Color.black.opacity(0.05) : Color.white.opacity(0.05))
-                        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                        .ignoresSafeArea()
-                } else {
-                    // iPad panel: background is handled by the MapView container
-                    Color.clear
-                        .ignoresSafeArea()
+                // Background gradient fading from clear to black to blend with the map
+                VStack(spacing: 0) {
+                    LinearGradient(
+                        colors: [.clear, .black.opacity(0.6), .black.opacity(0.95), .black],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 180)
+                    
+                    Color.black
                 }
+                .ignoresSafeArea()
                 
                 // Sheet content constrained within safe area boundaries
                 sheetContent
@@ -151,20 +154,82 @@ struct StationDetailSheet: View {
         .presentationBackground(.clear)
     }
 
+    private var stationDistanceAndWalkTime: (distanceStr: String, walkTimeMinutes: Int) {
+        let stationLoc = CLLocation(latitude: currentStation.latitude, longitude: currentStation.longitude)
+        let distanceMeters: Double
+        if let userCoord = locationManager.userLocation {
+            let userLoc = CLLocation(latitude: userCoord.latitude, longitude: userCoord.longitude)
+            distanceMeters = userLoc.distance(from: stationLoc)
+        } else {
+            distanceMeters = 350 // Fallback
+        }
+        
+        let distanceKm = distanceMeters / 1000.0
+        let distanceStr: String
+        if distanceKm < 1.0 {
+            distanceStr = String(format: "%.0f m", distanceMeters)
+        } else {
+            distanceStr = String(format: "%.2f km", distanceKm)
+        }
+        
+        // Average walking speed ~ 5 km/h = 1.38 m/s -> 83 meters/minute
+        let walkTimeMinutes = max(1, Int(ceil(distanceMeters / 83.3)))
+        return (distanceStr, walkTimeMinutes)
+    }
+
+    private var nextDepartureMinutes: String {
+        if let first = departures.first {
+            let dateStr = first.stopDateTime.departureDateTime
+            if let date = DateFormat.navitia.date(from: dateStr) {
+                let diff = Int(ceil(date.timeIntervalSinceNow / 60))
+                return diff <= 0 ? "Imminent" : "\(diff) min"
+            }
+        }
+        return "Aucun"
+    }
+
+    private var accessibilityStatus: String {
+        let hasGpe = currentStation.lines.contains { ["15", "16", "17", "18"].contains($0.name) }
+        if hasGpe {
+            return "Accessible"
+        } else if currentStation.mainType == .tram {
+            return "Accessible"
+        } else if currentStation.isHub {
+            return "Partielle"
+        } else {
+            return "Non accessible"
+        }
+    }
+
+    @ViewBuilder
+    private func metricCell(title: String, value: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(.caption, design: .rounded))
+                .fontWeight(.bold)
+                .foregroundColor(.gray)
+            MetricValueView(value: value, color: color)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     var contentView: some View {
         VStack(spacing: 0) {
-            // Header — Station name + close
+            // Fixed Top Bar: Localisation + Close Button
             HStack(alignment: .center) {
-                let words = currentStation.name.components(separatedBy: " ")
                 HStack(spacing: 4) {
-                    ForEach(Array(words.enumerated()), id: \.offset) { index, word in
-                        AnimatedStationWordView(text: word, sequenceIndex: index, size: 22)
-                    }
+                    Image(systemName: "mappin.circle.fill")
+                        .foregroundColor(Color(hex: "30D158")) // neon green
+                        .font(.footnote)
+                    Text((currentStation.city ?? "Île-de-France").uppercased())
+                        .font(.system(.caption, design: .rounded))
+                        .fontWeight(.bold)
+                        .foregroundColor(.gray)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-
+                
                 Spacer()
-
+                
                 // Close button
                 Button(action: {
                     if let onDismiss = onDismiss {
@@ -174,221 +239,296 @@ struct StationDetailSheet: View {
                     }
                 }) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(.primary)
-                        .frame(width: 22, height: 33)
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(8)
                 }
-                .buttonStyle(.glass)
-                .glassEffect(.regular.interactive(), in: .circle)
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: Circle())
             }
             .padding(.horizontal)
             .padding(.top, 16)
-
-            // Row 2: Y aller button + action buttons
-            HStack(spacing: 10) {
-                // Y aller — prominent button
-                Button(action: { showItinerary = true }) {
-                    Label("Y aller", systemImage: "arrow.triangle.turn.up.right.circle.fill")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        
-                }
-                .buttonStyle(.glassProminent)
-                .glassEffect(.regular.interactive(), in: .capsule)
-                
-
-                Spacer()
-            }
-            .padding(.horizontal)
-            .padding(.top, 8)
-
-            // Filtre des modes
-            let groups = groupDepartures(departures)
-            let availableModes = getAvailableModes(from: groups)
-            if availableModes.count > 1 {
-                Picker("Mode", selection: $selectedMode) {
-                    Text("Tout").tag("Tout")
-                    ForEach(availableModes, id: \.self) { mode in
-                        Text(mode).tag(mode)
-                    }
-                }
-                .pickerStyle(SegmentedPickerStyle())
-                .padding(.horizontal)
-                .padding(.top, 8)
-            }
+            .padding(.bottom, 8)
 
             ScrollView {
-                VStack(spacing: 16) {
-                    let filteredGroups = groups.filter { group in
-                        if selectedMode == "Tout" { return true }
-                        return group.mode?.lowercased().contains(selectedMode.lowercased()) ?? false
-                            || (group.mode == nil && selectedMode == "Autre")
-                    }
-                    let gpeLines = currentStation.lines.filter { ["15", "16", "17", "18"].contains($0.name) }
-
-                    if filteredGroups.isEmpty && gpeLines.isEmpty {
-                        let activeLines = currentStation.lines.filter { !["15", "16", "17", "18"].contains($0.name) }
-                        let hour = Calendar.current.component(.hour, from: Date())
-                        let isNight = hour >= 1 && hour < 5
-                        
-                        if !activeLines.isEmpty {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("Lignes desservies")
-                                    .font(.headline)
-                                    .foregroundColor(.secondary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal)
-                                    .padding(.top, 12)
-                                
-                                ForEach(activeLines) { line in
-                                    HStack(spacing: 12) {
-                                        // Badge
-                                        LineBadge(line: line)
-                                            .scaleEffect(1.2)
-                                            .frame(width: 32, height: 32)
-                                        
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(line.name.count < 3 ? "\(line.type.rawValue) Ligne \(line.name)" : line.name)
-                                                .font(.subheadline)
-                                                .fontWeight(.semibold)
-                                            Text(isNight ? "Service de jour terminé • Reprise à 05:30" : "Aucun départ imminent")
-                                                .font(.caption)
-                                                .foregroundColor(.secondary)
-                                        }
-                                        Spacer()
-                                    }
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 12)
-                                    .background(.ultraThinMaterial)
-                                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                                    .padding(.horizontal)
-                                }
+                VStack(spacing: 0) {
+                    // Large Title (Animated station name)
+                    VStack(alignment: .leading, spacing: 6) {
+                        let words = currentStation.name.components(separatedBy: " ")
+                        HStack(spacing: 6) {
+                            ForEach(Array(words.enumerated()), id: \.offset) { index, word in
+                                AnimatedStationWordView(text: word, sequenceIndex: index, size: 30)
                             }
-                        } else {
-                            VStack(spacing: 16) {
-                                Spacer().frame(height: 20)
-                                Image(systemName: "clock.badge.exclamationmark")
-                                    .font(.system(size: 40))
-                                    .foregroundColor(.secondary)
-                                Text("Aucun départ trouvé")
-                                    .font(.headline)
-                                    .foregroundColor(.secondary)
-                                Text("Veuillez réactualiser ou réessayer plus tard.")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                    .multilineTextAlignment(.center)
-                                    .padding(.horizontal)
-                            }
-                            .padding(.top, 20)
                         }
-                    } else {
-                        let categories = ["Métro", "RER", "Tramway", "Train", "Bus", "Autre"]
-                        ForEach(categories, id: \.self) { category in
-                            let categoryGroups = filteredGroups.filter { displayModeName(for: $0.mode) == category }
-                            if !categoryGroups.isEmpty {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Text(category.uppercased())
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        
+                        // Sub-header stats row (Distance only, clean styling)
+                        let stats = stationDistanceAndWalkTime
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(stats.distanceStr)
+                                .font(.system(size: 28, weight: .black, design: .rounded))
+                                .foregroundColor(Color(hex: "30D158")) // green
+                        }
+                        .padding(.top, 2)
+                    }
+                    .padding(.horizontal)
+                    
+                    // Action button: Calculate route
+                    Button(action: { showItinerary = true }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "arrow.triangle.turn.up.right.circle.fill")
+                                .font(.title3)
+                            Text("Calculer l'itinéraire")
+                                .font(.subheadline)
+                                .fontWeight(.bold)
+                        }
+                        .foregroundColor(.black)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color(hex: "30D158")) // Green
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.interactive())
+                    .padding(.horizontal)
+                    .padding(.top, 12)
+                    
+                    // Mode Picker
+                    let groups = groupDepartures(departures)
+                    let availableModes = getAvailableModes(from: groups)
+                    if availableModes.count > 1 {
+                        Picker("Mode", selection: $selectedMode) {
+                            Text("Tout").tag("Tout")
+                            ForEach(availableModes, id: \.self) { mode in
+                                Text(mode).tag(mode)
+                            }
+                        }
+                        .pickerStyle(SegmentedPickerStyle())
+                        .padding(.horizontal)
+                        .padding(.top, 16)
+                    }
+                    
+                    // Section Title: Details
+                    HStack {
+                        Text("Détails de la station")
+                            .font(.system(.title3, design: .rounded))
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.gray)
+                        Spacer()
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 24)
+                    
+                    // Statistics Card Grid
+                    let detailsStats = stationDistanceAndWalkTime
+                    VStack(spacing: 16) {
+                        HStack(spacing: 0) {
+                            metricCell(title: "TEMPS DE MARCHE", value: "\(detailsStats.walkTimeMinutes) MIN", color: Color(hex: "FFCC00")) // Yellow
+                            metricCell(title: "DISTANCE À PIED", value: detailsStats.distanceStr.uppercased(), color: Color(hex: "30B0C7")) // Cyan/Blue
+                        }
+                        
+                        HStack(spacing: 0) {
+                            metricCell(title: "LIGNES DE TRANSPORT", value: "\(currentStation.lines.count) LIGNES", color: Color(hex: "FF453A")) // Red
+                            metricCell(title: "QUAIS ACTIFS", value: "\(currentStation.platforms.count) QUAIS", color: Color(hex: "30D158")) // Green
+                        }
+                        
+                        HStack(spacing: 0) {
+                            metricCell(title: "PROCHAIN PASSAGE", value: nextDepartureMinutes.uppercased(), color: Color(hex: "FF9F0A")) // Orange
+                            metricCell(title: "ACCESSIBILITÉ PMR", value: accessibilityStatus.uppercased(), color: Color(hex: "BF5AF2")) // Purple
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    
+                    Divider()
+                        .background(Color.white.opacity(0.15))
+                        .padding(.horizontal)
+                        .padding(.vertical, 12)
+                    
+                    // Departures / Line Group rows
+                    VStack(spacing: 20) {
+                        let filteredGroups = groups.filter { group in
+                            if selectedMode == "Tout" { return true }
+                            return group.mode?.lowercased().contains(selectedMode.lowercased()) ?? false
+                                || (group.mode == nil && selectedMode == "Autre")
+                        }
+                        let gpeLines = currentStation.lines.filter { ["15", "16", "17", "18"].contains($0.name) }
+                        
+                        if filteredGroups.isEmpty && gpeLines.isEmpty {
+                            let activeLines = currentStation.lines.filter { !["15", "16", "17", "18"].contains($0.name) }
+                            let hour = Calendar.current.component(.hour, from: Date())
+                            let isNight = hour >= 1 && hour < 5
+                            
+                            if !activeLines.isEmpty {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("LIGNES DESSERVIES")
                                         .font(.system(.caption, design: .rounded))
                                         .fontWeight(.bold)
                                         .foregroundColor(.secondary)
                                         .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(.horizontal, 20)
-                                        .padding(.top, 10)
+                                        .padding(.horizontal)
+                                        .padding(.top, 12)
                                     
-                                    ForEach(categoryGroups) { group in
-                                        LineGroupRowSheet(
-                                            group: group,
-                                            station: currentStation,
-                                            liveActivityManager: liveActivityManager,
-                                            onLiveActivity: { lineName, direction, times, color, textColor in
-                                                startLiveActivity(
-                                                    lineName: lineName,
-                                                    direction: direction,
-                                                    nextDepartures: times,
-                                                    lineColor: color,
-                                                    textColor: textColor
-                                                )
+                                    ForEach(activeLines) { line in
+                                        HStack(spacing: 12) {
+                                            LineBadge(line: line)
+                                                .scaleEffect(1.2)
+                                                .frame(width: 32, height: 32)
+                                            
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(line.name.count < 3 ? "\(line.type.rawValue) Ligne \(line.name)" : line.name)
+                                                    .font(.subheadline)
+                                                    .fontWeight(.semibold)
+                                                    .foregroundColor(.white)
+                                                Text(isNight ? "Service de jour terminé • Reprise à 05:30" : "Aucun départ imminent")
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
                                             }
-                                        )
+                                            Spacer()
+                                        }
+                                        .padding(.vertical, 12)
+                                        .padding(.horizontal)
+                                        
+                                        Divider()
+                                            .background(Color.white.opacity(0.15))
+                                            .padding(.horizontal)
+                                    }
+                                }
+                            } else {
+                                VStack(spacing: 16) {
+                                    Spacer().frame(height: 20)
+                                    Image(systemName: "clock.badge.exclamationmark")
+                                        .font(.system(size: 40))
+                                        .foregroundColor(.secondary)
+                                    Text("Aucun départ trouvé")
+                                        .font(.headline)
+                                        .foregroundColor(.secondary)
+                                    Text("Veuillez réactualiser ou réessayer plus tard.")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                        .multilineTextAlignment(.center)
+                                        .padding(.horizontal)
+                                }
+                                .padding(.top, 20)
+                            }
+                        } else {
+                            let categories = ["Métro", "RER", "Tramway", "Train", "Bus", "Autre"]
+                            ForEach(categories, id: \.self) { category in
+                                let categoryGroups = filteredGroups.filter { displayModeName(for: $0.mode) == category }
+                                if !categoryGroups.isEmpty {
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        Text(category.uppercased())
+                                            .font(.system(.caption, design: .rounded))
+                                            .fontWeight(.bold)
+                                            .foregroundColor(.secondary)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .padding(.horizontal, 20)
+                                            .padding(.top, 14)
+                                        
+                                        ForEach(categoryGroups) { group in
+                                            LineGroupRowSheet(
+                                                group: group,
+                                                station: currentStation,
+                                                liveActivityManager: liveActivityManager,
+                                                departures: departures,
+                                                selectedDetent: selectedDetent,
+                                                onLiveActivity: { lineName, direction, times, color, textColor in
+                                                    startLiveActivity(
+                                                        lineName: lineName,
+                                                        direction: direction,
+                                                        nextDepartures: times,
+                                                        lineColor: color,
+                                                        textColor: textColor
+                                                    )
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-
-                    // Grand Paris Express lines (Estimated delivery dates)
-                    if !gpeLines.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Grand Paris Express (En construction)")
-                                .font(.headline)
-                                .foregroundColor(.primary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal)
-                                .padding(.top, filteredGroups.isEmpty ? 0 : 8)
-
-                            ForEach(gpeLines) { gpeLine in
-                                VStack(alignment: .leading, spacing: 8) {
-                                    HStack(spacing: 10) {
-                                        // GPE Line Logo using SVG vector
-                                        if UIImage(named: gpeLine.assetName) != nil {
-                                            Image(gpeLine.assetName)
-                                                .resizable()
-                                                .scaledToFit()
-                                                .frame(width: 36, height: 36)
-                                        } else {
-                                            Circle()
-                                                .fill(resolveLineColor(gpeLine.name, type: .metro))
-                                                .frame(width: 30, height: 30)
-                                                .overlay(
-                                                    Text(gpeLine.name)
-                                                        .font(.subheadline)
-                                                        .bold()
-                                                        .foregroundColor(.white)
-                                                )
+                        
+                        // Grand Paris Express lines (Estimated delivery dates)
+                        if !gpeLines.isEmpty {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("GRAND PARIS EXPRESS (EN CONSTRUCTION)")
+                                    .font(.system(.caption, design: .rounded))
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 20)
+                                    .padding(.top, 14)
+                                
+                                ForEach(gpeLines) { gpeLine in
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        HStack(spacing: 10) {
+                                            if UIImage(named: gpeLine.assetName) != nil {
+                                                Image(gpeLine.assetName)
+                                                    .resizable()
+                                                    .scaledToFit()
+                                                    .frame(width: 36, height: 36)
+                                            } else {
+                                                Circle()
+                                                    .fill(resolveLineColor(gpeLine.name, type: .metro))
+                                                    .frame(width: 30, height: 30)
+                                                    .overlay(
+                                                        Text(gpeLine.name)
+                                                            .font(.subheadline)
+                                                            .bold()
+                                                            .foregroundColor(.white)
+                                                    )
+                                            }
+                                            
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text("Métro Ligne \(gpeLine.name)")
+                                                    .font(.subheadline)
+                                                    .fontWeight(.semibold)
+                                                    .foregroundColor(.white)
+                                                Text("Société des Grands Projets")
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                            Spacer()
                                         }
                                         
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text("Métro Ligne \(gpeLine.name)")
-                                                .font(.subheadline)
-                                                .fontWeight(.semibold)
-                                            Text("Société des Grands Projets")
-                                                .font(.caption)
-                                                .foregroundColor(.secondary)
-                                        }
-
-                                        Spacer()
-                                    }
-                                    .padding(.horizontal)
-
-                                    // Delivery Date Box
-                                    HStack {
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text("Date de livraison estimée")
-                                                .font(.caption)
-                                                .foregroundColor(.secondary)
-                                            
-                                            Text(getGPEDeliveryDate(lineName: gpeLine.name, stationName: currentStation.name))
-                                                .font(.subheadline)
-                                                .bold()
+                                        // Delivery Date Box
+                                        HStack {
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text("Date de livraison estimée")
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                                
+                                                Text(getGPEDeliveryDate(lineName: gpeLine.name, stationName: currentStation.name))
+                                                    .font(.subheadline)
+                                                    .bold()
+                                                    .foregroundColor(.blue)
+                                            }
+                                            Spacer()
+                                            Image(systemName: "calendar")
+                                                .font(.title3)
                                                 .foregroundColor(.blue)
                                         }
-                                        Spacer()
-                                        Image(systemName: "calendar")
-                                            .font(.title3)
-                                            .foregroundColor(.blue)
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 12)
+                                        .background(Color.black.opacity(0.2))
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
                                     }
-                                    .padding(.horizontal, 14)
                                     .padding(.vertical, 12)
-                                    .background(.ultraThinMaterial)
-                                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                                    .padding(.horizontal)
+                                    
+                                    Divider()
+                                        .background(Color.white.opacity(0.15))
+                                        .padding(.horizontal)
                                 }
-                                .padding(.horizontal)
                             }
                         }
                     }
+                    .padding(.top, 16)
+                    .padding(.bottom, 100)
                 }
-                .padding(.top, 12)
-                .padding(.bottom, 100)
             }
             .scrollContentBackground(.hidden)
         }
@@ -1021,15 +1161,17 @@ private struct LineGroupRowSheet: View {
     let group: LineGroup
     let station: MapStation
     let liveActivityManager: LiveActivityManager
+    let departures: [Departure]
+    var selectedDetent: Binding<PresentationDetent>? = nil
     let onLiveActivity: (String, String, [String], String, String) -> Void
     @Environment(\.colorScheme) var colorScheme
     @ObservedObject var favoritesService = FavoritesService.shared
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             // En-tête : badge ligne + réseau
             lineHeader
-
+            
             // Contenu
             if let resume = group.resumeTime {
                 nightServiceView(resume: resume)
@@ -1037,7 +1179,12 @@ private struct LineGroupRowSheet: View {
                 directionsView
             }
         }
+        .padding(.vertical, 8)
         .padding(.horizontal)
+        
+        Divider()
+            .background(Color.white.opacity(0.15))
+            .padding(.horizontal)
     }
 
     private var lineHeader: some View {
@@ -1116,7 +1263,6 @@ private struct LineGroupRowSheet: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal)
     }
 
     private func mapModeToType(_ mode: String?) -> TransportType {
@@ -1130,10 +1276,29 @@ private struct LineGroupRowSheet: View {
     }
 
     private func locateBusStops() {
+        if let selectedDetent = selectedDetent {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                selectedDetent.wrappedValue = .fraction(0.22)
+            }
+        }
+        
         let busPlatforms = station.platforms.filter { $0.lineName == group.label && $0.type == .bus }
         guard !busPlatforms.isEmpty else {
             print("⚠️ No physical bus stops found for line \(group.label)")
             return
+        }
+        
+        // Build map of stopPoint ID -> Directions from departures
+        var stopDirections: [String: Set<String>] = [:]
+        for dep in departures {
+            let info = dep.displayInformations
+            let label = info.label ?? info.code ?? ""
+            if label == group.label,
+               let stopPointId = dep.stopDateTime.stopPoint?.id,
+               let direction = info.direction {
+                let cleanId = stopPointId.replacingOccurrences(of: "stop_point:", with: "")
+                stopDirections[cleanId, default: []].insert(direction)
+            }
         }
         
         let mapView = SharedMapView.main.mapView
@@ -1142,10 +1307,22 @@ private struct LineGroupRowSheet: View {
         
         var annotationsToAdd: [BusStopTempAnnotation] = []
         for platform in busPlatforms {
+            let cleanPlatformId = platform.id.replacingOccurrences(of: "stop_point:", with: "")
+            let directions = stopDirections[cleanPlatformId] ?? []
+            
+            let subtitleStr: String
+            if !directions.isEmpty {
+                subtitleStr = "Direction: " + directions.joined(separator: " / ")
+            } else {
+                subtitleStr = "Ligne \(group.label)"
+            }
+            
             let anno = BusStopTempAnnotation(
                 coordinate: platform.coordinate,
-                title: "\(station.name) - Bus \(group.label)",
-                subtitle: "Arrêt physique"
+                title: platform.name,
+                subtitle: subtitleStr,
+                lineColor: UIColor(Color(hex: group.color)),
+                lineName: group.label
             )
             annotationsToAdd.append(anno)
         }
@@ -1182,8 +1359,8 @@ private struct LineGroupRowSheet: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.03))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .background(Color.black.opacity(0.25))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private var directionsView: some View {
@@ -1197,14 +1374,14 @@ private struct LineGroupRowSheet: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
-                .background(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.03))
             } else {
                 ForEach(Array(group.directions.enumerated()), id: \.element.id) { index, direction in
                     directionRow(direction: direction, index: index)
                 }
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .background(Color.black.opacity(0.25))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private func directionRow(direction: StationDetailSheet.DirectionGroup, index: Int) -> some View {
@@ -1371,6 +1548,30 @@ private struct AnimatedStationWordView: View {
             .onAppear {
                 startAnimation = true
             }
+    }
+}
+
+private struct MetricValueView: View {
+    let value: String
+    let color: Color
+    
+    var body: some View {
+        let parts = value.components(separatedBy: " ")
+        if parts.count == 2, (Double(parts[0]) != nil || parts[0].contains(":") || parts[0].allSatisfy({ $0.isNumber })) {
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(parts[0])
+                    .font(.system(size: 26, weight: .black, design: .rounded))
+                    .foregroundColor(color)
+                Text(parts[1])
+                    .font(.system(.footnote, design: .rounded))
+                    .fontWeight(.bold)
+                    .foregroundColor(color)
+            }
+        } else {
+            Text(value)
+                .font(.system(size: 20, weight: .black, design: .rounded))
+                .foregroundColor(color)
+        }
     }
 }
 

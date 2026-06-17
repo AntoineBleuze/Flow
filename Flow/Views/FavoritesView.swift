@@ -55,12 +55,13 @@ struct FavoritesView: View {
                             .foregroundColor(.gray)
                         Text("Aucun favori")
                             .font(.headline)
+                            .foregroundColor(.white)
                         Text(
                             "Ajoutez des lignes à vos favoris en appuyant sur l'icône de cœur à côté de chaque ligne dans le détail d'une station."
                         )
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.gray)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding(.horizontal, 20)
@@ -81,14 +82,7 @@ struct FavoritesView: View {
                     .frame(maxWidth: .infinity) // center within parent
                 }
             }
-            .background {
-                ZStack {
-                    ShaderAnimationView(isLoading: true)
-                    (colorScheme == .dark ? Color.black.opacity(0.05) : Color.white.opacity(0.05))
-                        .background(.ultraThinMaterial.opacity(0.97))
-                }
-                .ignoresSafeArea()
-            }
+            .background(Color.black.ignoresSafeArea())
             .navigationTitle("Favoris")
             .navigationBarTitleDisplayMode(.large)
         }
@@ -137,12 +131,12 @@ struct FavoriteLineRow: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(lineNameString)
                         .font(.headline)
-                        .foregroundColor(.primary)
+                        .foregroundColor(.white)
                     
                     if let stationName = entry.stationName {
                         Text(stationName)
                             .font(.subheadline)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.gray)
                     } else {
                         HStack(spacing: 6) {
                             Image(systemName: line.status.icon)
@@ -175,18 +169,19 @@ struct FavoriteLineRow: View {
                         .foregroundColor(.red)
                         .font(.system(size: 16, weight: .bold))
                         .frame(width: 36, height: 36)
-                        .background(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.05), in: Circle())
+                        .background(Color.white.opacity(0.1), in: Circle())
                 }
                 .buttonStyle(.plain)
                 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.gray)
             }
             
             // Real-time departures (if stationId exists)
             if entry.stationId != nil {
                 Divider()
+                    .background(Color.white.opacity(0.15))
                 
                 if isLoading && departures.isEmpty {
                     HStack {
@@ -194,13 +189,13 @@ struct FavoriteLineRow: View {
                             .scaleEffect(0.8)
                         Text("Chargement des départs...")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.gray)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 } else if departures.isEmpty {
                     Text("Aucun départ prévu ou info indisponible")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.gray)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     let grouped = groupedDepartures
@@ -209,7 +204,7 @@ struct FavoriteLineRow: View {
                             HStack {
                                 Text(group.direction)
                                     .font(.caption)
-                                    .foregroundColor(.primary)
+                                    .foregroundColor(.white)
                                     .lineLimit(1)
                                 
                                 Spacer()
@@ -234,17 +229,13 @@ struct FavoriteLineRow: View {
                     }
                 }
             }
+            
+            Divider()
+                .background(Color.white.opacity(0.15))
+                .padding(.top, 4)
         }
-        .padding()
-        // Premium glassmorphic look
-        .background(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.03), lineWidth: 1)
-        )
         .padding(.horizontal)
-        .padding(.vertical, 4)
+        .padding(.vertical, 8)
         .onAppear {
             startFetching()
         }

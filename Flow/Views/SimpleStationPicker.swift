@@ -101,6 +101,12 @@ struct SimpleStationPicker: View {
                                                 .foregroundColor(.red)
                                         }
                                     }
+                                    
+                                    if let city = station.city, !city.isEmpty {
+                                        Text(city)
+                                            .font(.subheadline)
+                                            .foregroundColor(.gray)
+                                    }
                                 }
                                 Spacer()
                             }
@@ -190,7 +196,7 @@ struct SimpleStationPicker: View {
             }
             
             let addressStations: [MapStation] = response.mapItems.map { item in
-                let coordinate = item.location.coordinate
+                let coordinate = item.placemark.coordinate
                 
                 let name = item.name ?? ""
                 
@@ -201,7 +207,8 @@ struct SimpleStationPicker: View {
                     platforms: [],
                     isHub: false,
                     mainType: .bus,
-                    lines: []
+                    lines: [],
+                    city: item.placemark.title ?? "Adresse"
                 )
             }
             

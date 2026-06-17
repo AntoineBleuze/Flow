@@ -37,6 +37,7 @@ struct AppMapView: View {
     @State private var selectedJourney: Journey?
     @State private var itineraryPanelState: ItineraryPanelState = .compact
     @State private var isNavigatingImmersive = false
+    @State private var sheetDetent: PresentationDetent = .medium
     
     // iPad panel resize state
     @State private var iPadPanelHeight: CGFloat = 600
@@ -209,8 +210,8 @@ struct AppMapView: View {
             get: { horizontalSizeClass == .regular ? nil : coordinator.selectedStation },
             set: { coordinator.selectedStation = $0 }
         )) { station in
-            StationDetailSheet(station: station)
-                .presentationDetents([.medium, .large])
+            StationDetailSheet(station: station, selectedDetent: $sheetDetent)
+                .presentationDetents([.fraction(0.22), .medium, .large], selection: $sheetDetent)
         }
         .onAppear {
             LocationManager.shared.requestLocation()
@@ -222,6 +223,9 @@ struct AppMapView: View {
                 for annotation in mapView.selectedAnnotations {
                     mapView.deselectAnnotation(annotation, animated: true)
                 }
+            }
+            if newId != nil {
+                sheetDetent = .medium
             }
         }
         .onChange(of: data.externalSelection) { _, newStation in

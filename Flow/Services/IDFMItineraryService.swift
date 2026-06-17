@@ -7,7 +7,12 @@ class IDFMItineraryService: ObservableObject {
     private let baseURL = "https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia"
 
     func searchItinerary(
-        from: CLLocationCoordinate2D, to: MapStation, date: Date = Date(), isArrival: Bool = false
+        from: CLLocationCoordinate2D,
+        to: MapStation,
+        date: Date = Date(),
+        isArrival: Bool = false,
+        forbiddenUris: [String] = [],
+        isAccessible: Bool = false
     ) -> AnyPublisher<[Journey], Error> {
         // Mode serveur : passer par FlowServer si activé
         if FlowServerService.shared.isEnabled {
@@ -16,7 +21,9 @@ class IDFMItineraryService: ObservableObject {
                 from: from,
                 to: to.coordinate,
                 date: date,
-                isArrival: isArrival
+                isArrival: isArrival,
+                forbiddenUris: forbiddenUris,
+                isAccessible: isAccessible
             )
             .catch { [weak self] error -> AnyPublisher<[Journey], Error> in
                 print("⚠️ [Server Mode] FlowServer failed: \(error.localizedDescription). Falling back to direct Navitia.")
@@ -27,7 +34,9 @@ class IDFMItineraryService: ObservableObject {
                     from: from,
                     to: to,
                     date: date,
-                    isArrival: isArrival
+                    isArrival: isArrival,
+                    forbiddenUris: forbiddenUris,
+                    isAccessible: isAccessible
                 )
             }
             .eraseToAnyPublisher()
@@ -38,12 +47,19 @@ class IDFMItineraryService: ObservableObject {
             from: from,
             to: to,
             date: date,
-            isArrival: isArrival
+            isArrival: isArrival,
+            forbiddenUris: forbiddenUris,
+            isAccessible: isAccessible
         )
     }
 
     private func searchDirectItinerary(
-        from: CLLocationCoordinate2D, to: MapStation, date: Date = Date(), isArrival: Bool = false
+        from: CLLocationCoordinate2D,
+        to: MapStation,
+        date: Date = Date(),
+        isArrival: Bool = false,
+        forbiddenUris: [String] = [],
+        isAccessible: Bool = false
     ) -> AnyPublisher<[Journey], Error> {
         // Format coordinates: "lon;lat"
         let fromCoord = "\(from.longitude);\(from.latitude)"
@@ -57,7 +73,7 @@ class IDFMItineraryService: ObservableObject {
         formatter.dateFormat = "yyyyMMdd'T'HHmmss"
         let dateStr = formatter.string(from: date)
 
-        components.queryItems = [
+        var queryItems = [
             URLQueryItem(name: "from", value: fromCoord),
             URLQueryItem(name: "to", value: toCoord),
             URLQueryItem(name: "datetime", value: dateStr),
@@ -65,6 +81,16 @@ class IDFMItineraryService: ObservableObject {
             URLQueryItem(name: "count", value: "5"),
             URLQueryItem(name: "depth", value: "3"),  // Get detailed sections
         ]
+
+        if isAccessible {
+            queryItems.append(URLQueryItem(name: "traveler_type", value: "wheelchair"))
+        }
+
+        for uri in forbiddenUris {
+            queryItems.append(URLQueryItem(name: "forbidden_uris[]", value: uri))
+        }
+
+        components.queryItems = queryItems
 
         guard let url = components.url else {
             return Fail(error: URLError(.badURL)).eraseToAnyPublisher()

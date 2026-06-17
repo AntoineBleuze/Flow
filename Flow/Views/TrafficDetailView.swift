@@ -16,15 +16,17 @@ struct TrafficDetailView: View {
                     VStack(alignment: .leading) {
                         Text("Ligne \(line.lineId)")
                             .font(.title).bold()
+                            .foregroundColor(.white)
                         Text(line.status.description)
                             .font(.headline)
                             .foregroundColor(line.status.color)
                     }
                     Spacer()
                 }
-                .padding()
-                .background(.ultraThinMaterial.opacity(0.97))
-                .clipShape(RoundedRectangle(cornerRadius: 15))
+                .padding(.vertical, 8)
+                
+                Divider()
+                    .background(Color.white.opacity(0.15))
 
                 // Section: Détails des incidents
                 let activeInfos = deduplicateInfos(
@@ -33,6 +35,7 @@ struct TrafficDetailView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Détails des incidents")
                             .font(.headline)
+                            .foregroundColor(.white)
                             .padding(.bottom, 5)
 
                         ForEach(activeInfos) { info in
@@ -42,7 +45,7 @@ struct TrafficDetailView: View {
                 } else if line.status == .normal {
                     Text("Aucun incident signalé pour le moment.")
                         .font(.body)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.gray)
                         .padding()
                 }
 
@@ -53,6 +56,7 @@ struct TrafficDetailView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Travaux et événements à venir")
                             .font(.headline)
+                            .foregroundColor(.white)
                             .padding(.top, 10)
                             .padding(.bottom, 5)
 
@@ -66,21 +70,7 @@ struct TrafficDetailView: View {
             }
             .padding()
         }
-        .background {
-            ZStack {
-                let lineColor: Color = {
-                    if let hex = line.colorHex {
-                        return Color(hex: hex)
-                    } else {
-                        return resolveLineColor(line.lineId, type: line.type)
-                    }
-                }()
-                ShaderAnimationView(isLoading: false, customColors: [lineColor])
-                (colorScheme == .dark ? Color.black.opacity(0.05) : Color.white.opacity(0.05))
-                    .background(.ultraThinMaterial.opacity(0.65))
-            }
-            .ignoresSafeArea()
-        }
+        .background(Color.black.ignoresSafeArea())
         .navigationTitle("Info Trafic")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -116,6 +106,7 @@ struct TrafficInfoCard: View {
                     .foregroundColor(isActive ? info.severity.color : .blue)
                 Text(info.title)
                     .font(.subheadline).bold()
+                    .foregroundColor(.white)
                 Spacer()
             }
 
@@ -124,13 +115,14 @@ struct TrafficInfoCard: View {
                 let messageText = formatMessage(info.message)
                 Text(.init(messageText))
                     .font(.body)
+                    .foregroundColor(.white)
             }
 
             // Section impactée
             if let section = info.impactedSection {
                 Text("📍 \(section)")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.gray)
             }
 
             // Plan de ligne
@@ -149,7 +141,7 @@ struct TrafficInfoCard: View {
                         .foregroundColor(isActive ? info.severity.color : .blue)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
-                        .background(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.05), in: Capsule())
+                        .background(Color.white.opacity(0.12), in: Capsule())
                     }
                     .buttonStyle(.plain)
                     
@@ -160,10 +152,12 @@ struct TrafficInfoCard: View {
                     }
                 }
             }
+            
+            Divider()
+                .background(Color.white.opacity(0.15))
+                .padding(.top, 4)
         }
-        .padding()
-        .background(.ultraThinMaterial.opacity(0.97))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .padding(.vertical, 8)
     }
 
     private func formatMessage(_ message: String) -> String {

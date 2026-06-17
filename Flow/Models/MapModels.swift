@@ -1121,9 +1121,14 @@ class MapDataService: ObservableObject {
     nonisolated private func finalizeStations(_ groupedStops: [String: [StopPoint]]) {
         var initialStations: [MapStation] = []
 
-        for (_, stops) in groupedStops {
+        for (key, stops) in groupedStops {
             // Regrouper par proximité de 20m minimum
             let clusters = MapDataService.clusterStops(stops, maxDistance: 20.0)
+            
+            // Extraire la ville à partir de la clé
+            let components = key.components(separatedBy: "_")
+            let city = components.count > 1 ? components.last : nil
+
             for (clusterIndex, clusterStops) in clusters.enumerated() {
                 guard let first = clusterStops.first else { continue }
 
@@ -1157,7 +1162,8 @@ class MapDataService: ObservableObject {
                     platforms: clusterStops,
                     isHub: false,
                     mainType: mainType,
-                    lines: sortedLines
+                    lines: sortedLines,
+                    city: city
                 )
 
                 initialStations.append(station)
@@ -1360,6 +1366,8 @@ class MapDataService: ObservableObject {
         // Agrégation unique des lignes
         let uniqueLines = Set(allPlatforms.map { StationLine(name: $0.lineName, type: $0.type) })
         let sortedLines = Array(uniqueLines).sorted { $0.name < $1.name }
+
+        let city = stations.first(where: { $0.city != nil && !$0.city!.isEmpty })?.city
         
         return MapStation(
             id: stations.first?.id ?? UUID().uuidString,
@@ -1368,7 +1376,8 @@ class MapDataService: ObservableObject {
             platforms: allPlatforms,
             isHub: true,
             mainType: mainType,
-            lines: sortedLines
+            lines: sortedLines,
+            city: city
         )
     }
 

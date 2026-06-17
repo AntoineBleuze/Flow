@@ -740,12 +740,17 @@ struct MapViewControllerBridge: UIViewRepresentable {
                 return markerView
             }
 
-            if annotation is BusStopTempAnnotation {
+            if let busAnno = annotation as? BusStopTempAnnotation {
                 let reuseId = "busStopTemp"
                 let markerView = mapView.dequeueReusableAnnotationView(withIdentifier: reuseId) as? MKMarkerAnnotationView
                     ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: reuseId)
-                markerView.markerTintColor = UIColor(red: 0.0, green: 0.545, blue: 0.369, alpha: 1.0)
-                markerView.glyphImage = UIImage(systemName: "bus.fill")
+                markerView.markerTintColor = busAnno.lineColor ?? UIColor(red: 0.0, green: 0.545, blue: 0.369, alpha: 1.0)
+                markerView.glyphTintColor = .white
+                if let line = busAnno.lineName {
+                    markerView.glyphText = line
+                } else {
+                    markerView.glyphImage = UIImage(systemName: "bus.fill")
+                }
                 markerView.canShowCallout = true
                 markerView.titleVisibility = .visible
                 markerView.displayPriority = .defaultLow
@@ -938,11 +943,15 @@ class BusStopTempAnnotation: NSObject, MKAnnotation {
     let coordinate: CLLocationCoordinate2D
     let title: String?
     let subtitle: String?
+    let lineColor: UIColor?
+    let lineName: String?
 
-    init(coordinate: CLLocationCoordinate2D, title: String?, subtitle: String?) {
+    init(coordinate: CLLocationCoordinate2D, title: String?, subtitle: String?, lineColor: UIColor?, lineName: String?) {
         self.coordinate = coordinate
         self.title = title
         self.subtitle = subtitle
+        self.lineColor = lineColor
+        self.lineName = lineName
     }
 }
 

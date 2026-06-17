@@ -900,7 +900,7 @@ app.get("/api/traffic", (req, res) => {
 // GET /api/itinerary — Recherche d'itinéraire
 app.get("/api/itinerary", async (req, res) => {
   try {
-    const { from, to, datetime, datetime_represents, count, depth } = req.query;
+    const { from, to, datetime, datetime_represents, count, depth, traveler_type, forbidden_uris } = req.query;
 
     if (!from || !to) {
       return res.status(400).json({ error: "Paramètres 'from' et 'to' requis" });
@@ -913,6 +913,14 @@ app.get("/api/itinerary", async (req, res) => {
     if (datetime_represents) params.set("datetime_represents", datetime_represents);
     params.set("count", count || "5");
     params.set("depth", depth || "3");
+    if (traveler_type) params.set("traveler_type", traveler_type);
+    if (forbidden_uris) {
+      if (Array.isArray(forbidden_uris)) {
+        forbidden_uris.forEach(uri => params.append("forbidden_uris[]", uri));
+      } else {
+        params.append("forbidden_uris[]", forbidden_uris);
+      }
+    }
 
     const url = `${NAVITIA_BASE}/journeys?${params.toString()}`;
 

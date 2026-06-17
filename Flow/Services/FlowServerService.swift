@@ -500,7 +500,9 @@ class FlowServerService: ObservableObject {
         from: CLLocationCoordinate2D,
         to: CLLocationCoordinate2D,
         date: Date = Date(),
-        isArrival: Bool = false
+        isArrival: Bool = false,
+        forbiddenUris: [String] = [],
+        isAccessible: Bool = false
     ) -> AnyPublisher<[Journey], Error> {
         let fromCoord = "\(from.longitude);\(from.latitude)"
         let toCoord = "\(to.longitude);\(to.latitude)"
@@ -510,7 +512,7 @@ class FlowServerService: ObservableObject {
         let dateStr = formatter.string(from: date)
 
         var components = URLComponents(string: "\(baseURL)/api/itinerary")!
-        components.queryItems = [
+        var queryItems = [
             URLQueryItem(name: "from", value: fromCoord),
             URLQueryItem(name: "to", value: toCoord),
             URLQueryItem(name: "datetime", value: dateStr),
@@ -518,6 +520,16 @@ class FlowServerService: ObservableObject {
             URLQueryItem(name: "count", value: "5"),
             URLQueryItem(name: "depth", value: "3"),
         ]
+
+        if isAccessible {
+            queryItems.append(URLQueryItem(name: "traveler_type", value: "wheelchair"))
+        }
+
+        for uri in forbiddenUris {
+            queryItems.append(URLQueryItem(name: "forbidden_uris[]", value: uri))
+        }
+
+        components.queryItems = queryItems
 
         guard let url = components.url else {
             return Fail(error: URLError(.badURL)).eraseToAnyPublisher()

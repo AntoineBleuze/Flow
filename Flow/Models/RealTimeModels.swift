@@ -46,8 +46,20 @@ struct DisplayInformations: Decodable {
 struct StopDateTime: Decodable {
     // Format attendu: "YYYYMMDDTHHMMSS" souvent avec Navitia
     let departureDateTime: String
+    let stopPoint: StopPointRef?
 
     enum CodingKeys: String, CodingKey {
         case departureDateTime = "departure_date_time"
+        case stopPoint = "stop_point"
     }
+
+    init(departureDateTime: String, stopPoint: StopPointRef? = nil) {
+        self.departureDateTime = departureDateTime
+        self.stopPoint = stopPoint
+    }
+}
+
+struct StopPointRef: Decodable {
+    let id: String
+    let name: String?
 }

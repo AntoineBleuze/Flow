@@ -17,6 +17,7 @@ struct SearchTabContent: View {
 
     @Environment(\.modelContext) private var context
     @State private var cancellables = Set<AnyCancellable>()
+    @State private var currentSearch: MKLocalSearch? = nil
     
     // Live Map and Focus Interaction State
     @State private var userTrackingMode: MKUserTrackingMode = .none
@@ -24,19 +25,10 @@ struct SearchTabContent: View {
 
     var body: some View {
         NavigationStack {
-            GlassEffectContainer(spacing: 0) {
-                VStack(spacing: 0) {
-                    stationSearchView
-                }
+            VStack(spacing: 0) {
+                stationSearchView
             }
-            .background {
-                ZStack {
-                    ShaderAnimationView(isLoading: true)
-                    (colorScheme == .dark ? Color.black.opacity(0.05) : Color.white.opacity(0.05))
-                        .background(.ultraThinMaterial.opacity(0.97))
-                }
-                .ignoresSafeArea()
-            }
+            .background(Color.black.ignoresSafeArea())
             .navigationTitle("Recherche")
             .navigationBarTitleDisplayMode(.large)
         }
@@ -55,7 +47,7 @@ struct SearchTabContent: View {
                                     .foregroundColor(.yellow)
                                 Text("Favoris")
                                     .font(.caption).bold()
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(.gray)
                             }
                             .padding(.horizontal)
                             .padding(.top, 8)
@@ -76,6 +68,7 @@ struct SearchTabContent: View {
                         }
                         
                         Divider()
+                            .background(Color.white.opacity(0.15))
                             .padding(.vertical, 4)
                     }
                     
@@ -84,10 +77,10 @@ struct SearchTabContent: View {
                         VStack(alignment: .leading, spacing: 12) {
                             HStack {
                                 Image(systemName: "clock.arrow.circlepath")
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(.gray)
                                 Text("Recherches récentes")
                                     .font(.caption).bold()
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(.gray)
                             }
                             .padding(.horizontal)
                             .padding(.top, 8)
@@ -102,7 +95,9 @@ struct SearchTabContent: View {
                                 .padding(.horizontal)
                                 
                                 if station.id != historyManager.recentStations.last?.id {
-                                    Divider().padding(.leading, 56)
+                                    Divider()
+                                        .background(Color.white.opacity(0.15))
+                                        .padding(.leading, 56)
                                 }
                             }
                         }
@@ -112,7 +107,7 @@ struct SearchTabContent: View {
                         VStack {
                             Spacer()
                             Text("Aucun résultat")
-                                .foregroundColor(.secondary)
+                                .foregroundColor(.gray)
                             Spacer()
                         }
                         .frame(minHeight: 200)
@@ -128,7 +123,9 @@ struct SearchTabContent: View {
                                 .padding(.horizontal)
                                 
                                 if station.id != searchResults.last?.id {
-                                    Divider().padding(.leading, 56)
+                                    Divider()
+                                        .background(Color.white.opacity(0.15))
+                                        .padding(.leading, 56)
                                 }
                             }
                         }
@@ -155,15 +152,16 @@ struct SearchTabContent: View {
     var bottomSearchBar: some View {
         HStack {
             Image(systemName: "magnifyingglass")
-                .foregroundColor(.secondary)
+                .foregroundColor(.gray)
             
             TextField("Rechercher une station...", text: $searchText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.white)
             
             if !searchText.isEmpty {
                 Image(systemName: "xmark.circle.fill")
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.gray)
                     .font(.system(size: 18))
                     .padding(8)
                     .contentShape(Rectangle())
@@ -174,7 +172,7 @@ struct SearchTabContent: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .glassEffect(.regular.interactive(), in: Capsule())
+        .background(Color.white.opacity(0.12), in: Capsule())
         .padding(.horizontal)
         .padding(.bottom, 8)
     }
@@ -194,6 +192,8 @@ struct SearchTabContent: View {
     }
 
     func performSearch(query: String) {
+        currentSearch?.cancel()
+        
         guard !query.isEmpty else {
             searchResults = []
             return
@@ -227,6 +227,8 @@ struct SearchTabContent: View {
             sortBy: [SortDescriptor(\.name, order: .forward)]
         )
         descriptor.fetchLimit = 150
+
+        var localResults: [MapStation] = []
 
         do {
             let busResults = try context.fetch(descriptor)
@@ -287,12 +289,58 @@ struct SearchTabContent: View {
             // 3. Combiner et trier
             var allResults = matchingRailStations + busStations
             allResults.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            localResults = allResults
             searchResults = allResults
 
         } catch {
             print("❌ Search error: \(error)")
-            // Fallback sur les stations ferrées trouvées en cas d'erreur CoreData
+            localResults = matchingRailStations
             searchResults = matchingRailStations
+        }
+
+        // 3. Rechercher les adresses physiques à proximité via MapKit
+        let searchRequest = MKLocalSearch.Request()
+        searchRequest.naturalLanguageQuery = query
+        let parisCenter = CLLocationCoordinate2D(latitude: 48.8566, longitude: 2.3522)
+        searchRequest.region = MKCoordinateRegion(
+            center: parisCenter,
+            latitudinalMeters: 50000,
+            longitudinalMeters: 50000
+        )
+        
+        let search = MKLocalSearch(request: searchRequest)
+        currentSearch = search
+        
+        search.start { response, error in
+            guard let response = response, error == nil else {
+                return
+            }
+            
+            let addressStations: [MapStation] = response.mapItems.map { item in
+                let coordinate = item.placemark.coordinate
+                let name = item.name ?? ""
+                
+                return MapStation(
+                    id: "address:\(coordinate.latitude),\(coordinate.longitude)",
+                    name: name,
+                    coordinate: coordinate,
+                    platforms: [],
+                    isHub: false,
+                    mainType: .bus,
+                    lines: [],
+                    city: item.placemark.title ?? "Adresse"
+                )
+            }
+            
+            DispatchQueue.main.async {
+                var merged = localResults
+                for addr in addressStations {
+                    if !merged.contains(where: { $0.id == addr.id }) {
+                        merged.append(addr)
+                    }
+                }
+                self.searchResults = merged
+            }
         }
     }
 
@@ -366,19 +414,25 @@ struct StationRow: View {
                 HStack(alignment: .center, spacing: 8) {
                     Text(station.name)
                         .font(.system(size: 17, weight: .semibold))
-                        .foregroundColor(.primary)
+                        .foregroundColor(.white)
                     
-                    HStack(spacing: 4) {
-                        let lines = displayedStationLines
-                        ForEach(lines.prefix(8), id: \.id) { line in
-                            LineIcon(type: line.type, lineId: line.name, size: 16)
-                        }
-                        
-                        if station.lines.contains(where: { $0.type == .bus }) {
-                            Image("Bus")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(height: 16)
+                    if station.id.hasPrefix("address:") {
+                        Image(systemName: "mappin.and.ellipse")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    } else {
+                        HStack(spacing: 4) {
+                            let lines = displayedStationLines
+                            ForEach(lines.prefix(8), id: \.id) { line in
+                                LineIcon(type: line.type, lineId: line.name, size: 16)
+                            }
+                            
+                            if station.lines.contains(where: { $0.type == .bus }) {
+                                Image("Bus")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(height: 16)
+                            }
                         }
                     }
                 }
@@ -386,11 +440,11 @@ struct StationRow: View {
                 if let city = station.city, !city.isEmpty {
                     Text(city)
                         .font(.system(size: 13))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.gray)
                 } else {
                     Text(modesString)
                         .font(.system(size: 13))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.gray)
                 }
             }
             
@@ -398,7 +452,7 @@ struct StationRow: View {
             
             Image(systemName: "chevron.right")
                 .font(.system(size: 14, weight: .bold))
-                .foregroundColor(.secondary.opacity(0.5))
+                .foregroundColor(.gray)
         }
         .padding(.vertical, 12)
         .contentShape(Rectangle())

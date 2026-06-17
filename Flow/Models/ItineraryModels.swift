@@ -92,6 +92,35 @@ struct DisplayInformation: Codable {
     let commercial_mode: String?
     let direction: String?
     let physical_mode: String?
+    let line: ItineraryLine?
+
+    init(
+        network: String? = nil,
+        code: String? = nil,
+        label: String? = nil,
+        color: String? = nil,
+        text_color: String? = nil,
+        commercial_mode: String? = nil,
+        direction: String? = nil,
+        physical_mode: String? = nil,
+        line: ItineraryLine? = nil
+    ) {
+        self.network = network
+        self.code = code
+        self.label = label
+        self.color = color
+        self.text_color = text_color
+        self.commercial_mode = commercial_mode
+        self.direction = direction
+        self.physical_mode = physical_mode
+        self.line = line
+    }
+}
+
+struct ItineraryLine: Codable {
+    let id: String?
+    let name: String?
+    let code: String?
 }
 
 // MARK: - GeoJSON
