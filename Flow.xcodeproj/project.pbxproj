@@ -54,6 +54,7 @@
 		6E71765C2ED5D7AC003FAB2D /* Exceptions for "Flow" folder in "Flow" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				"etat-des-ascenseurs.csv",
 				Info.plist,
 			);
 			target = 6E5DC3A82ECD311E005188FE /* Flow */;
@@ -270,6 +271,7 @@
 				INFOPLIST_FILE = FlowWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = FlowWidgets;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -300,6 +302,7 @@
 				INFOPLIST_FILE = FlowWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = FlowWidgets;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

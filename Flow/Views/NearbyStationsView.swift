@@ -12,7 +12,7 @@ struct NearbyStationsView: View {
     var body: some View {
         NavigationStack {
             nearbyStationsContent
-                .background(Color.black.ignoresSafeArea())
+                .liquidGlassBackground()
                 .navigationTitle("À Proximité")
                 .navigationBarTitleDisplayMode(.large)
         }
@@ -23,108 +23,134 @@ struct NearbyStationsView: View {
         if viewModel.permissionDenied {
             VStack(spacing: 20) {
                 Image(systemName: "location.slash.fill")
-                    .font(.system(size: 50))
+                    .font(.system(size: 54))
                     .foregroundColor(.orange)
                 Text("Localisation désactivée")
-                    .font(.headline)
-                    .foregroundColor(.white)
+                    .font(.system(.title3, design: .rounded))
+                    .fontWeight(.bold)
+                    .foregroundColor(.primary)
                 Text(
                     "Veuillez activer la localisation dans les réglages pour voir les stations à proximité."
                 )
+                .font(.subheadline)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal)
-                .foregroundColor(.gray)
+                .padding(.horizontal, 24)
+                .foregroundColor(.secondary)
             }
+            .padding(24)
+            .liquidGlassCard(cornerRadius: 24, padding: 24)
+            .padding(.horizontal, 24)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if viewModel.userLocation == nil {
             VStack(spacing: 20) {
                 Image(systemName: "location.circle.fill")
-                    .font(.system(size: 50))
+                    .font(.system(size: 54))
                     .foregroundColor(.blue)
                 Text("Localisation nécessaire")
-                    .font(.headline)
-                    .foregroundColor(.white)
+                    .font(.system(.title3, design: .rounded))
+                    .fontWeight(.bold)
+                    .foregroundColor(.primary)
                 Text(
                     "Autorisez l'accès à votre position pour trouver les stations autour de vous."
                 )
+                .font(.subheadline)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal)
-                .foregroundColor(.gray)
+                .padding(.horizontal, 24)
+                .foregroundColor(.secondary)
 
                 Button(action: {
                     viewModel.requestLocation()
                 }) {
                     Text("Autoriser la localisation")
+                        .font(.system(.headline, design: .rounded))
                         .fontWeight(.bold)
-                        .padding()
+                        .foregroundColor(.white)
+                        .padding(.vertical, 14)
                         .frame(maxWidth: .infinity)
-                        .foregroundColor(.black)
+                        .background(Color.blue)
+                        .clipShape(Capsule())
+                        .shadow(color: Color.blue.opacity(0.35), radius: 8, y: 3)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.white)
-                .padding(.horizontal, 40)
+                .buttonStyle(.liquidGlassInteractive)
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
             }
+            .padding(24)
+            .liquidGlassCard(cornerRadius: 24, padding: 24)
+            .padding(.horizontal, 24)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if viewModel.nearbyStations.isEmpty {
             VStack(spacing: 20) {
                 RadiusSelector(viewModel: viewModel)
+                    .padding(.top, 8)
 
                 if viewModel.isLoading {
                     ProgressView("Recherche des stations...")
+                        .tint(.primary)
+                        .foregroundColor(.secondary)
                 } else {
-                    VStack(spacing: 20) {
+                    VStack(spacing: 16) {
                         Image(systemName: "tram.fill")
                             .font(.system(size: 50))
-                            .foregroundColor(.gray)
+                            .foregroundColor(.secondary)
                         Text("Aucune station trouvée")
-                            .font(.headline)
-                            .foregroundColor(.white)
+                            .font(.system(.title3, design: .rounded))
+                            .fontWeight(.bold)
+                            .foregroundColor(.primary)
                         Text(
                             "Aucune station dans un rayon de \(Int(viewModel.selectedRadius))m."
                         )
+                        .font(.subheadline)
                         .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-                        .foregroundColor(.gray)
+                        .padding(.horizontal, 20)
+                        .foregroundColor(.secondary)
                     }
+                    .padding(24)
+                    .liquidGlassCard(cornerRadius: 24, padding: 24)
+                    .padding(.horizontal, 20)
                 }
                 Spacer()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(.top)
         } else {
-            VStack(spacing: 0) {
-                RadiusSelector(viewModel: viewModel)
-                    .padding(.vertical, 8)
-
-                List {
-                    ForEach(viewModel.nearbyStations) { station in
-                        Button(action: {
-                            coordinator.selectedStation = station
-                            coordinator.switchToExplore()
-                        }) {
-                            NearbyStationRow(station: station)
-                        }
-                        .buttonStyle(.plain)
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
+            ScrollView {
+                VStack(spacing: 14) {
+                    HStack {
+                        RadiusSelector(viewModel: viewModel)
+                        Spacer()
+                        Text("\(viewModel.nearbyStations.count) stations")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.secondary)
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+
+                    LazyVStack(spacing: 12) {
+                        ForEach(viewModel.nearbyStations) { station in
+                            Button(action: {
+                                coordinator.selectedStation = station
+                                coordinator.switchToExplore()
+                            }) {
+                                NearbyStationRow(station: station)
+                            }
+                            .buttonStyle(.liquidGlassInteractive)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 20)
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
                 .frame(maxWidth: horizontalSizeClass == .regular ? 700 : .infinity)
-                .frame(maxWidth: .infinity) // center within parent
+                .frame(maxWidth: .infinity)
             }
         }
     }
-
-
 }
 
 struct RadiusSelector: View {
     @ObservedObject var viewModel: NearbyStationsViewModel
 
     var body: some View {
-
         Menu {
             ForEach(viewModel.availableRadii, id: \.self) { radius in
                 Button(action: {
@@ -145,16 +171,20 @@ struct RadiusSelector: View {
                 Image(systemName: "arrow.up.and.down.circle.fill")
                     .foregroundColor(.blue)
                 Text(formatRadius(viewModel.selectedRadius))
-                    .font(SwiftUI.Font.subheadline)
+                    .font(.system(.subheadline, design: .rounded))
                     .fontWeight(.bold)
-                    .foregroundColor(.white)
+                    .foregroundColor(.primary)
                 Image(systemName: "chevron.down")
-                    .font(.caption)
-                    .foregroundColor(.gray)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .background(Color.white.opacity(0.12), in: Capsule())
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            )
         }
     }
 
@@ -169,8 +199,9 @@ struct RadiusSelector: View {
 
 struct NearbyStationRow: View {
     let station: MapStation
+    @Environment(\.colorScheme) var colorScheme
 
-    @State private var groupedDepartures: [String: [String: [Departure]]] = [:]  // Structure: [Line: [Direction: [Departures]]]
+    @State private var groupedDepartures: [String: [String: [Departure]]] = [:]
     @State private var isLoading = true
     @State private var cancellables = Set<AnyCancellable>()
 
@@ -198,108 +229,123 @@ struct NearbyStationRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .center, spacing: 8) {
+        LiquidGlassCard(cornerRadius: 18, padding: 14) {
+            VStack(alignment: .leading, spacing: 10) {
+                // Station Header: Name, Transport Badges, Distance Pill
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 5) {
                         Text(station.name)
-                            .font(.headline)
-                            .foregroundColor(.white)
+                            .font(.system(.headline, design: .rounded))
+                            .fontWeight(.bold)
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
 
                         HStack(spacing: 4) {
                             let lines = displayedStationLines
                             ForEach(lines.prefix(5), id: \.id) { line in
-                                LineIcon(type: line.type, lineId: line.name, size: 16)
+                                LineIcon(type: line.type, lineId: line.name, size: 18)
                             }
 
                             if station.mainType != .bus && station.lines.contains(where: { $0.type == .bus }) {
                                 Image("Bus")
                                     .resizable()
                                     .scaledToFit()
-                                    .frame(height: 16)
+                                    .frame(height: 18)
                             }
                         }
                     }
 
-                    if isLoading {
-                        Text("Chargement...")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                    } else if groupedDepartures.isEmpty {
-                        Text("Aucun départ proche")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                    } else {
-                        // Affichage groupé par ligne
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(groupedDepartures.keys.sorted { a, b in
-                                if let numA = Int(a), let numB = Int(b) { return numA < numB }
-                                if Int(a) != nil { return true }
-                                if Int(b) != nil { return false }
-                                return a.localizedStandardCompare(b) == .orderedAscending
-                            }, id: \.self) { lineKey in
-                                if let directions = groupedDepartures[lineKey] {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        HStack(alignment: .center, spacing: 6) {
-                                            // Nom de la ligne
-                                            let firstDep = directions.values.first?.first
-                                            let type = determineType(
-                                                from: firstDep?.displayInformations)
-                                            LineIcon(type: type, lineId: lineKey, size: 18)
-                                        }
+                    Spacer()
 
-                                        // Liste des directions pour cette ligne
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            ForEach(directions.keys.sorted(), id: \.self) {
-                                                directionKey in
-                                                if let deps = directions[directionKey] {
+                    if let distance = distanceFromUser(station: station) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "figure.walk")
+                                .font(.caption2)
+                            Text(distance)
+                                .font(.system(.caption, design: .rounded))
+                                .fontWeight(.bold)
+                        }
+                        .foregroundColor(.primary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .overlay(Capsule().stroke(Color.primary.opacity(0.08), lineWidth: 1))
+                    }
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .padding(.leading, 4)
+                }
+
+                // Departures Preview
+                if isLoading {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .scaleEffect(0.75)
+                        Text("Recherche des horaires...")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.top, 2)
+                } else if groupedDepartures.isEmpty {
+                    Text("Aucun départ immédiat")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 2)
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Divider().opacity(0.5)
+                        
+                        ForEach(groupedDepartures.keys.sorted { a, b in
+                            if let numA = Int(a), let numB = Int(b) { return numA < numB }
+                            if Int(a) != nil { return true }
+                            if Int(b) != nil { return false }
+                            return a.localizedStandardCompare(b) == .orderedAscending
+                        }.prefix(3), id: \.self) { lineKey in
+                            if let directions = groupedDepartures[lineKey] {
+                                let firstDep = directions.values.first?.first
+                                let type = determineType(from: firstDep?.displayInformations)
+                                
+                                HStack(alignment: .center, spacing: 8) {
+                                    LineIcon(type: type, lineId: lineKey, size: 20)
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        ForEach(directions.keys.sorted().prefix(1), id: \.self) { directionKey in
+                                            if let deps = directions[directionKey] {
+                                                HStack {
+                                                    Text(directionKey)
+                                                        .font(.caption)
+                                                        .foregroundColor(.secondary)
+                                                        .lineLimit(1)
+
+                                                    Spacer()
+
                                                     HStack(spacing: 4) {
-                                                        Text(directionKey)
-                                                            .font(.caption)
-                                                            .foregroundColor(.gray)
-                                                            .lineLimit(1)
-
-                                                        Spacer()
-
+                                                        Circle()
+                                                            .fill(LiquidGlassTheme.liveGreen(for: colorScheme))
+                                                            .frame(width: 5, height: 5)
+                                                        
                                                         Text(
                                                             deps.prefix(2).map(formatDepartureTime)
                                                                 .joined(separator: ", ")
                                                         )
-                                                        .font(.caption2)
+                                                        .font(.system(.caption, design: .rounded))
                                                         .fontWeight(.bold)
-                                                        .foregroundColor(.green)
+                                                        .foregroundColor(LiquidGlassTheme.liveGreen(for: colorScheme))
                                                     }
                                                 }
                                             }
                                         }
-                                        .padding(.leading, 24)
                                     }
                                 }
                             }
                         }
                     }
-                }
-
-                Spacer()
-
-                if let distance = distanceFromUser(station: station) {
-                    Text(distance)
-                        .font(.caption)
-                        .fontWeight(.bold)
-                        .foregroundColor(.gray)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.white.opacity(0.12))
-                        .clipShape(Capsule())
+                    .padding(.top, 2)
                 }
             }
-            
-            Divider()
-                .background(Color.white.opacity(0.15))
-                .padding(.top, 4)
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
         .onAppear {
             loadPreview()
         }
@@ -320,7 +366,6 @@ struct NearbyStationRow: View {
     }
 
     private func loadPreview() {
-        // Utiliser les stop_area quand disponibles (1-2 requêtes au lieu de 5-15)
         let stopAreaIds = Set(station.platforms.compactMap { platform -> String? in
             let id = platform.stopAreaId
             if id.isEmpty || id.contains("IDFM:C") || id.contains(":C") { return nil }
@@ -328,7 +373,6 @@ struct NearbyStationRow: View {
         })
 
         if !stopAreaIds.isEmpty {
-            // Requête par stop_area (beaucoup plus efficace)
             let publishers = stopAreaIds.prefix(2).map { id in
                 IDFMService.shared.fetchDepartures(for: "stop_area:\(id)")
                     .catch { _ in Just<[Departure]>([]) }
@@ -351,7 +395,6 @@ struct NearbyStationRow: View {
                 )
                 .store(in: &cancellables)
         } else {
-            // Fallback: limiter à 3 stop_points pour l'aperçu
             let stopIds = Array(Set(station.platforms.map { $0.id }.filter { $0.contains("IDFM:") }).prefix(3))
 
             let publishers = stopIds.map { id in
@@ -393,7 +436,6 @@ struct NearbyStationRow: View {
                 groups[lineLabel]?[direction] = []
             }
 
-            // Limit to 2 departures per direction for preview
             if groups[lineLabel]![direction]!.count < 2 {
                 groups[lineLabel]![direction]!.append(dep)
             }
@@ -420,7 +462,7 @@ struct NearbyStationRow: View {
     }
 }
 
-// Extension pour récupérer la couleur du type de transport (si pas déjà dispo)
+// Extension pour récupérer la couleur du type de transport
 extension TransportType {
     static func color(for type: TransportType) -> Color {
         switch type {
@@ -437,4 +479,3 @@ extension TransportType {
 #Preview {
     NearbyStationsView()
 }
-

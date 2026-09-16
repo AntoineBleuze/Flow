@@ -933,6 +933,312 @@ app.get("/api/itinerary", async (req, res) => {
 });
 
 // ============================================================
+// Base de données des ascenseurs (Données officielles IDFM)
+// ============================================================
+const ELEVATORS_FILE = path.join(__dirname, "etat-des-ascenseurs.csv");
+const ELEVATORS_CACHE_FILE = path.join(CACHE_DIR, "cache_etat_des_ascenseurs.csv");
+const ELEVATORS_REFRESH_INTERVAL_MS = 8 * 60 * 60 * 1000; // 8 heures (3 fois par jour)
+
+function normalizeString(str) {
+  if (!str) return "";
+  return str
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function getDistanceMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371e3;
+  const phi1 = (lat1 * Math.PI) / 180;
+  const phi2 = (lat2 * Math.PI) / 180;
+  const deltaPhi = ((lat2 - lat1) * Math.PI) / 180;
+  const deltaLambda = ((lon2 - lon1) * Math.PI) / 180;
+  const a = Math.sin(deltaPhi / 2) ** 2 + Math.cos(phi1) * Math.cos(phi2) * (Math.sin(deltaLambda / 2) ** 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+const elevatorsDb = {
+  zdcMap: new Map(),       // zdcid -> Array<lift>
+  nameMap: new Map(),      // normalizedName -> Array<lift>
+  coordsList: [],          // Array<{ zdcid, name, lat, lon, lifts }>
+  lastUpdate: null,
+  totalLifts: 0,
+  totalStations: 0
+};
+
+function parseElevatorsCSV(csvContent) {
+  const lines = csvContent.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length < 2) return false;
+
+  const header = lines[0].replace(/^\uFEFF/, "").split(";").map((h) => h.trim());
+  const newZdcMap = new Map();
+  const newNameMap = new Map();
+  const newCoordsList = [];
+  let liftCount = 0;
+  let latestUpdate = null;
+
+  for (let i = 1; i < lines.length; i++) {
+    const parts = lines[i].split(";");
+    if (parts.length < header.length) continue;
+    const row = {};
+    header.forEach((h, idx) => {
+      row[h] = parts[idx] ? parts[idx].trim() : "";
+    });
+
+    const zdcid = row.zdcid;
+    if (!zdcid) continue;
+
+    const liftItem = {
+      liftid: row.liftid || String(liftCount + 1),
+      privateelevatorid: row.privateelevatorid || `Ascenseur ${row.liftid || i}`,
+      liftsituation: row.liftsituation || "",
+      liftdirection: row.liftdirection || "",
+      liftstatus: row.liftstatus || (row.liftstate === "1" ? "available" : row.liftstate === "2" ? "notavailable" : "unknown"),
+      liftreason: row.liftreason || "",
+      liftstateupdate: row.liftstateupdate || "",
+      liftstate: row.liftstate || "",
+      zdcname: row.zdcname || "",
+      severity: row.severity || "1",
+      liftmode: row.liftmode || "",
+      centroidzdc: row.centroidzdc || ""
+    };
+
+    if (row.liftstateupdate && (!latestUpdate || row.liftstateupdate > latestUpdate)) {
+      latestUpdate = row.liftstateupdate;
+    }
+
+    if (!newZdcMap.has(zdcid)) newZdcMap.set(zdcid, []);
+    newZdcMap.get(zdcid).push(liftItem);
+
+    const normName = normalizeString(row.zdcname);
+    if (normName) {
+      if (!newNameMap.has(normName)) newNameMap.set(normName, []);
+      newNameMap.get(normName).push(liftItem);
+    }
+    liftCount++;
+  }
+
+  // Construire la liste des coordonnées géographiques par ZDC
+  for (const [zdcid, lifts] of newZdcMap.entries()) {
+    const firstWithCoords = lifts.find((l) => l.centroidzdc && l.centroidzdc.includes(","));
+    if (firstWithCoords) {
+      const [latStr, lonStr] = firstWithCoords.centroidzdc.split(",").map((s) => s.trim());
+      const lat = parseFloat(latStr);
+      const lon = parseFloat(lonStr);
+      if (!isNaN(lat) && !isNaN(lon)) {
+        newCoordsList.push({
+          zdcid,
+          name: firstWithCoords.zdcname,
+          lat,
+          lon,
+          lifts
+        });
+      }
+    }
+  }
+
+  elevatorsDb.zdcMap = newZdcMap;
+  elevatorsDb.nameMap = newNameMap;
+  elevatorsDb.coordsList = newCoordsList;
+  elevatorsDb.totalLifts = liftCount;
+  elevatorsDb.totalStations = newZdcMap.size;
+  elevatorsDb.lastUpdate = latestUpdate || new Date().toISOString();
+
+  console.log(`🛗 [Elevators DB] Indexation terminée : ${liftCount} ascenseurs sur ${newZdcMap.size} gares/stations.`);
+  return true;
+}
+
+function loadElevatorsData() {
+  try {
+    let loaded = false;
+    // 1. Tenter depuis le cache disque récent
+    if (fs.existsSync(ELEVATORS_CACHE_FILE)) {
+      const cached = fs.readFileSync(ELEVATORS_CACHE_FILE, "utf8");
+      loaded = parseElevatorsCSV(cached);
+      if (loaded) {
+        console.log(`💾 [Elevators Cache] Chargé depuis le cache : ${ELEVATORS_CACHE_FILE}`);
+      }
+    }
+
+    // 2. Si non chargé, utiliser le fichier source local
+    if (!loaded && fs.existsSync(ELEVATORS_FILE)) {
+      const local = fs.readFileSync(ELEVATORS_FILE, "utf8");
+      loaded = parseElevatorsCSV(local);
+      if (loaded) {
+        console.log(`📂 [Elevators Source] Chargé depuis le fichier source : ${ELEVATORS_FILE}`);
+      }
+    }
+
+    if (!loaded) {
+      console.warn("⚠️ [Elevators] Aucun fichier d'ascenseurs valide trouvé.");
+    }
+  } catch (err) {
+    console.error("❌ [Elevators] Erreur lors du chargement des ascenseurs:", err.message);
+  }
+}
+
+// Actualisation 3 fois par jour via l'API Open Data d'IDFM
+async function refreshElevatorsFromAPI() {
+  const timestamp = new Date().toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris" });
+  console.log(`\n🔄 [${timestamp}] [Elevators 3x/jour] Vérification et actualisation des ascenseurs...`);
+
+  const exportUrl = "https://data.iledefrance-mobilites.fr/api/explore/v2.1/catalog/datasets/etat-des-ascenseurs/exports/csv?delimiter=%3B";
+  const headers = {
+    "User-Agent": "FlowServer/1.0"
+  };
+  if (IDFM_API_KEY) {
+    headers["apiKey"] = IDFM_API_KEY;
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const response = await fetch(exportUrl, { headers, signal: controller.signal });
+    clearTimeout(timeoutId);
+
+    if (response.ok) {
+      const csvText = await response.text();
+      const lines = csvText.split(/\r?\n/).filter((l) => l.trim().length > 0);
+      if (lines.length > 50) {
+        // Enregistrement valide reçu
+        fs.writeFileSync(ELEVATORS_CACHE_FILE, csvText, "utf8");
+        parseElevatorsCSV(csvText);
+        console.log(`✅ [Elevators 3x/jour] Mise à jour réussie avec ${lines.length - 1} ascenseurs.`);
+        return;
+      } else {
+        console.log(`ℹ️ [Elevators 3x/jour] L'export API a renvoyé peu ou pas de données (${lines.length} lignes). Conservation de la base actuelle.`);
+      }
+    } else {
+      console.warn(`⚠️ [Elevators 3x/jour] Réponse API ${response.status}. Conservation de la base actuelle.`);
+    }
+  } catch (err) {
+    console.warn(`⚠️ [Elevators 3x/jour] Impossible de joindre l'API d'actualisation (${err.message}). Utilisation de la base locale.`);
+  }
+}
+
+// GET /api/elevators/:stationId — État réel des ascenseurs
+app.get("/api/elevators/:stationId", async (req, res) => {
+  const { stationId } = req.params;
+  const { name, stopAreaId, lat, lon } = req.query;
+
+  if (!stationId && !name && !stopAreaId) {
+    return res.status(400).json({ error: "Missing stationId, name or stopAreaId" });
+  }
+
+  try {
+    let lifts = null;
+    let matchedStationName = name || stationId;
+
+    // 1. Recherche par stopAreaId si fourni (ex: "stop_area:IDFM:71056" ou "IDFM:71056" ou "71056")
+    if (stopAreaId) {
+      const cleanZdc = stopAreaId.replace(/^.*IDFM:/, "").replace(/[^0-9]/g, "");
+      if (cleanZdc && elevatorsDb.zdcMap.has(cleanZdc)) {
+        lifts = elevatorsDb.zdcMap.get(cleanZdc);
+      }
+    }
+
+    // 2. Recherche par stationId si c'est un zdcid ou s'il contient l'identifiant (ex: "71056", "71056_0")
+    if (!lifts && stationId) {
+      const cleanStationZdc = stationId.replace(/^.*IDFM:/, "").split("_")[0].replace(/[^0-9]/g, "");
+      if (cleanStationZdc && elevatorsDb.zdcMap.has(cleanStationZdc)) {
+        lifts = elevatorsDb.zdcMap.get(cleanStationZdc);
+      }
+    }
+
+    // 3. Recherche par nom de station normalisé
+    if (!lifts) {
+      const testNames = [name, stationId].filter(Boolean);
+      for (const n of testNames) {
+        const norm = normalizeString(n);
+        if (norm && elevatorsDb.nameMap.has(norm)) {
+          lifts = elevatorsDb.nameMap.get(norm);
+          break;
+        }
+      }
+    }
+
+    // 4. Recherche par proximité GPS (moins de 450 mètres)
+    if (!lifts && lat && lon) {
+      const qLat = parseFloat(lat);
+      const qLon = parseFloat(lon);
+      if (!isNaN(qLat) && !isNaN(qLon)) {
+        let closestDist = Infinity;
+        let closestLifts = null;
+        let closestName = null;
+        for (const item of elevatorsDb.coordsList) {
+          const d = getDistanceMeters(qLat, qLon, item.lat, item.lon);
+          if (d < closestDist && d <= 450) {
+            closestDist = d;
+            closestLifts = item.lifts;
+            closestName = item.name;
+          }
+        }
+        if (closestLifts) {
+          lifts = closestLifts;
+          matchedStationName = closestName;
+        }
+      }
+    }
+
+    if (lifts && lifts.length > 0) {
+      matchedStationName = lifts[0].zdcname || matchedStationName;
+      let functionalCount = 0;
+      const details = lifts.map((l) => {
+        const isAvailable = l.liftstatus === "available" || l.liftstate === "1";
+        if (isAvailable) functionalCount++;
+        return {
+          id: l.liftid,
+          name: l.privateelevatorid || `Ascenseur ${l.liftid}`,
+          situation: l.liftsituation || "",
+          direction: l.liftdirection || "",
+          status: l.liftstatus || (isAvailable ? "available" : "notavailable"),
+          isAvailable: isAvailable,
+          reason: l.liftreason || "",
+          lastUpdate: l.liftstateupdate || "",
+          mode: l.liftmode || ""
+        };
+      });
+
+      return res.json({
+        status: "success",
+        hasEquipments: true,
+        stationName: matchedStationName,
+        lastUpdate: elevatorsDb.lastUpdate,
+        elevators: {
+          functional: functionalCount,
+          total: lifts.length,
+          details: details
+        },
+        escalators: {
+          functional: 0,
+          total: 0
+        }
+      });
+    }
+
+    // Aucun ascenseur répertorié pour cet arrêt
+    res.json({
+      status: "success",
+      hasEquipments: false,
+      stationName: matchedStationName,
+      lastUpdate: elevatorsDb.lastUpdate,
+      elevators: { functional: 0, total: 0, details: [] },
+      escalators: { functional: 0, total: 0 }
+    });
+  } catch (error) {
+    console.error(`❌ [FlowServer] Erreur ascenseurs pour ${stationId}:`, error.message);
+    res.json({
+      status: "error",
+      hasEquipments: false,
+      elevators: { functional: 0, total: 0, details: [] },
+      escalators: { functional: 0, total: 0 }
+    });
+  }
+});
+
+// ============================================================
 // Catch-all : route non trouvée
 // ============================================================
 app.use((req, res) => {
@@ -953,10 +1259,14 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`      GET /api/departures/:stationId`);
   console.log(`      GET /api/traffic`);
   console.log(`      GET /api/itinerary?from=...&to=...`);
+  console.log(`      GET /api/elevators/:stationId`);
   console.log(`   🔑 API Key: ${IDFM_API_KEY.slice(0, 6)}...${IDFM_API_KEY.slice(-4)}\n`);
 
   // Charger le cache persistant
   loadPersistentCache();
+
+  // Charger la base de données des ascenseurs
+  loadElevatorsData();
 
   // Premier fetch immédiat au démarrage (perturbations + départs globaux)
   console.log(`🔄 Premier fetch des perturbations...`);
@@ -964,6 +1274,14 @@ server.listen(PORT, "0.0.0.0", () => {
 
   console.log(`🔄 Premier fetch des horaires ferroviaires globaux...`);
   refreshAllGlobalRailDepartures();
+
+  // Première vérification de l'API ascenseurs après 5 secondes
+  setTimeout(() => {
+    refreshElevatorsFromAPI();
+  }, 5000);
+
+  // Boucle d'actualisation des ascenseurs 3 fois par jour (toutes les 8 heures)
+  setInterval(refreshElevatorsFromAPI, ELEVATORS_REFRESH_INTERVAL_MS);
 
   // Boucle de mise à jour des perturbations (trafic global)
   setInterval(autoRefresh, TRAFFIC_REFRESH_INTERVAL_MS);

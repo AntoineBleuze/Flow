@@ -192,7 +192,7 @@ struct LocalNetworkData: Codable {
 class LocalDataService {
     static let shared = LocalDataService()
     
-    private var networkData: LocalNetworkData?
+    private(set) var networkData: LocalNetworkData?
     
     private init() {
         loadData()

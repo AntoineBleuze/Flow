@@ -383,9 +383,17 @@ class TrafficService: ObservableObject {
             return normalizedModeName.contains("tram")
                 && (line.lineId == code || line.lineId == "T\(code)")
         case .transilien, .train:
+            if line.lineId.caseInsensitiveCompare("orlyval") == .orderedSame {
+                return normalizedModeName.contains("val") || code.localizedCaseInsensitiveContains("orlyval")
+            }
+            if line.lineId.caseInsensitiveCompare("cdgval") == .orderedSame {
+                return normalizedModeName.contains("val") || code.localizedCaseInsensitiveContains("cdgval")
+            }
             return normalizedModeName.contains("train") && line.lineId == code
         case .cable:
-            // Match "cable", "funiculaire" or "suspended"
+            if line.lineId.caseInsensitiveCompare("fun") == .orderedSame || line.lineId.localizedCaseInsensitiveContains("funiculaire") {
+                return normalizedModeName.contains("funiculaire") || code.localizedCaseInsensitiveContains("fun")
+            }
             return
                 (normalizedModeName.contains("cable") || normalizedModeName.contains("funiculaire"))
         case .bus:
@@ -500,7 +508,7 @@ class TrafficService: ObservableObject {
             TransportLine(type: .tram, lineId: "T13", status: .normal),
             TransportLine(type: .tram, lineId: "T14", status: .normal),
 
-            // TRANSILIENS
+            // TRANSILIENS & NAVETTES
             TransportLine(type: .transilien, lineId: "H", status: .normal),
             TransportLine(type: .transilien, lineId: "J", status: .normal),
             TransportLine(type: .transilien, lineId: "K", status: .normal),
@@ -510,9 +518,12 @@ class TrafficService: ObservableObject {
             TransportLine(type: .transilien, lineId: "R", status: .normal),
             TransportLine(type: .transilien, lineId: "U", status: .normal),
             TransportLine(type: .transilien, lineId: "V", status: .normal),
+            TransportLine(type: .train, lineId: "Orlyval", status: .normal),
+            TransportLine(type: .train, lineId: "CDGVAL", status: .normal),
 
-            // CABLES
+            // CÂBLES & FUNICULAIRE
             TransportLine(type: .cable, lineId: "1", status: .normal),
+            TransportLine(type: .cable, lineId: "FUN", status: .normal),
         ]
     }
 }

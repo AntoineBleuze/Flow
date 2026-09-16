@@ -15,5 +15,9 @@
 	<true/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
 	<true/>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Flow utilise la reconnaissance vocale pour comprendre vos demandes d'itinéraires et commandes de transport.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Flow a besoin de votre microphone pour la recherche vocale de trajets.</string>
 </dict>
 </plist>

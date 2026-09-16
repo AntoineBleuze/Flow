@@ -8,12 +8,18 @@ struct AnimatedMeshGradientView: View {
     @Environment(\.colorScheme) var colorScheme
     @State private var relativeTimeOffset = Date().timeIntervalSinceReferenceDate
     
-    @State private var isLowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
+    @State private var isLowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled || ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
     @State private var cachedMeshColors: [Color] = []
+    
+    private var isPreview: Bool {
+        ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+    }
     
     var body: some View {
         Group {
-            if isLowPowerMode {
+            if isPreview {
+                previewBody
+            } else if isLowPowerMode {
                 staticBody
             } else {
                 animatedBody
@@ -36,6 +42,15 @@ struct AnimatedMeshGradientView: View {
     
     private func updateCachedColors() {
         cachedMeshColors = getMeshColors(for: colorScheme)
+    }
+    
+    private var previewBody: some View {
+        let meshColors = cachedMeshColors.isEmpty ? getMeshColors(for: colorScheme) : cachedMeshColors
+        return LinearGradient(
+            colors: meshColors,
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
     }
     
     private var staticBody: some View {

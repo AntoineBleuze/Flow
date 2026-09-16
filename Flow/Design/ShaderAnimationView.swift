@@ -23,7 +23,7 @@ struct ShaderAnimationView: View {
     
     var body: some View {
         Group {
-            if isLowPowerMode {
+            if isPreview || isLowPowerMode {
                 staticBody
             } else {
                 animatedBody
@@ -44,6 +44,10 @@ struct ShaderAnimationView: View {
         }
     }
     
+    private var isPreview: Bool {
+        ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+    }
+    
     private var staticBody: some View {
         let meshColors = getMeshColors(for: colorScheme)
         let staticPoints: [SIMD2<Float>] = [
@@ -58,14 +62,19 @@ struct ShaderAnimationView: View {
             
             // 1. Mesh Gradient (Static ambient background)
             if showMeshGradient && waveProgress > 0.0 {
-                MeshGradient(
-                    width: 3,
-                    height: 3,
-                    points: staticPoints,
-                    colors: meshColors,
-                    background: colorScheme == .dark ? .black : .white
-                )
-                .opacity(Double(waveProgress))
+                if isPreview {
+                    LinearGradient(colors: meshColors, startPoint: .topLeading, endPoint: .bottomTrailing)
+                        .opacity(Double(waveProgress))
+                } else {
+                    MeshGradient(
+                        width: 3,
+                        height: 3,
+                        points: staticPoints,
+                        colors: meshColors,
+                        background: colorScheme == .dark ? .black : .white
+                    )
+                    .opacity(Double(waveProgress))
+                }
             }
             
             // 2. Static black background if loading
@@ -150,19 +159,16 @@ struct ShaderAnimationView: View {
 // Helper to blend colors smoothly
 extension Color {
     func mixed(with other: Color, amount: CGFloat) -> Color {
-        var r1: CGFloat = 0, g1: CGFloat = 0, b1: CGFloat = 0, a1: CGFloat = 0
-        var r2: CGFloat = 0, g2: CGFloat = 0, b2: CGFloat = 0, a2: CGFloat = 0
-        
-        #if canImport(UIKit)
-        UIColor(self).getRed(&r1, green: &g1, blue: &b1, alpha: &a1)
-        UIColor(other).getRed(&r2, green: &g2, blue: &b2, alpha: &a2)
-        #endif
+        let env = EnvironmentValues()
+        let c1 = self.resolve(in: env)
+        let c2 = other.resolve(in: env)
+        let t = Float(amount)
         
         return Color(
-            red: Double(r1 * (1 - amount) + r2 * amount),
-            green: Double(g1 * (1 - amount) + g2 * amount),
-            blue: Double(b1 * (1 - amount) + b2 * amount),
-            opacity: Double(a1 * (1 - amount) + a2 * amount)
+            red: Double(c1.red * (1.0 - t) + c2.red * t),
+            green: Double(c1.green * (1.0 - t) + c2.green * t),
+            blue: Double(c1.blue * (1.0 - t) + c2.blue * t),
+            opacity: Double(c1.opacity * (1.0 - t) + c2.opacity * t)
         )
     }
 }

@@ -83,7 +83,7 @@ struct ItineraryCoord: Codable {
 }
 
 // MARK: - Display Information
-struct DisplayInformation: Codable {
+struct DisplayInformation: Codable, Sendable {
     let network: String?
     let code: String?
     let label: String?
@@ -94,7 +94,7 @@ struct DisplayInformation: Codable {
     let physical_mode: String?
     let line: ItineraryLine?
 
-    init(
+    nonisolated init(
         network: String? = nil,
         code: String? = nil,
         label: String? = nil,
@@ -117,7 +117,7 @@ struct DisplayInformation: Codable {
     }
 }
 
-struct ItineraryLine: Codable {
+struct ItineraryLine: Codable, Sendable {
     let id: String?
     let name: String?
     let code: String?

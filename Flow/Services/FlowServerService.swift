@@ -544,6 +544,130 @@ class FlowServerService: ObservableObject {
             .receive(on: DispatchQueue.main)
             .eraseToAnyPublisher()
     }
+
+    // Cache pour l'état des ascenseurs (stationId: (status, timestamp))
+    // 3 fois par jour = toutes les 8 heures maximum.
+    struct CacheEntry: Codable {
+        let status: ElevatorStatus
+        let timestamp: Date
+    }
+    
+    private func getCachedElevatorStatus(for stationId: String) -> ElevatorStatus? {
+        guard let data = UserDefaults.standard.data(forKey: "elevator_cache_\(stationId)"),
+              let entry = try? JSONDecoder().decode(CacheEntry.self, from: data) else {
+            return nil
+        }
+        
+        // 8 heures = 28800 secondes
+        if Date().timeIntervalSince(entry.timestamp) < 28800 {
+            print("💾 [Server] Utilisation du cache pour les ascenseurs de \(stationId)")
+            return entry.status
+        }
+        return nil
+    }
+    
+    private func cacheElevatorStatus(_ status: ElevatorStatus, for stationId: String) {
+        let entry = CacheEntry(status: status, timestamp: Date())
+        if let data = try? JSONEncoder().encode(entry) {
+            UserDefaults.standard.set(data, forKey: "elevator_cache_\(stationId)")
+        }
+    }
+    
+    func fetchElevatorStatus(for station: MapStation) -> AnyPublisher<ElevatorStatus, Never> {
+        let stopArea = station.platforms.first(where: { !$0.stopAreaId.isEmpty })?.stopAreaId ?? ""
+        return fetchElevatorStatus(
+            for: station.id,
+            name: station.name,
+            stopAreaId: stopArea,
+            coordinate: station.coordinate
+        )
+    }
+
+    func fetchElevatorStatus(for stationId: String) -> AnyPublisher<ElevatorStatus, Never> {
+        return fetchElevatorStatus(for: stationId, name: nil, stopAreaId: nil, coordinate: nil)
+    }
+
+    func fetchElevatorStatus(
+        for stationId: String,
+        name: String? = nil,
+        stopAreaId: String? = nil,
+        coordinate: CLLocationCoordinate2D? = nil
+    ) -> AnyPublisher<ElevatorStatus, Never> {
+        if let cached = getCachedElevatorStatus(for: stationId) {
+            return Just(cached).eraseToAnyPublisher()
+        }
+        
+        guard let encodedId = stationId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+            let fallback = ElevatorStatus(status: "error", hasEquipments: false, stationName: nil, lastUpdate: nil, elevators: EquipmentCount(functional: 0, total: 0), escalators: EquipmentCount(functional: 0, total: 0))
+            return Just(fallback).eraseToAnyPublisher()
+        }
+        
+        var components = URLComponents(string: "\(baseURL)/api/elevators/\(encodedId)")
+        var queryItems: [URLQueryItem] = []
+        if let name = name, !name.isEmpty {
+            queryItems.append(URLQueryItem(name: "name", value: name))
+        }
+        if let stopAreaId = stopAreaId, !stopAreaId.isEmpty {
+            queryItems.append(URLQueryItem(name: "stopAreaId", value: stopAreaId))
+        }
+        if let coord = coordinate {
+            queryItems.append(URLQueryItem(name: "lat", value: String(format: "%.6f", coord.latitude)))
+            queryItems.append(URLQueryItem(name: "lon", value: String(format: "%.6f", coord.longitude)))
+        }
+        if !queryItems.isEmpty {
+            components?.queryItems = queryItems
+        }
+        
+        guard let url = components?.url else {
+            let fallback = ElevatorStatus(status: "error", hasEquipments: false, stationName: nil, lastUpdate: nil, elevators: EquipmentCount(functional: 0, total: 0), escalators: EquipmentCount(functional: 0, total: 0))
+            return Just(fallback).eraseToAnyPublisher()
+        }
+        
+        print("📡 [Server] Elevators REST: \(url.absoluteString)")
+        
+        return session.dataTaskPublisher(for: url)
+            .map { $0.data }
+            .decode(type: ElevatorStatus.self, decoder: JSONDecoder())
+            .handleEvents(receiveOutput: { [weak self] status in
+                self?.cacheElevatorStatus(status, for: stationId)
+            })
+            .replaceError(with: ElevatorStatus(status: "error", hasEquipments: false, stationName: nil, lastUpdate: nil, elevators: EquipmentCount(functional: 0, total: 0), escalators: EquipmentCount(functional: 0, total: 0)))
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+}
+
+struct ElevatorDetail: Codable, Identifiable, Equatable, Hashable, Sendable {
+    let id: String
+    let name: String
+    let situation: String
+    let direction: String
+    let status: String
+    let isAvailable: Bool
+    let reason: String
+    let lastUpdate: String
+    let mode: String?
+}
+
+struct ElevatorStatus: Codable, Equatable, Sendable {
+    let status: String
+    let hasEquipments: Bool
+    let stationName: String?
+    let lastUpdate: String?
+    let elevators: EquipmentCount
+    let escalators: EquipmentCount
+}
+
+struct EquipmentCount: Codable, Equatable, Sendable {
+    let functional: Int
+    let total: Int
+    let details: [ElevatorDetail]?
+
+    init(functional: Int, total: Int, details: [ElevatorDetail]? = nil) {
+        self.functional = functional
+        self.total = total
+        self.details = details
+    }
 }
 
 // MARK: - Modèles WebSocket

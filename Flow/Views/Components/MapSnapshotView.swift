@@ -153,6 +153,11 @@ struct MapSnapshotView: View {
                 context.setLineWidth(2.5)
                 context.setLineCap(.round)
                 context.setLineJoin(.round)
+                if line.isDashed || ["15", "16", "17", "18"].contains(line.name) {
+                    context.setLineDash(phase: 0, lengths: [6, 4])
+                } else {
+                    context.setLineDash(phase: 0, lengths: [])
+                }
 
                 for polyline in line.polylines {
                     guard polyline.pointCount > 1 else { continue }

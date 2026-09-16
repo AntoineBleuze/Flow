@@ -1,7 +1,7 @@
 import Foundation
 import MapKit
 
-struct StationExit: Codable, Identifiable {
+struct StationExit: Codable, Identifiable, Sendable {
     var id: String { exit_id }
     let exit_id: String
     let exit_number: Int?
@@ -12,12 +12,12 @@ struct StationExit: Codable, Identifiable {
     let coordinates: ExitCoordinates?
     let stations: [ExitStation]?
     
-    struct ExitCoordinates: Codable {
+    struct ExitCoordinates: Codable, Sendable {
         let lat: Double
         let lon: Double
     }
     
-    struct ExitStation: Codable {
+    struct ExitStation: Codable, Sendable {
         let id: String
         let name: String
         let town: String?
@@ -42,18 +42,36 @@ class ExitMarkerAnnotation: NSObject, MKAnnotation {
     let title: String?
     let subtitle: String?
     let isEntry: Bool
+    let exitId: String?
+    let exitNumber: Int?
+    let exitName: String?
+    let isJourneyExit: Bool
     
-    init(coordinate: CLLocationCoordinate2D, title: String?, subtitle: String?, isEntry: Bool) {
+    init(
+        coordinate: CLLocationCoordinate2D,
+        title: String?,
+        subtitle: String?,
+        isEntry: Bool,
+        exitId: String? = nil,
+        exitNumber: Int? = nil,
+        exitName: String? = nil,
+        isJourneyExit: Bool = false
+    ) {
         self.coordinate = coordinate
         self.title = title
         self.subtitle = subtitle
         self.isEntry = isEntry
+        self.exitId = exitId
+        self.exitNumber = exitNumber
+        self.exitName = exitName
+        self.isJourneyExit = isJourneyExit
     }
 }
 
 class StationExitsService {
     static let shared = StationExitsService()
     
+    private(set) var allExits: [StationExit] = []
     private var exitsByStationId: [String: [StationExit]] = [:]
     
     private init() {
@@ -109,6 +127,7 @@ class StationExitsService {
                     }
                 }
             }
+            self.allExits = exits
             self.exitsByStationId = map
             print("✅ Loaded \(exits.count) exits, mapped to \(map.count) station IDs.")
         } catch {
@@ -125,5 +144,34 @@ class StationExitsService {
                         .replacingOccurrences(of: "stop:", with: "")
                         .trimmingCharacters(in: .whitespacesAndNewlines)
         return exitsByStationId[cleanId] ?? []
+    }
+    
+    func exits(in region: MKCoordinateRegion) -> [StationExit] {
+        let minLat = region.center.latitude - region.span.latitudeDelta / 2
+        let maxLat = region.center.latitude + region.span.latitudeDelta / 2
+        let minLon = region.center.longitude - region.span.longitudeDelta / 2
+        let maxLon = region.center.longitude + region.span.longitudeDelta / 2
+        
+        return allExits.filter { exit in
+            guard let coords = exit.coordinates else { return false }
+            return coords.lat >= minLat && coords.lat <= maxLat &&
+                   coords.lon >= minLon && coords.lon <= maxLon
+        }
+    }
+    
+    func closestExit(to coordinate: CLLocationCoordinate2D, stationId: String? = nil) -> StationExit? {
+        let target = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        let candidates: [StationExit]
+        if let stationId = stationId {
+            candidates = exitsForStation(id: stationId)
+        } else {
+            candidates = allExits
+        }
+        return candidates.filter { $0.is_exit }.min { a, b in
+            guard let cA = a.coordinates, let cB = b.coordinates else { return false }
+            let distA = target.distance(from: CLLocation(latitude: cA.lat, longitude: cA.lon))
+            let distB = target.distance(from: CLLocation(latitude: cB.lat, longitude: cB.lon))
+            return distA < distB
+        }
     }
 }

@@ -53,6 +53,45 @@ class IDFMItineraryService: ObservableObject {
         )
     }
 
+    func searchItineraryAsync(
+        from: CLLocationCoordinate2D,
+        to: MapStation,
+        date: Date = Date(),
+        isArrival: Bool = false,
+        forbiddenUris: [String] = [],
+        isAccessible: Bool = false
+    ) async throws -> [Journey] {
+        try await withCheckedThrowingContinuation { continuation in
+            var cancellable: AnyCancellable?
+            var hasResumed = false
+            cancellable = self.searchItinerary(
+                from: from,
+                to: to,
+                date: date,
+                isArrival: isArrival,
+                forbiddenUris: forbiddenUris,
+                isAccessible: isAccessible
+            )
+            .first()
+            .sink(
+                receiveCompletion: { completion in
+                    guard !hasResumed else { return }
+                    if case .failure(let error) = completion {
+                        hasResumed = true
+                        continuation.resume(throwing: error)
+                    }
+                    _ = cancellable
+                },
+                receiveValue: { journeys in
+                    guard !hasResumed else { return }
+                    hasResumed = true
+                    continuation.resume(returning: journeys)
+                    _ = cancellable
+                }
+            )
+        }
+    }
+
     private func searchDirectItinerary(
         from: CLLocationCoordinate2D,
         to: MapStation,

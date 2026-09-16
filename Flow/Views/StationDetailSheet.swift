@@ -19,6 +19,8 @@ struct StationDetailSheet: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var cancellable: AnyCancellable?
+    @State private var elevatorStatus: ElevatorStatus? = nil
+    @State private var elevatorCancellable: AnyCancellable? = nil
     @State private var selectedMode: String = "Tout"
     @State private var showItinerary = false
     @ObservedObject var locationManager = LocationManager.shared
@@ -30,6 +32,18 @@ struct StationDetailSheet: View {
 
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
+
+    private var primaryGreen: Color {
+        colorScheme == .dark ? Color(hex: "30D158") : Color(hex: "008543")
+    }
+
+    private var cardBackground: Color {
+        colorScheme == .dark ? Color.white.opacity(0.08) : Color(uiColor: .secondarySystemBackground)
+    }
+
+    private var cardBorder: Color {
+        colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)
+    }
 
     // Structures pour le regroupement
     struct LineGroup: Identifiable {
@@ -81,19 +95,6 @@ struct StationDetailSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // Background gradient fading from clear to black to blend with the map
-                VStack(spacing: 0) {
-                    LinearGradient(
-                        colors: [.clear, .black.opacity(0.6), .black.opacity(0.95), .black],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: 180)
-                    
-                    Color.black
-                }
-                .ignoresSafeArea()
-                
                 // Sheet content constrained within safe area boundaries
                 sheetContent
             }
@@ -151,7 +152,9 @@ struct StationDetailSheet: View {
                 )
             }
         }
-        .presentationBackground(.clear)
+        .presentationBackground(.ultraThinMaterial)
+        .presentationCornerRadius(LiquidGlassTheme.sheetCornerRadius)
+        .presentationBackgroundInteraction(.enabled(upThrough: .medium))
     }
 
     private var stationDistanceAndWalkTime: (distanceStr: String, walkTimeMinutes: Int) {
@@ -202,13 +205,56 @@ struct StationDetailSheet: View {
     }
 
     @ViewBuilder
-    private func metricCell(title: String, value: String, color: Color) -> some View {
+    private func metricCell(title: String, value: String, symbol: String? = nil, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.system(.caption, design: .rounded))
                 .fontWeight(.bold)
-                .foregroundColor(.gray)
-            MetricValueView(value: value, color: color)
+                .foregroundColor(.secondary)
+            HStack(spacing: 6) {
+                if let symbol = symbol {
+                    Image(systemName: symbol)
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(color)
+                }
+                MetricValueView(value: value, color: color)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func equipmentCell(status: ElevatorStatus) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("ÉQUIPEMENTS")
+                .font(.system(.caption, design: .rounded))
+                .fontWeight(.bold)
+                .foregroundColor(.secondary)
+            
+            HStack(spacing: 14) {
+                if status.elevators.total > 0 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.up.and.down.square.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(status.elevators.functional < status.elevators.total ? Color(hex: "FF453A") : Color(hex: "BF5AF2"))
+                        Text("\(status.elevators.functional)/\(status.elevators.total)")
+                            .font(.system(size: 20, weight: .black, design: .rounded))
+                            .foregroundColor(status.elevators.functional < status.elevators.total ? Color(hex: "FF453A") : Color(hex: "BF5AF2"))
+                    }
+                }
+                
+                if status.escalators.total > 0 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "stairs")
+                            .font(.system(size: 20))
+                            .foregroundColor(status.escalators.functional < status.escalators.total ? Color(hex: "FF453A") : Color(hex: "BF5AF2"))
+                        Text("\(status.escalators.functional)/\(status.escalators.total)")
+                            .font(.system(size: 20, weight: .black, design: .rounded))
+                            .foregroundColor(status.escalators.functional < status.escalators.total ? Color(hex: "FF453A") : Color(hex: "BF5AF2"))
+                    }
+                }
+            }
+            .padding(.vertical, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -219,7 +265,7 @@ struct StationDetailSheet: View {
             HStack(alignment: .center) {
                 HStack(spacing: 4) {
                     Image(systemName: "mappin.circle.fill")
-                        .foregroundColor(Color(hex: "30D158")) // neon green
+                        .foregroundColor(primaryGreen)
                         .font(.footnote)
                     Text((currentStation.city ?? "Île-de-France").uppercased())
                         .font(.system(.caption, design: .rounded))
@@ -240,10 +286,10 @@ struct StationDetailSheet: View {
                 }) {
                     Image(systemName: "xmark")
                         .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(.white)
+                        .foregroundColor(.primary)
                         .padding(14)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.liquidGlassInteractive)
                 .glassEffect(.regular.interactive(), in: Circle())
             }
             .padding(.horizontal)
@@ -267,7 +313,7 @@ struct StationDetailSheet: View {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Text(stats.distanceStr)
                                 .font(.system(size: 28, weight: .black, design: .rounded))
-                                .foregroundColor(Color(hex: "30D158")) // green
+                                .foregroundColor(primaryGreen)
                         }
                         .padding(.top, 2)
                     }
@@ -279,17 +325,17 @@ struct StationDetailSheet: View {
                             Image(systemName: "arrow.triangle.turn.up.right.circle.fill")
                                 .font(.title3)
                             Text("Calculer l'itinéraire")
-                                .font(.subheadline)
+                                .font(.system(.subheadline, design: .rounded))
                                 .fontWeight(.bold)
                         }
-                        .foregroundColor(.black)
+                        .foregroundColor(colorScheme == .dark ? .black : .white)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(Color(hex: "30D158")) // Green
+                        .padding(.vertical, 14)
+                        .background(primaryGreen)
                         .clipShape(Capsule())
+                        .shadow(color: primaryGreen.opacity(0.3), radius: 6, y: 3)
                     }
-                    .buttonStyle(.plain)
-                    .glassEffect(.regular.interactive())
+                    .buttonStyle(.liquidGlassInteractive)
                     .padding(.horizontal)
                     .padding(.top, 12)
                     
@@ -313,40 +359,43 @@ struct StationDetailSheet: View {
                         Text("Détails de la station")
                             .font(.system(.title3, design: .rounded))
                             .fontWeight(.bold)
-                            .foregroundColor(.white)
+                            .foregroundColor(.primary)
                         Image(systemName: "chevron.right")
                             .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(.gray)
+                            .foregroundColor(.secondary)
                         Spacer()
                     }
                     .padding(.horizontal)
                     .padding(.top, 24)
                     
-                    // Statistics Card Grid
+                    // Statistics Card Grid - Encapsulated in Liquid Glass
                     let detailsStats = stationDistanceAndWalkTime
-                    VStack(spacing: 16) {
-                        HStack(spacing: 0) {
-                            metricCell(title: "TEMPS DE MARCHE", value: "\(detailsStats.walkTimeMinutes) MIN", color: Color(hex: "FFCC00")) // Yellow
-                            metricCell(title: "DISTANCE À PIED", value: detailsStats.distanceStr.uppercased(), color: Color(hex: "30B0C7")) // Cyan/Blue
-                        }
-                        
-                        HStack(spacing: 0) {
-                            metricCell(title: "LIGNES DE TRANSPORT", value: "\(currentStation.lines.count) LIGNES", color: Color(hex: "FF453A")) // Red
-                            metricCell(title: "QUAIS ACTIFS", value: "\(currentStation.platforms.count) QUAIS", color: Color(hex: "30D158")) // Green
-                        }
-                        
-                        HStack(spacing: 0) {
-                            metricCell(title: "PROCHAIN PASSAGE", value: nextDepartureMinutes.uppercased(), color: Color(hex: "FF9F0A")) // Orange
-                            metricCell(title: "ACCESSIBILITÉ PMR", value: accessibilityStatus.uppercased(), color: Color(hex: "BF5AF2")) // Purple
+                    
+                    LiquidGlassCard(cornerRadius: 18, padding: 16) {
+                        VStack(spacing: 14) {
+                            HStack(spacing: 12) {
+                                metricCell(title: "TEMPS DE MARCHE", value: "\(detailsStats.walkTimeMinutes) MIN", symbol: "figure.walk", color: Color(hex: "FFCC00")) // Yellow
+                                metricCell(title: "DISTANCE À PIED", value: detailsStats.distanceStr.uppercased(), symbol: "location.fill", color: Color(hex: "30B0C7")) // Cyan/Blue
+                            }
+                            
+                            Divider().opacity(0.4)
+                            
+                            HStack(spacing: 12) {
+                                metricCell(title: "LIGNES DE TRANSPORT", value: "\(currentStation.lines.count) LIGNES", symbol: "tram", color: Color(hex: "FF453A")) // Red
+                                if let status = elevatorStatus {
+                                    if status.hasEquipments {
+                                        equipmentCell(status: status)
+                                    } else {
+                                        Spacer()
+                                    }
+                                } else {
+                                    metricCell(title: "ÉQUIPEMENTS", value: "CHARGEMENT...", symbol: "arrow.up.and.down.square", color: .secondary)
+                                }
+                            }
                         }
                     }
                     .padding(.horizontal)
                     .padding(.top, 8)
-                    
-                    Divider()
-                        .background(Color.white.opacity(0.15))
-                        .padding(.horizontal)
-                        .padding(.vertical, 12)
                     
                     // Departures / Line Group rows
                     VStack(spacing: 20) {
@@ -382,7 +431,7 @@ struct StationDetailSheet: View {
                                                 Text(line.name.count < 3 ? "\(line.type.rawValue) Ligne \(line.name)" : line.name)
                                                     .font(.subheadline)
                                                     .fontWeight(.semibold)
-                                                    .foregroundColor(.white)
+                                                    .foregroundColor(.primary)
                                                 Text(isNight ? "Service de jour terminé • Reprise à 05:30" : "Aucun départ imminent")
                                                     .font(.caption)
                                                     .foregroundColor(.secondary)
@@ -393,7 +442,6 @@ struct StationDetailSheet: View {
                                         .padding(.horizontal)
                                         
                                         Divider()
-                                            .background(Color.white.opacity(0.15))
                                             .padding(.horizontal)
                                     }
                                 }
@@ -463,65 +511,67 @@ struct StationDetailSheet: View {
                                     .padding(.top, 14)
                                 
                                 ForEach(gpeLines) { gpeLine in
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        HStack(spacing: 10) {
-                                            if UIImage(named: gpeLine.assetName) != nil {
-                                                Image(gpeLine.assetName)
-                                                    .resizable()
-                                                    .scaledToFit()
-                                                    .frame(width: 36, height: 36)
-                                            } else {
-                                                Circle()
-                                                    .fill(resolveLineColor(gpeLine.name, type: .metro))
-                                                    .frame(width: 30, height: 30)
-                                                    .overlay(
-                                                        Text(gpeLine.name)
-                                                            .font(.subheadline)
-                                                            .bold()
-                                                            .foregroundColor(.white)
-                                                    )
+                                    LiquidGlassCard(cornerRadius: 18, padding: 14) {
+                                        VStack(alignment: .leading, spacing: 10) {
+                                            HStack(spacing: 10) {
+                                                if UIImage(named: gpeLine.assetName) != nil {
+                                                    Image(gpeLine.assetName)
+                                                        .resizable()
+                                                        .scaledToFit()
+                                                        .frame(width: 36, height: 36)
+                                                } else {
+                                                    Circle()
+                                                        .fill(resolveLineColor(gpeLine.name, type: .metro))
+                                                        .frame(width: 30, height: 30)
+                                                        .overlay(
+                                                            Text(gpeLine.name)
+                                                                .font(.subheadline)
+                                                                .bold()
+                                                                .foregroundColor(.white)
+                                                        )
+                                                }
+                                                
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    Text("Métro Ligne \(gpeLine.name)")
+                                                        .font(.subheadline)
+                                                        .fontWeight(.semibold)
+                                                        .foregroundColor(.primary)
+                                                    Text("Société des Grands Projets")
+                                                        .font(.caption)
+                                                        .foregroundColor(.secondary)
+                                                }
+                                                Spacer()
                                             }
                                             
-                                            VStack(alignment: .leading, spacing: 2) {
-                                                Text("Métro Ligne \(gpeLine.name)")
-                                                    .font(.subheadline)
-                                                    .fontWeight(.semibold)
-                                                    .foregroundColor(.white)
-                                                Text("Société des Grands Projets")
-                                                    .font(.caption)
-                                                    .foregroundColor(.secondary)
-                                            }
-                                            Spacer()
-                                        }
-                                        
-                                        // Delivery Date Box
-                                        HStack {
-                                            VStack(alignment: .leading, spacing: 4) {
-                                                Text("Date de livraison estimée")
-                                                    .font(.caption)
-                                                    .foregroundColor(.secondary)
-                                                
-                                                Text(getGPEDeliveryDate(lineName: gpeLine.name, stationName: currentStation.name))
-                                                    .font(.subheadline)
-                                                    .bold()
+                                            // Delivery Date Box
+                                            HStack {
+                                                VStack(alignment: .leading, spacing: 4) {
+                                                    Text("Date de livraison estimée")
+                                                        .font(.caption)
+                                                        .foregroundColor(.secondary)
+                                                    
+                                                    Text(getGPEDeliveryDate(lineName: gpeLine.name, stationName: currentStation.name))
+                                                        .font(.subheadline)
+                                                        .bold()
+                                                        .foregroundColor(.blue)
+                                                }
+                                                Spacer()
+                                                Image(systemName: "calendar")
+                                                    .font(.title3)
                                                     .foregroundColor(.blue)
                                             }
-                                            Spacer()
-                                            Image(systemName: "calendar")
-                                                .font(.title3)
-                                                .foregroundColor(.blue)
+                                            .padding(.horizontal, 14)
+                                            .padding(.vertical, 12)
+                                            .background(cardBackground)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 12)
+                                                    .stroke(cardBorder, lineWidth: 1)
+                                            )
                                         }
-                                        .padding(.horizontal, 14)
-                                        .padding(.vertical, 12)
-                                        .background(Color.black.opacity(0.2))
-                                        .clipShape(RoundedRectangle(cornerRadius: 12))
                                     }
-                                    .padding(.vertical, 12)
                                     .padding(.horizontal)
-                                    
-                                    Divider()
-                                        .background(Color.white.opacity(0.15))
-                                        .padding(.horizontal)
+                                    .padding(.vertical, 4)
                                 }
                             }
                         }
@@ -543,6 +593,11 @@ struct StationDetailSheet: View {
         bufferTask?.cancel()
         departureBuffer.removeAll()
         
+        if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" {
+            loadDepartures(for: station)
+            return
+        }
+        
         // Charger immédiatement les départs pour la station d'origine (Métro / RER)
         let hasActiveLines = station.lines.contains { !["15", "16", "17", "18"].contains($0.name) }
         if hasActiveLines {
@@ -551,6 +606,19 @@ struct StationDetailSheet: View {
         
         // Lancer la recherche des bus proches et la fusion en arrière-plan
         loadNearbyBusesAndMerge()
+        
+        // Charger l'état des ascenseurs
+        fetchElevators()
+    }
+    
+    private func fetchElevators() {
+        self.elevatorStatus = nil
+        self.elevatorCancellable = FlowServerService.shared.fetchElevatorStatus(for: station.id)
+            .sink { status in
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    self.elevatorStatus = status
+                }
+            }
     }
 
     private func loadNearbyBusesAndMerge() {
@@ -1167,24 +1235,34 @@ private struct LineGroupRowSheet: View {
     @Environment(\.colorScheme) var colorScheme
     @ObservedObject var favoritesService = FavoritesService.shared
 
+    private var cardBackground: Color {
+        colorScheme == .dark ? Color.white.opacity(0.08) : Color(uiColor: .secondarySystemBackground)
+    }
+
+    private var cardBorder: Color {
+        colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)
+    }
+
+    private var timeColor: Color {
+        colorScheme == .dark ? Color(hex: "30D158") : Color(hex: "008543")
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // En-tête : badge ligne + réseau
-            lineHeader
-            
-            // Contenu
-            if let resume = group.resumeTime {
-                nightServiceView(resume: resume)
-            } else {
-                directionsView
+        LiquidGlassCard(cornerRadius: 18, padding: 14) {
+            VStack(alignment: .leading, spacing: 12) {
+                // En-tête : badge ligne + réseau
+                lineHeader
+                
+                // Contenu
+                if let resume = group.resumeTime {
+                    nightServiceView(resume: resume)
+                } else {
+                    directionsView
+                }
             }
         }
-        .padding(.vertical, 8)
         .padding(.horizontal)
-        
-        Divider()
-            .background(Color.white.opacity(0.15))
-            .padding(.horizontal)
+        .padding(.vertical, 4)
     }
 
     private var lineHeader: some View {
@@ -1239,7 +1317,7 @@ private struct LineGroupRowSheet: View {
                         .background(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.06))
                         .clipShape(Capsule())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.liquidGlassInteractive)
                 }
                 
                 let lineType = mapModeToType(group.mode)
@@ -1260,7 +1338,7 @@ private struct LineGroupRowSheet: View {
                         .frame(width: 32, height: 32)
                         .background(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.06), in: Circle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.liquidGlassInteractive)
             }
         }
     }
@@ -1359,8 +1437,12 @@ private struct LineGroupRowSheet: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(Color.black.opacity(0.25))
+        .background(cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(cardBorder, lineWidth: 1)
+        )
     }
 
     private var directionsView: some View {
@@ -1380,8 +1462,12 @@ private struct LineGroupRowSheet: View {
                 }
             }
         }
-        .background(Color.black.opacity(0.25))
+        .background(cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(cardBorder, lineWidth: 1)
+        )
     }
 
     private func directionRow(direction: StationDetailSheet.DirectionGroup, index: Int) -> some View {
@@ -1408,11 +1494,11 @@ private struct LineGroupRowSheet: View {
                                 }
                             }
                             .font(.subheadline).bold()
-                            .foregroundColor(.green)
+                            .foregroundColor(timeColor)
                         }
                         Image(systemName: "wifi")
                             .font(.caption2)
-                            .foregroundColor(.green)
+                            .foregroundColor(timeColor)
                             .padding(.leading, 4)
                     }
                 }
@@ -1431,10 +1517,10 @@ private struct LineGroupRowSheet: View {
                 }) {
                     Image(systemName: "bolt.fill")
                         .font(.body)
-                        .foregroundColor(isActive ? .green : .pink)
+                        .foregroundColor(isActive ? timeColor : .pink)
                         .frame(width: 44, height: 44)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.liquidGlassInteractive)
                 .glassEffect(.regular.interactive(), in: .circle)
             }
             .padding(.horizontal, 14)
@@ -1446,35 +1532,64 @@ private struct LineGroupRowSheet: View {
     }
 }
 
-struct StationDetailSheet_Previews: PreviewProvider {
-    static var previews: some View {
-        StationDetailSheet(
-            station: MapStation(
-                id: "IDFM:C01377",
-                name: "Nation",
-                coordinate: CLLocationCoordinate2D(latitude: 48.8482, longitude: 2.3982),
-                platforms: [
-                    StopPoint(
-                        id: "stop_point:1",
-                        stopAreaId: "C01377",
-                        name: "Nation - RER A",
-                        coordinate: CLLocationCoordinate2D(latitude: 48.8482, longitude: 2.3982),
-                        type: .rer,
-                        lineName: "A"
-                    )
-                ],
-                isHub: true,
-                mainType: .rer,
-                lines: [
-                    StationLine(name: "A", type: .rer),
-                    StationLine(name: "1", type: .metro),
-                    StationLine(name: "6", type: .metro),
-                    StationLine(name: "15", type: .metro)
-                ],
-                city: "Paris"
-            )
+#Preview("Station Detail Light") {
+    StationDetailSheet(
+        station: MapStation(
+            id: "IDFM:C01377",
+            name: "Nation",
+            coordinate: CLLocationCoordinate2D(latitude: 48.8482, longitude: 2.3982),
+            platforms: [
+                StopPoint(
+                    id: "stop_point:1",
+                    stopAreaId: "C01377",
+                    name: "Nation - RER A",
+                    coordinate: CLLocationCoordinate2D(latitude: 48.8482, longitude: 2.3982),
+                    type: .rer,
+                    lineName: "A"
+                )
+            ],
+            isHub: true,
+            mainType: .rer,
+            lines: [
+                StationLine(name: "A", type: .rer),
+                StationLine(name: "1", type: .metro),
+                StationLine(name: "6", type: .metro),
+                StationLine(name: "15", type: .metro)
+            ],
+            city: "Paris"
         )
-    }
+    )
+    .preferredColorScheme(.light)
+}
+
+#Preview("Station Detail Dark") {
+    StationDetailSheet(
+        station: MapStation(
+            id: "IDFM:C01377",
+            name: "Nation",
+            coordinate: CLLocationCoordinate2D(latitude: 48.8482, longitude: 2.3982),
+            platforms: [
+                StopPoint(
+                    id: "stop_point:1",
+                    stopAreaId: "C01377",
+                    name: "Nation - RER A",
+                    coordinate: CLLocationCoordinate2D(latitude: 48.8482, longitude: 2.3982),
+                    type: .rer,
+                    lineName: "A"
+                )
+            ],
+            isHub: true,
+            mainType: .rer,
+            lines: [
+                StationLine(name: "A", type: .rer),
+                StationLine(name: "1", type: .metro),
+                StationLine(name: "6", type: .metro),
+                StationLine(name: "15", type: .metro)
+            ],
+            city: "Paris"
+        )
+    )
+    .preferredColorScheme(.dark)
 }
 
 // MARK: - COMPONENTS POUR L'ANIMATION DE VAGUE TYPOGRAPHIQUE

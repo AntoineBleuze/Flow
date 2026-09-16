@@ -32,13 +32,15 @@ nonisolated struct LineTrace: Identifiable, @unchecked Sendable {
     let color: Color
     let polylines: [MKPolyline]  // Utilisation directe de MKPolyline
     let type: TransportType
+    let isDashed: Bool
 
-    nonisolated init(id: String, name: String, color: Color, polylines: [MKPolyline], type: TransportType) {
+    nonisolated init(id: String, name: String, color: Color, polylines: [MKPolyline], type: TransportType, isDashed: Bool = false) {
         self.id = id
         self.name = name
         self.color = color
         self.polylines = polylines
         self.type = type
+        self.isDashed = isDashed
     }
 }
 
@@ -49,6 +51,7 @@ nonisolated struct CacheableLineTrace: Codable, Sendable {
     let colorHex: String
     let typeRawValue: String
     let coordinates: [[[Double]]]  // Array of polylines, each polyline is array of [lon, lat]
+    let isDashed: Bool?
 
     nonisolated init(from lineTrace: LineTrace) {
         self.id = lineTrace.id
@@ -61,6 +64,7 @@ nonisolated struct CacheableLineTrace: Codable, Sendable {
                 return [coord.longitude, coord.latitude]
             }
         }
+        self.isDashed = lineTrace.isDashed
     }
 
     nonisolated func toLineTrace() -> LineTrace {
@@ -73,7 +77,8 @@ nonisolated struct CacheableLineTrace: Codable, Sendable {
             name: name,
             color: Color(hex: colorHex),
             polylines: polylines,
-            type: TransportType(rawValue: typeRawValue) ?? .metro
+            type: TransportType(rawValue: typeRawValue) ?? .metro,
+            isDashed: isDashed ?? false
         )
     }
 }
@@ -548,6 +553,12 @@ class MapDataService: ObservableObject {
     }
 
     func loadData() {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" {
+            loadingProgress = 1.0
+            return
+        }
+        #endif
         loadingProgress = 0.0
         
         // Précharger les couleurs de bus
@@ -557,11 +568,14 @@ class MapDataService: ObservableObject {
         
         let appVersion = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
         let cachedVersion = UserDefaults.standard.string(forKey: "cached_data_version")
-        if cachedVersion != appVersion {
-            print("🔄 Nouvelle version de l'application détectée (\(cachedVersion ?? "aucune") -> \(appVersion)). Purge du cache...")
+        let tracesVersion = "v2_projets_gpe"
+        let cachedTracesVersion = UserDefaults.standard.string(forKey: "cached_traces_version")
+        if cachedVersion != appVersion || cachedTracesVersion != tracesVersion {
+            print("🔄 Nouvelle version de l'application ou des tracés détectée (\(cachedVersion ?? "aucune") -> \(appVersion), \(cachedTracesVersion ?? "aucune") -> \(tracesVersion)). Purge du cache...")
             try? FileManager.default.removeItem(at: cacheURL)
             try? FileManager.default.removeItem(at: stationsCacheURL)
             UserDefaults.standard.set(appVersion, forKey: "cached_data_version")
+            UserDefaults.standard.set(tracesVersion, forKey: "cached_traces_version")
         }
 
         DispatchQueue.global(qos: .userInitiated).async {
@@ -602,7 +616,7 @@ class MapDataService: ObservableObject {
         "1": "FFCD00", "2": "003CA6", "3": "837902", "3bis": "6EC4E8", "3BIS": "6EC4E8", "4": "CF009E",
         "5": "FF7E2E", "6": "6ECA97", "7": "FA9ABA", "7bis": "6ECA97", "7BIS": "6ECA97", "8": "E19BDF",
         "9": "B6BD00", "10": "C9910D", "11": "704B1C", "12": "007852", "13": "6EC4E8",
-        "14": "62259D",
+        "14": "62259D", "15": "A50034", "16": "FF82B4", "17": "D2D200", "18": "00A092",
     ]
 
     nonisolated private func loadTracesCold() {
@@ -2108,11 +2122,95 @@ class MapDataService: ObservableObject {
             
             var newLines: [LineTrace] = []
             
-            // Charger le tracé de la ligne 15 Sud
-            var line15SudPolylines: [MKPolyline] = []
-            if let trace15SudUrl = Bundle.main.url(forResource: "ligne-15-sud-trace-et-localisation-des-gares", withExtension: "geojson") {
+            // Structures pour décoder projets_lignes_idf.geojson (tracés affinés GPE)
+            struct ProjetIDFGeometry: Decodable {
+                let type: String
+                let lineCoordinates: [[[Double]]]
+                
+                enum CodingKeys: String, CodingKey {
+                    case type, coordinates
+                }
+                
+                init(from decoder: Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    self.type = try container.decode(String.self, forKey: .type)
+                    if self.type == "LineString" {
+                        let coords = try container.decode([[Double]].self, forKey: .coordinates)
+                        self.lineCoordinates = [coords]
+                    } else if self.type == "MultiLineString" {
+                        let coords = try container.decode([[[Double]]].self, forKey: .coordinates)
+                        self.lineCoordinates = coords
+                    } else {
+                        self.lineCoordinates = []
+                    }
+                }
+            }
+
+            struct ProjetIDFProperties: Decodable {
+                let indice: String?
+                let nom_projet: String?
+                let operation: String?
+                let statut: String?
+                let rvb: String?
+                let res_com: String?
+                let mode: String?
+            }
+
+            struct ProjetIDFFeature: Decodable {
+                let properties: ProjetIDFProperties
+                let geometry: ProjetIDFGeometry
+            }
+
+            struct ProjetIDFCollection: Decodable {
+                let features: [ProjetIDFFeature]
+            }
+            
+            var gpePolylinesByLine: [String: [MKPolyline]] = [:]
+            var gpeColorsByLine: [String: Color] = [:]
+            var gpeIsDashedByLine: [String: Bool] = [:]
+
+            if let projetsUrl = Bundle.main.url(forResource: "projets_lignes_idf", withExtension: "geojson") {
                 do {
-                    let traceData = try Data(contentsOf: trace15SudUrl)
+                    let data = try Data(contentsOf: projetsUrl)
+                    let collection = try JSONDecoder().decode(ProjetIDFCollection.self, from: data)
+                    
+                    for feature in collection.features {
+                        guard let indice = feature.properties.indice,
+                              ["15", "16", "17", "18"].contains(indice) else { continue }
+                        
+                        // Couleur officielle depuis le GeoJSON
+                        if gpeColorsByLine[indice] == nil, let rvb = feature.properties.rvb {
+                            gpeColorsByLine[indice] = Color(rgbString: rvb)
+                        }
+                        
+                        // Tronçons en travaux -> affichage en pointillés
+                        let isTravaux = (feature.properties.statut?.localizedCaseInsensitiveContains("travaux") ?? true)
+                        if isTravaux {
+                            gpeIsDashedByLine[indice] = true
+                        }
+                        
+                        for lineCoords in feature.geometry.lineCoordinates {
+                            let clCoords = lineCoords.compactMap { pt -> CLLocationCoordinate2D? in
+                                guard pt.count >= 2 else { return nil }
+                                return CLLocationCoordinate2D(latitude: pt[1], longitude: pt[0])
+                            }
+                            if clCoords.count > 1 {
+                                let polyline = MKPolyline(coordinates: clCoords, count: clCoords.count)
+                                gpePolylinesByLine[indice, default: []].append(polyline)
+                            }
+                        }
+                    }
+                    print("✅ [GPE] Tracés affinés chargés depuis projets_lignes_idf.geojson: 15 (\(gpePolylinesByLine["15"]?.count ?? 0) tronçons), 16 (\(gpePolylinesByLine["16"]?.count ?? 0) tronçons), 17 (\(gpePolylinesByLine["17"]?.count ?? 0) tronçons), 18 (\(gpePolylinesByLine["18"]?.count ?? 0) tronçons)")
+                } catch {
+                    print("⚠️ [GPE] Erreur lors du décodage de projets_lignes_idf.geojson: \(error)")
+                }
+            }
+            
+            // Fallback pour ligne 15 Sud si projets_lignes_idf non disponible
+            var fallbackLine15SudPolylines: [MKPolyline] = []
+            if (gpePolylinesByLine["15"] ?? []).isEmpty,
+               let trace15SudUrl = Bundle.main.url(forResource: "ligne-15-sud-trace-et-localisation-des-gares", withExtension: "geojson") {
+                if let traceData = try? Data(contentsOf: trace15SudUrl) {
                     struct TraceFeature: Codable {
                         struct Geometry: Codable {
                             let coordinates: [[Double]]
@@ -2127,78 +2225,43 @@ class MapDataService: ObservableObject {
                     struct TraceCollection: Codable {
                         let features: [TraceFeature]
                     }
-                    let traceColl = try JSONDecoder().decode(TraceCollection.self, from: traceData)
-                    for feat in traceColl.features where feat.properties.niv_type == "Axe ligne" {
-                        let clCoords = feat.geometry.coordinates.map { CLLocationCoordinate2D(latitude: $0[1], longitude: $0[0]) }
-                        if !clCoords.isEmpty {
-                            line15SudPolylines.append(MKPolyline(coordinates: clCoords, count: clCoords.count))
+                    if let traceColl = try? JSONDecoder().decode(TraceCollection.self, from: traceData) {
+                        for feat in traceColl.features where feat.properties.niv_type == "Axe ligne" {
+                            let clCoords = feat.geometry.coordinates.map { CLLocationCoordinate2D(latitude: $0[1], longitude: $0[0]) }
+                            if !clCoords.isEmpty {
+                                fallbackLine15SudPolylines.append(MKPolyline(coordinates: clCoords, count: clCoords.count))
+                            }
                         }
                     }
-                } catch {
-                    print("⚠️ Erreur de décodage du tracé 15 Sud: \(error)")
                 }
             }
             
-            let line16Order = ["GA33", "GA34", "GA01", "GA02", "GA03", "GA04", "GA05", "GA06", "GA07", "GA08"]
-            let line17Order = ["GA33", "GA34", "GA01", "GA35", "GA36", "GA37", "GA38", "GA39", "GA40"]
-            let line18Order = ["GA46", "GA47", "GA48", "GA49", "GA50", "GA51", "GA52", "GA53", "GA55", "GA56"]
-            
-            for (lineName, stationsInfo) in stationsByLine {
-                // On n'affiche que les tracés des nouvelles lignes du GPE (15, 16, 17, 18).
-                // La ligne 14 est déjà tracée par le réseau classique, on évite ainsi de créer de fausses lignes droites.
-                guard ["15", "16", "17", "18"].contains(lineName) else { continue }
+            for lineName in ["15", "16", "17", "18"] {
+                var polylines = gpePolylinesByLine[lineName] ?? []
                 
-                let sortedStations: [(name: String, code: String, coord: CLLocationCoordinate2D)]
-                if lineName == "16" {
-                    sortedStations = stationsInfo.sorted { a, b in
-                        let idxA = line16Order.firstIndex(of: a.code) ?? 999
-                        let idxB = line16Order.firstIndex(of: b.code) ?? 999
-                        return idxA < idxB
-                    }
-                } else if lineName == "17" {
-                    sortedStations = stationsInfo.sorted { a, b in
-                        let idxA = line17Order.firstIndex(of: a.code) ?? 999
-                        let idxB = line17Order.firstIndex(of: b.code) ?? 999
-                        return idxA < idxB
-                    }
-                } else if lineName == "18" {
-                    sortedStations = stationsInfo.sorted { a, b in
-                        let idxA = line18Order.firstIndex(of: a.code) ?? 999
-                        let idxB = line18Order.firstIndex(of: b.code) ?? 999
-                        return idxA < idxB
-                    }
-                } else {
-                    sortedStations = stationsInfo.sorted(by: { $0.code < $1.code })
-                }
-                
-                var polylines: [MKPolyline] = []
-                
-                if lineName == "15" {
-                    if !line15SudPolylines.isEmpty {
-                        polylines.append(contentsOf: line15SudPolylines)
-                    }
-                } else {
-                    var coords = sortedStations.map { $0.coord }
-                    if coords.count > 1 {
-                        polylines.append(MKPolyline(coordinates: &coords, count: coords.count))
+                if polylines.isEmpty {
+                    if lineName == "15", !fallbackLine15SudPolylines.isEmpty {
+                        polylines = fallbackLine15SudPolylines
+                    } else if let stationsInfo = stationsByLine[lineName] {
+                        var coords = stationsInfo.map { $0.coord }
+                        if coords.count > 1 {
+                            polylines.append(MKPolyline(coordinates: &coords, count: coords.count))
+                        }
                     }
                 }
                 
-                let colorHex: String
-                switch lineName {
-                case "15": colorHex = "A81232"
-                case "16": colorHex = "E47881"
-                case "17": colorHex = "AEC802"
-                case "18": colorHex = "0099C4"
-                default: colorHex = "999999"
-                }
+                guard !polylines.isEmpty else { continue }
+                
+                let color = gpeColorsByLine[lineName] ?? resolveLineColor(lineName, type: .metro)
+                let isDashed = gpeIsDashedByLine[lineName] ?? true
                 
                 let line = LineTrace(
                     id: "GPE_\(lineName)",
                     name: lineName,
-                    color: Color(hex: colorHex),
+                    color: color,
                     polylines: polylines,
-                    type: .metro
+                    type: .metro,
+                    isDashed: isDashed
                 )
                 newLines.append(line)
             }
@@ -2318,6 +2381,25 @@ extension Color {
         )
     }
 
+    /// Initialize Color from CSS rgb string like "rgb(165,0,52)"
+    nonisolated init(rgbString: String) {
+        let cleaned = rgbString
+            .replacingOccurrences(of: "rgb(", with: "")
+            .replacingOccurrences(of: ")", with: "")
+        let components = cleaned.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        if components.count == 3 {
+            self.init(
+                .sRGB,
+                red: components[0] / 255.0,
+                green: components[1] / 255.0,
+                blue: components[2] / 255.0,
+                opacity: 1.0
+            )
+        } else {
+            self.init(.gray)
+        }
+    }
+
     /// Convert Color to hex string for caching
     nonisolated func toHex() -> String? {
         guard let components = MapPlatformColor(self).cgColor.components else { return nil }
@@ -2325,6 +2407,16 @@ extension Color {
         let g = components.count > 1 ? components[1] : 0
         let b = components.count > 2 ? components[2] : 0
         return String(format: "%02X%02X%02X", Int(r * 255), Int(g * 255), Int(b * 255))
+    }
+
+    /// Convert "rgb(165,0,52)" to hex string "A50034"
+    nonisolated static func hexFromRgbString(_ rgbString: String) -> String? {
+        let cleaned = rgbString
+            .replacingOccurrences(of: "rgb(", with: "")
+            .replacingOccurrences(of: ")", with: "")
+        let components = cleaned.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+        guard components.count == 3 else { return nil }
+        return String(format: "%02X%02X%02X", components[0], components[1], components[2])
     }
 }
 

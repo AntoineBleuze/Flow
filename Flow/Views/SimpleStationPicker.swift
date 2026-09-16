@@ -109,6 +109,12 @@ struct SimpleStationPicker: View {
                                     }
                                 }
                                 Spacer()
+
+                                if let distance = formattedDistance(for: station) {
+                                    Text(distance)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
                             }
                         }
                     }
@@ -123,6 +129,19 @@ struct SimpleStationPicker: View {
         }
     }
 
+    private func formattedDistance(for station: MapStation) -> String? {
+        guard let userCoord = currentLocation ?? LocationManager.shared.userLocation else { return nil }
+        let userLoc = CLLocation(latitude: userCoord.latitude, longitude: userCoord.longitude)
+        let stationLoc = CLLocation(latitude: station.coordinate.latitude, longitude: station.coordinate.longitude)
+        let meters = userLoc.distance(from: stationLoc)
+        guard meters < 100_000 else { return nil }
+        if meters < 1000 {
+            return "\(Int(meters)) m"
+        } else {
+            return String(format: "%.1f km", meters / 1000.0)
+        }
+    }
+
     func performSearch(query: String) {
         currentSearch?.cancel()
         
@@ -131,60 +150,81 @@ struct SimpleStationPicker: View {
             return
         }
 
-        let descriptor = FetchDescriptor<StopPointModel>(
-            predicate: #Predicate<StopPointModel> { stop in
-                stop.name.contains(query)
-            },
-            sortBy: [SortDescriptor(\.name, order: .forward)]
-        )
+        let normQuery = query.replacingOccurrences(of: "'", with: " ")
+            .replacingOccurrences(of: "’", with: " ")
+        let tokens = normQuery.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+
+        let tokenVariants = tokens.first != nil ? StationSuggestionEngine.accentVariants(for: tokens[0]) : [query]
+        var busResults: [StopPointModel] = []
+        for variant in tokenVariants.prefix(6) {
+            var descriptor = FetchDescriptor<StopPointModel>(
+                predicate: #Predicate<StopPointModel> { stop in
+                    stop.name.contains(variant)
+                },
+                sortBy: [SortDescriptor(\.name, order: .forward)]
+            )
+            descriptor.fetchLimit = 80
+            if let results = try? context.fetch(descriptor) {
+                for r in results {
+                    if !busResults.contains(where: { $0.id == r.id }) {
+                        busResults.append(r)
+                    }
+                }
+            }
+        }
 
         var stations: [MapStation] = []
-        do {
-            let results = try context.fetch(descriptor)
-            let grouped = Dictionary(grouping: results) { "\($0.name)_\($0.city)" }
-
-            stations = grouped.compactMap { (_, stops) in
-                guard let first = stops.first else { return nil }
-                let name = first.name
-
-                let totalLat = stops.reduce(0.0) { $0 + $1.latitude }
-                let totalLon = stops.reduce(0.0) { $0 + $1.longitude }
-                let count = Double(stops.count)
-                let center = CLLocationCoordinate2D(
-                    latitude: totalLat / count, longitude: totalLon / count)
-
-                let types = stops.map { $0.type }
-                let mainTypeStr =
-                    types.first(where: { $0 == "RER" }) ?? types.first(where: { $0 == "Transilien" }
-                    ) ?? types.first(where: { $0 == "Metro" }) ?? types.first ?? "Bus"
-
-                let type = mapType(mainTypeStr)
-
-                return MapStation(
-                    id: first.stopAreaId.isEmpty ? first.id : first.stopAreaId,
-                    name: name,
-                    coordinate: center,
-                    platforms: [],
-                    isHub: false,
-                    mainType: type,
-                    lines: []
-                )
-            }
-
-            stations.sort { $0.name < $1.name }
-            searchResults = stations
-
-        } catch {
-            print("❌ Search error: \(error)")
+        let filteredResults = busResults.filter { stop in
+            StationSuggestionEngine.matchesQuery(text: stop.name, tokens: tokens)
+                || StationSuggestionEngine.matchesQuery(text: stop.city, tokens: tokens)
         }
+        let grouped = Dictionary(grouping: filteredResults) { "\($0.name)_\($0.city)" }
+
+        stations = grouped.compactMap { (_, stops) in
+            guard let first = stops.first else { return nil }
+            let name = first.name
+
+            let totalLat = stops.reduce(0.0) { $0 + $1.latitude }
+            let totalLon = stops.reduce(0.0) { $0 + $1.longitude }
+            let count = Double(stops.count)
+            let center = CLLocationCoordinate2D(
+                latitude: totalLat / count, longitude: totalLon / count)
+
+            let types = stops.map { $0.type }
+            let mainTypeStr =
+                types.first(where: { $0 == "RER" }) ?? types.first(where: { $0 == "Transilien" }
+                ) ?? types.first(where: { $0 == "Metro" }) ?? types.first ?? "Bus"
+
+            let type = mapType(mainTypeStr)
+
+            return MapStation(
+                id: first.stopAreaId.isEmpty ? first.id : first.stopAreaId,
+                name: name,
+                coordinate: center,
+                platforms: [],
+                isHub: false,
+                mainType: type,
+                lines: []
+            )
+        }
+
+        let userLoc = currentLocation ?? LocationManager.shared.userLocation
+        searchResults = StationSuggestionEngine.rank(
+            stations: stations,
+            query: query,
+            userLocation: userLoc,
+            favoriteIds: FavoritesService.shared.favoriteStationIds,
+            recentIds: Set(SearchHistoryManager.shared.recentStations.map { $0.id })
+        )
 
         let searchRequest = MKLocalSearch.Request()
         searchRequest.naturalLanguageQuery = query
         let parisCenter = CLLocationCoordinate2D(latitude: 48.8566, longitude: 2.3522)
+        let searchCenter = currentLocation ?? LocationManager.shared.userLocation ?? parisCenter
         searchRequest.region = MKCoordinateRegion(
-            center: parisCenter,
-            latitudinalMeters: 50000,
-            longitudinalMeters: 50000
+            center: searchCenter,
+            latitudinalMeters: 30000,
+            longitudinalMeters: 30000
         )
         
         let search = MKLocalSearch(request: searchRequest)
@@ -196,9 +236,9 @@ struct SimpleStationPicker: View {
             }
             
             let addressStations: [MapStation] = response.mapItems.map { item in
-                let coordinate = item.placemark.coordinate
-                
+                let coordinate = item.location.coordinate
                 let name = item.name ?? ""
+                let city = item.addressRepresentations?.cityName ?? item.name ?? "Adresse"
                 
                 return MapStation(
                     id: "address:\(coordinate.latitude),\(coordinate.longitude)",
@@ -208,7 +248,7 @@ struct SimpleStationPicker: View {
                     isHub: false,
                     mainType: .bus,
                     lines: [],
-                    city: item.placemark.title ?? "Adresse"
+                    city: city
                 )
             }
             
@@ -219,7 +259,14 @@ struct SimpleStationPicker: View {
                         merged.append(addr)
                     }
                 }
-                self.searchResults = merged
+                let userLoc = self.currentLocation ?? LocationManager.shared.userLocation
+                self.searchResults = StationSuggestionEngine.rank(
+                    stations: merged,
+                    query: query,
+                    userLocation: userLoc,
+                    favoriteIds: FavoritesService.shared.favoriteStationIds,
+                    recentIds: Set(SearchHistoryManager.shared.recentStations.map { $0.id })
+                )
             }
         }
     }

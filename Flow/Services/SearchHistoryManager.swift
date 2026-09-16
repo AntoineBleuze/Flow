@@ -48,4 +48,14 @@ class SearchHistoryManager: ObservableObject {
     func refreshHistory() {
         loadHistory()
     }
+
+    func removeSearch(stationId: String) {
+        recentStations.removeAll { $0.id == stationId }
+        saveHistory()
+    }
+
+    func clearHistory() {
+        recentStations.removeAll()
+        UserDefaults.standard.removeObject(forKey: historyKey)
+    }
 }

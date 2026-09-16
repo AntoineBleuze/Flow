@@ -207,10 +207,14 @@ struct MapViewControllerBridge: UIViewRepresentable {
                 }
             }
         } else {
+            let hadJourney = context.coordinator.lastZoomedJourneyId != nil
             context.coordinator.lastZoomedJourneyId = nil
             context.coordinator.lastZoomedSectionId = nil
             // Standard behavior: Show all lines
             updateStandardOverlays(mapView, data: data)
+            if hadJourney {
+                context.coordinator.updateAnnotations(in: mapView.region, for: mapView)
+            }
         }
 
         // Center on user at startup
@@ -353,7 +357,11 @@ struct MapViewControllerBridge: UIViewRepresentable {
                                 coordinate: exitCoord,
                                 title: "Accès \(exit.exit_number ?? 0): \(exit.exit_name ?? "Entrée")",
                                 subtitle: "Entrée pour la station \(fromPlace.name ?? "")",
-                                isEntry: true
+                                isEntry: true,
+                                exitId: exit.exit_id,
+                                exitNumber: exit.exit_number,
+                                exitName: exit.exit_name,
+                                isJourneyExit: true
                             )
                             mapView.addAnnotation(exitAnnotation)
                         }
@@ -379,7 +387,11 @@ struct MapViewControllerBridge: UIViewRepresentable {
                                 coordinate: exitCoord,
                                 title: "Sortie \(exit.exit_number ?? 0): \(exit.exit_name ?? "Sortie")",
                                 subtitle: "Sortie de la station \(toPlace.name ?? "")",
-                                isEntry: false
+                                isEntry: false,
+                                exitId: exit.exit_id,
+                                exitNumber: exit.exit_number,
+                                exitName: exit.exit_name,
+                                isJourneyExit: true
                             )
                             mapView.addAnnotation(exitAnnotation)
                         }
@@ -556,6 +568,7 @@ struct MapViewControllerBridge: UIViewRepresentable {
                 coloredPolyline.color = UIColor(item.line.color)
                 coloredPolyline.lineName = item.line.name
                 coloredPolyline.type = item.line.type
+                coloredPolyline.isDashed = item.line.isDashed
                 
                 let status = TrafficService.shared.lines.first(where: {
                     $0.lineId == item.line.name && $0.type == item.line.type
@@ -710,20 +723,37 @@ struct MapViewControllerBridge: UIViewRepresentable {
                     ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: reuseId)
                 markerView.canShowCallout = true
                 markerView.displayPriority = .required
-                if exitAnno.isEntry {
-                    markerView.markerTintColor = .systemGreen
-                    #if canImport(UIKit)
-                    markerView.glyphImage = UIImage(systemName: "arrow.down.circle.fill")
-                    #else
-                    markerView.glyphImage = NSImage(systemSymbolName: "arrow.down.circle.fill", accessibilityDescription: nil)
-                    #endif
+                if exitAnno.isJourneyExit {
+                    if exitAnno.isEntry {
+                        markerView.markerTintColor = .systemGreen
+                        #if canImport(UIKit)
+                        markerView.glyphImage = UIImage(systemName: "arrow.down.circle.fill")
+                        #else
+                        markerView.glyphImage = NSImage(systemSymbolName: "arrow.down.circle.fill", accessibilityDescription: nil)
+                        #endif
+                    } else {
+                        markerView.markerTintColor = .systemRed
+                        #if canImport(UIKit)
+                        markerView.glyphImage = UIImage(systemName: "arrow.up.circle.fill")
+                        #else
+                        markerView.glyphImage = NSImage(systemSymbolName: "arrow.up.circle.fill", accessibilityDescription: nil)
+                        #endif
+                    }
+                    markerView.glyphText = nil
                 } else {
-                    markerView.markerTintColor = .systemRed
-                    #if canImport(UIKit)
-                    markerView.glyphImage = UIImage(systemName: "arrow.up.circle.fill")
-                    #else
-                    markerView.glyphImage = NSImage(systemSymbolName: "arrow.up.circle.fill", accessibilityDescription: nil)
-                    #endif
+                    // Mode exploration libre hors itinéraire : transit blue élégant
+                    markerView.markerTintColor = UIColor(red: 0.10, green: 0.45, blue: 0.88, alpha: 1.0)
+                    if let number = exitAnno.exitNumber {
+                        markerView.glyphText = "\(number)"
+                        markerView.glyphImage = nil
+                    } else {
+                        markerView.glyphText = nil
+                        #if canImport(UIKit)
+                        markerView.glyphImage = UIImage(systemName: "figure.walk.departure")
+                        #else
+                        markerView.glyphImage = NSImage(systemSymbolName: "figure.walk.departure", accessibilityDescription: nil)
+                        #endif
+                    }
                 }
                 return markerView
             }
@@ -834,11 +864,8 @@ struct MapViewControllerBridge: UIViewRepresentable {
                 renderer.shouldRasterize = false  // Keep vector rendering for smoothness
                 renderer.alpha = 0.95
 
-                if ["15", "16", "17", "18"].contains(coloredPolyline.lineName) {
+                if coloredPolyline.isDashed || ["15", "16", "17", "18"].contains(coloredPolyline.lineName) {
                     renderer.lineDashPattern = [10, 8] as [NSNumber]
-                    renderer.lineWidth = style == .glass ? 4.5 : (style == .neon ? 3.0 : 3.5)
-                } else if coloredPolyline.isDashed {
-                    renderer.lineDashPattern = [6, 6] as [NSNumber]
                     renderer.lineWidth = style == .glass ? 4.5 : (style == .neon ? 3.0 : 3.5)
                 }
 
@@ -891,16 +918,26 @@ struct MapViewControllerBridge: UIViewRepresentable {
         }
 
         // MARK: - Data Loading Logic
+        
+        nonisolated static let exitVisibilityZoomThreshold: Double = 0.008
 
         func updateAnnotations(in region: MKCoordinateRegion, for mapView: MKMapView) {
             currentTask?.cancel()
 
+            let hasJourney = self.parent.journey != nil
+            let shouldShowExits = !hasJourney && (region.span.latitudeDelta <= Self.exitVisibilityZoomThreshold)
+            let stationData = self.parent.data
+
             currentTask = Task.detached(priority: .userInitiated) { [weak self] in
                 guard let self = self else { return }
 
-                let visibleStations = await self.parent.data.fetchStations(in: region)
+                let visibleStations = await stationData.fetchStations(in: region)
+                
+                // Requête des sorties si aucun itinéraire n'est actif et que le zoom est suffisant
+                let visibleExits = shouldShowExits ? await MainActor.run { StationExitsService.shared.exits(in: region) } : []
 
                 await MainActor.run {
+                    // 1. Mise à jour des annotations de stations
                     let currentAnnotations = mapView.annotations.compactMap {
                         $0 as? StationAnnotation
                     }
@@ -918,6 +955,55 @@ struct MapViewControllerBridge: UIViewRepresentable {
                     if !newStations.isEmpty {
                         let newAnnotations = newStations.map { StationAnnotation(station: $0) }
                         mapView.addAnnotations(newAnnotations)
+                    }
+                    
+                    // 2. Mise à jour des annotations de sorties de stations (exploration hors itinéraire)
+                    if self.parent.journey == nil {
+                        let currentExitAnnotations = mapView.annotations.compactMap {
+                            $0 as? ExitMarkerAnnotation
+                        }.filter { !$0.isJourneyExit }
+
+                        let currentExitIDs = Set(currentExitAnnotations.compactMap { $0.exitId })
+                        let visibleExitIDs = Set(visibleExits.map { $0.exit_id })
+
+                        let exitsToRemove = currentExitAnnotations.filter { anno in
+                            guard let id = anno.exitId else { return true }
+                            return !visibleExitIDs.contains(id)
+                        }
+                        if !exitsToRemove.isEmpty {
+                            mapView.removeAnnotations(exitsToRemove)
+                        }
+
+                        let newExits = visibleExits.filter { !currentExitIDs.contains($0.exit_id) }
+                        if !newExits.isEmpty {
+                            let newExitAnnotations = newExits.compactMap { exit -> ExitMarkerAnnotation? in
+                                guard let coords = exit.coordinates else { return nil }
+                                let title: String
+                                if let num = exit.exit_number, let name = exit.exit_name, !name.isEmpty {
+                                    title = "Sortie \(num) : \(name)"
+                                } else if let num = exit.exit_number {
+                                    title = "Sortie \(num)"
+                                } else if let name = exit.exit_name, !name.isEmpty {
+                                    title = "Sortie : \(name)"
+                                } else {
+                                    title = exit.is_entry ? "Accès station" : "Sortie"
+                                }
+
+                                let subtitle = exit.stations?.first?.name ?? "Métro / RER"
+
+                                return ExitMarkerAnnotation(
+                                    coordinate: CLLocationCoordinate2D(latitude: coords.lat, longitude: coords.lon),
+                                    title: title,
+                                    subtitle: subtitle,
+                                    isEntry: exit.is_entry && !exit.is_exit,
+                                    exitId: exit.exit_id,
+                                    exitNumber: exit.exit_number,
+                                    exitName: exit.exit_name,
+                                    isJourneyExit: false
+                                )
+                            }
+                            mapView.addAnnotations(newExitAnnotations)
+                        }
                     }
                 }
             }

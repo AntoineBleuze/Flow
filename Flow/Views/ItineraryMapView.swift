@@ -101,62 +101,46 @@ struct ItineraryMapViewRepresentable: UIViewRepresentable {
                 mapView.addOverlay(polyline)
             }
             
-            // Add markers
+            // Add Entry/Exit markers for transit sections
             if isTransit {
-                // Add start marker
-                if let fromPlace = section.from, let fromCoord = fromPlace.coordinate {
-                    let fromStation = StationMarkerAnnotation(
-                        coordinate: fromCoord,
-                        title: fromPlace.name ?? "Départ",
-                        type: .start
-                    )
-                    mapView.addAnnotation(fromStation)
-                    allCoordinates.append(fromCoord)
-                    
-                    // Add Entry Exits
-                    if let stationId = fromPlace.id {
-                        let exits = StationExitsService.shared.exitsForStation(id: stationId)
-                        for exit in exits where exit.is_entry {
-                            if let coords = exit.coordinates {
-                                let exitCoord = CLLocationCoordinate2D(latitude: coords.lat, longitude: coords.lon)
-                                let exitAnnotation = ExitMarkerAnnotation(
-                                    coordinate: exitCoord,
-                                    title: "Accès \(exit.exit_number ?? 0): \(exit.exit_name ?? "Entrée")",
-                                    subtitle: "Entrée pour la station \(fromPlace.name ?? "")",
-                                    isEntry: true
-                                )
-                                mapView.addAnnotation(exitAnnotation)
-                                allCoordinates.append(exitCoord)
-                            }
+                if let fromPlace = section.from, let stationId = fromPlace.id {
+                    let exits = StationExitsService.shared.exitsForStation(id: stationId)
+                    for exit in exits where exit.is_entry {
+                        if let coords = exit.coordinates {
+                            let exitCoord = CLLocationCoordinate2D(latitude: coords.lat, longitude: coords.lon)
+                            let exitAnnotation = ExitMarkerAnnotation(
+                                coordinate: exitCoord,
+                                title: "Accès \(exit.exit_number ?? 0): \(exit.exit_name ?? "Entrée")",
+                                subtitle: "Entrée pour la station \(fromPlace.name ?? "")",
+                                isEntry: true,
+                                exitId: exit.exit_id,
+                                exitNumber: exit.exit_number,
+                                exitName: exit.exit_name,
+                                isJourneyExit: true
+                            )
+                            mapView.addAnnotation(exitAnnotation)
+                            allCoordinates.append(exitCoord)
                         }
                     }
                 }
                 
-                // Add end marker
-                if let toPlace = section.to, let toCoord = toPlace.coordinate {
-                    let toStation = StationMarkerAnnotation(
-                        coordinate: toCoord,
-                        title: toPlace.name ?? "Arrivée",
-                        type: .end
-                    )
-                    mapView.addAnnotation(toStation)
-                    allCoordinates.append(toCoord)
-                    
-                    // Add Exit Exits
-                    if let stationId = toPlace.id {
-                        let exits = StationExitsService.shared.exitsForStation(id: stationId)
-                        for exit in exits where exit.is_exit {
-                            if let coords = exit.coordinates {
-                                let exitCoord = CLLocationCoordinate2D(latitude: coords.lat, longitude: coords.lon)
-                                let exitAnnotation = ExitMarkerAnnotation(
-                                    coordinate: exitCoord,
-                                    title: "Sortie \(exit.exit_number ?? 0): \(exit.exit_name ?? "Sortie")",
-                                    subtitle: "Sortie de la station \(toPlace.name ?? "")",
-                                    isEntry: false
-                                )
-                                mapView.addAnnotation(exitAnnotation)
-                                allCoordinates.append(exitCoord)
-                            }
+                if let toPlace = section.to, let stationId = toPlace.id {
+                    let exits = StationExitsService.shared.exitsForStation(id: stationId)
+                    for exit in exits where exit.is_exit {
+                        if let coords = exit.coordinates {
+                            let exitCoord = CLLocationCoordinate2D(latitude: coords.lat, longitude: coords.lon)
+                            let exitAnnotation = ExitMarkerAnnotation(
+                                coordinate: exitCoord,
+                                title: "Sortie \(exit.exit_number ?? 0): \(exit.exit_name ?? "Sortie")",
+                                subtitle: "Sortie de la station \(toPlace.name ?? "")",
+                                isEntry: false,
+                                exitId: exit.exit_id,
+                                exitNumber: exit.exit_number,
+                                exitName: exit.exit_name,
+                                isJourneyExit: true
+                            )
+                            mapView.addAnnotation(exitAnnotation)
+                            allCoordinates.append(exitCoord)
                         }
                     }
                 }
@@ -173,12 +157,34 @@ struct ItineraryMapViewRepresentable: UIViewRepresentable {
             }
         }
         
+        // Add single global start marker (first section's from)
+        if let firstSection = sections.first, let fromPlace = firstSection.from, let fromCoord = fromPlace.coordinate {
+            let startStation = StationMarkerAnnotation(
+                coordinate: fromCoord,
+                title: fromPlace.name ?? "Départ",
+                type: .start
+            )
+            mapView.addAnnotation(startStation)
+            allCoordinates.append(fromCoord)
+        }
+        
+        // Add single global end marker (last section's to)
+        if let lastSection = sections.last, let toPlace = lastSection.to, let toCoord = toPlace.coordinate {
+            let toStation = StationMarkerAnnotation(
+                coordinate: toCoord,
+                title: toPlace.name ?? "Arrivée",
+                type: .end
+            )
+            mapView.addAnnotation(toStation)
+            allCoordinates.append(toCoord)
+        }
+        
         // Fit map to show all coordinates (only once per journey)
         if !allCoordinates.isEmpty {
             if context.coordinator.lastZoomedJourneyId != journey.id.uuidString {
                 context.coordinator.lastZoomedJourneyId = journey.id.uuidString
                 let boundingRect = MKMapRect(coordinates: allCoordinates)
-                mapView.setVisibleMapRect(boundingRect, edgePadding: UIEdgeInsets(top: 50, left: 50, bottom: 50, right: 50), animated: true)
+                mapView.setVisibleMapRect(boundingRect, edgePadding: UIEdgeInsets(top: 100, left: 100, bottom: 100, right: 100), animated: true)
             }
         }
     }
@@ -268,13 +274,13 @@ struct ItineraryMapViewRepresentable: UIViewRepresentable {
             
             switch markerAnnotation.markerType {
             case .start:
-                view?.markerTintColor = .white
+                view?.markerTintColor = .systemGreen
                 #if canImport(UIKit)
-                view?.glyphImage = UIImage(systemName: "figure.walk")
+                view?.glyphImage = UIImage(systemName: "mappin.and.ellipse")
                 #else
-                view?.glyphImage = NSImage(systemSymbolName: "figure.walk", accessibilityDescription: nil)
+                view?.glyphImage = NSImage(systemSymbolName: "mappin.and.ellipse", accessibilityDescription: nil)
                 #endif
-                view?.glyphTintColor = .systemBlue
+                view?.glyphTintColor = .white
             case .end:
                 view?.markerTintColor = .systemRed
                 #if canImport(UIKit)

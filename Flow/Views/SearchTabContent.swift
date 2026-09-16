@@ -14,6 +14,7 @@ struct SearchTabContent: View {
     @ObservedObject var historyManager = SearchHistoryManager.shared
     @ObservedObject var favoritesService = FavoritesService.shared
     @ObservedObject var mapData = MapDataService.shared
+    @ObservedObject var locationManager = LocationManager.shared
 
     @Environment(\.modelContext) private var context
     @State private var cancellables = Set<AnyCancellable>()
@@ -23,158 +24,309 @@ struct SearchTabContent: View {
     @State private var userTrackingMode: MKUserTrackingMode = .none
     @State private var focusedSectionId: String? = nil
 
+    private var nearbyStations: [MapStation] {
+        let nearby = StationSuggestionEngine.nearbySuggestions(
+            from: mapData.allStations,
+            userLocation: locationManager.userLocation,
+            maxResults: 5
+        )
+        let recentIds = Set(historyManager.recentStations.map { $0.id })
+        return nearby.filter { !recentIds.contains($0.id) }
+    }
+
+    private var cardBackground: Material {
+        .ultraThinMaterial
+    }
+
+    private var borderColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.08)
+    }
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                stationSearchView
-            }
-            .background(Color.black.ignoresSafeArea())
-            .navigationTitle("Recherche")
-            .navigationBarTitleDisplayMode(.large)
+            stationSearchView
+                .liquidGlassBackground()
+                .navigationTitle("Recherche")
+                .navigationBarTitleDisplayMode(.large)
+                .searchPresentationToolbarBehavior(.avoidHidingContent)
         }
     }
     
     // MARK: - Station Search View
     var stationSearchView: some View {
         ScrollView {
-            LazyVStack(spacing: 8) {
+            LazyVStack(spacing: 16) {
                 if searchText.isEmpty {
-                    // MARK: Favorites Section
-                    if !favoritesService.favoriteStationIds.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack {
-                                Image(systemName: "star.fill")
-                                    .foregroundColor(.yellow)
-                                Text("Favoris")
-                                    .font(.caption).bold()
-                                    .foregroundColor(.gray)
-                            }
-                            .padding(.horizontal)
-                            .padding(.top, 8)
-                            
-                            ForEach(Array(favoritesService.favoriteStationIds), id: \.self) { stationId in
-                                if let station = mapData.allStations.first(where: { $0.id == stationId })
-                                    ?? mapData.getAllStationsSync().first(where: { $0.id == stationId })
-                                {
-                                    Button(action: {
-                                        selectStation(station)
-                                    }) {
-                                        StationRow(station: station)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .padding(.horizontal)
-                                }
-                            }
+                    if historyManager.recentStations.isEmpty && favoritesService.favoriteStationIds.isEmpty && nearbyStations.isEmpty {
+                        emptyHistoryView
+                    } else {
+                        if !historyManager.recentStations.isEmpty {
+                            recentSearchesSection
                         }
-                        
-                        Divider()
-                            .background(Color.white.opacity(0.15))
-                            .padding(.vertical, 4)
-                    }
-                    
-                    // MARK: Recent Searches Section
-                    if !historyManager.recentStations.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack {
-                                Image(systemName: "clock.arrow.circlepath")
-                                    .foregroundColor(.gray)
-                                Text("Recherches récentes")
-                                    .font(.caption).bold()
-                                    .foregroundColor(.gray)
-                            }
-                            .padding(.horizontal)
-                            .padding(.top, 8)
-                            
-                            ForEach(historyManager.recentStations) { station in
-                                Button(action: {
-                                    selectStation(station)
-                                }) {
-                                    StationRow(station: station)
-                                }
-                                .buttonStyle(.plain)
-                                .padding(.horizontal)
-                                
-                                if station.id != historyManager.recentStations.last?.id {
-                                    Divider()
-                                        .background(Color.white.opacity(0.15))
-                                        .padding(.leading, 56)
-                                }
-                            }
+
+                        if !nearbyStations.isEmpty {
+                            nearbyStationsSection
+                        }
+
+                        if !favoritesService.favoriteStationIds.isEmpty {
+                            favoritesSection
                         }
                     }
                 } else {
                     if searchResults.isEmpty {
-                        VStack {
-                            Spacer()
-                            Text("Aucun résultat")
-                                .foregroundColor(.gray)
-                            Spacer()
-                        }
-                        .frame(minHeight: 200)
+                        noResultsView
                     } else {
-                        VStack(alignment: .leading, spacing: 12) {
-                            ForEach(searchResults) { station in
-                                Button(action: {
-                                    selectStation(station)
-                                }) {
-                                    StationRow(station: station)
-                                }
-                                .buttonStyle(.plain)
-                                .padding(.horizontal)
-                                
-                                if station.id != searchResults.last?.id {
-                                    Divider()
-                                        .background(Color.white.opacity(0.15))
-                                        .padding(.leading, 56)
-                                }
-                            }
-                        }
+                        searchResultsSection
                     }
                 }
             }
-            .padding(.top, 8)
-            .padding(.bottom, 100)
-        }
-        .safeAreaInset(edge: .bottom) {
-            bottomSearchBar
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 24)
         }
         .onChange(of: searchText) { _, newValue in
             performSearch(query: newValue)
         }
+        .onChange(of: locationManager.userLocation?.latitude) { _, _ in
+            if !searchText.isEmpty {
+                performSearch(query: searchText)
+            }
+        }
         .onAppear {
+            locationManager.requestLocation()
             historyManager.refreshHistory()
             if !searchText.isEmpty {
                 performSearch(query: searchText)
             }
         }
     }
-    
-    var bottomSearchBar: some View {
-        HStack {
-            Image(systemName: "magnifyingglass")
-                .foregroundColor(.gray)
-            
-            TextField("Rechercher une station...", text: $searchText)
-                .textFieldStyle(.plain)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundColor(.white)
-            
-            if !searchText.isEmpty {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundColor(.gray)
-                    .font(.system(size: 18))
-                    .padding(8)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        searchText = ""
+
+    // MARK: - Recent Searches Section
+    var recentSearchesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Historique de recherche", systemImage: "clock.arrow.circlepath")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundColor(.secondary)
+                    .textCase(.uppercase)
+
+                Spacer()
+
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        historyManager.clearHistory()
                     }
+                }) {
+                    Text("Effacer")
+                        .font(.footnote.weight(.medium))
+                        .foregroundColor(.blue)
+                }
+                .buttonStyle(.liquidGlassInteractive)
+            }
+            .padding(.horizontal, 4)
+
+            VStack(spacing: 0) {
+                ForEach(historyManager.recentStations) { station in
+                    HStack(spacing: 0) {
+                        Button(action: {
+                            selectStation(station)
+                        }) {
+                            StationRow(station: station)
+                        }
+                        .buttonStyle(.liquidGlassInteractive)
+
+                        Button(action: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                historyManager.removeSearch(stationId: station.id)
+                            }
+                        }) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.secondary.opacity(0.7))
+                                .padding(8)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.liquidGlassInteractive)
+                    }
+                    .padding(.horizontal, 16)
+
+                    if station.id != historyManager.recentStations.last?.id {
+                        Divider()
+                            .padding(.leading, 16)
+                    }
+                }
+            }
+            .background(cardBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(borderColor, lineWidth: 1)
+            )
+        }
+    }
+
+    // MARK: - Nearby Stations Section
+    var nearbyStationsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("À proximité", systemImage: "location.fill")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundColor(.secondary)
+                    .textCase(.uppercase)
+
+                Spacer()
+            }
+            .padding(.horizontal, 4)
+
+            VStack(spacing: 0) {
+                ForEach(nearbyStations) { station in
+                    Button(action: {
+                        selectStation(station)
+                    }) {
+                        StationRow(station: station)
+                    }
+                    .buttonStyle(.liquidGlassInteractive)
+                    .padding(.horizontal, 16)
+
+                    if station.id != nearbyStations.last?.id {
+                        Divider()
+                            .padding(.leading, 16)
+                    }
+                }
+            }
+            .background(cardBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(borderColor, lineWidth: 1)
+            )
+        }
+    }
+
+    // MARK: - Favorites Section
+    var favoritesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Favoris", systemImage: "star.fill")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundColor(.secondary)
+                    .textCase(.uppercase)
+            }
+            .padding(.horizontal, 4)
+
+            VStack(spacing: 0) {
+                let favStations = Array(favoritesService.favoriteStationIds).compactMap { id in
+                    mapData.allStations.first(where: { $0.id == id })
+                        ?? mapData.getAllStationsSync().first(where: { $0.id == id })
+                }
+                ForEach(favStations) { station in
+                    Button(action: {
+                        selectStation(station)
+                    }) {
+                        StationRow(station: station)
+                    }
+                    .buttonStyle(.liquidGlassInteractive)
+                    .padding(.horizontal, 16)
+
+                    if station.id != favStations.last?.id {
+                        Divider()
+                            .padding(.leading, 16)
+                    }
+                }
+            }
+            .background(cardBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(borderColor, lineWidth: 1)
+            )
+        }
+    }
+
+    // MARK: - Empty History View
+    var emptyHistoryView: some View {
+        VStack(spacing: 14) {
+            Spacer(minLength: 60)
+
+            ZStack {
+                Circle()
+                    .fill(Color.blue.opacity(0.12))
+                    .frame(width: 72, height: 72)
+
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 32, weight: .medium))
+                    .foregroundColor(.blue)
+            }
+
+            Text("Historique vide")
+                .font(.headline)
+                .foregroundColor(.primary)
+
+            Text("Vos stations et adresses récemment consultées apparaîtront ici.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+
+            Spacer(minLength: 80)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - No Results View
+    var noResultsView: some View {
+        VStack(spacing: 14) {
+            Spacer(minLength: 60)
+
+            ZStack {
+                Circle()
+                    .fill(Color.secondary.opacity(0.12))
+                    .frame(width: 72, height: 72)
+
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 32, weight: .medium))
+                    .foregroundColor(.secondary)
+            }
+
+            Text("Aucun résultat")
+                .font(.headline)
+                .foregroundColor(.primary)
+
+            Text("Aucune station ou adresse ne correspond à « \(searchText) ».")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+
+            Spacer(minLength: 80)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Search Results Section
+    var searchResultsSection: some View {
+        VStack(spacing: 0) {
+            ForEach(searchResults) { station in
+                Button(action: {
+                    selectStation(station)
+                }) {
+                    StationRow(station: station)
+                }
+                .buttonStyle(.liquidGlassInteractive)
+                .padding(.horizontal, 16)
+
+                if station.id != searchResults.last?.id {
+                    Divider()
+                        .padding(.leading, 16)
+                }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(Color.white.opacity(0.12), in: Capsule())
-        .padding(.horizontal)
-        .padding(.bottom, 8)
+        .background(cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(borderColor, lineWidth: 1)
+        )
     }
     
 
@@ -211,101 +363,107 @@ struct SearchTabContent: View {
             return
         }
 
-        // 1. Filtrer les stations ferroviaires (métro, RER, tram, transilien) chargées en mémoire
+        // 1. Filtrer les stations ferroviaires (métro, RER, tram, transilien) chargées en mémoire sans tenir compte des accents
         let matchingRailStations = MapDataService.shared.allStations.filter { station in
-            tokens.allSatisfy { token in
-                station.name.localizedCaseInsensitiveContains(token)
-            }
+            StationSuggestionEngine.matchesQuery(text: station.name, tokens: tokens)
+                || (station.city != nil && StationSuggestionEngine.matchesQuery(text: station.city!, tokens: tokens))
         }
 
-        // 2. Chercher dans SwiftData uniquement pour les bus (optimisé par premier token)
-        let token1 = tokens[0]
-        var descriptor = FetchDescriptor<StopPointModel>(
-            predicate: #Predicate<StopPointModel> { stop in
-                stop.type == "Bus" && stop.name.contains(token1)
-            },
-            sortBy: [SortDescriptor(\.name, order: .forward)]
-        )
-        descriptor.fetchLimit = 150
+        // 2. Chercher dans SwiftData pour les bus avec les variantes accentuées du premier token
+        let tokenVariants = StationSuggestionEngine.accentVariants(for: tokens[0])
+        var busResults: [StopPointModel] = []
+        for variant in tokenVariants.prefix(6) {
+            var descriptor = FetchDescriptor<StopPointModel>(
+                predicate: #Predicate<StopPointModel> { stop in
+                    stop.type == "Bus" && stop.name.contains(variant)
+                },
+                sortBy: [SortDescriptor(\.name, order: .forward)]
+            )
+            descriptor.fetchLimit = 80
+            if let results = try? context.fetch(descriptor) {
+                for r in results {
+                    if !busResults.contains(where: { $0.id == r.id }) {
+                        busResults.append(r)
+                    }
+                }
+            }
+        }
 
         var localResults: [MapStation] = []
 
-        do {
-            let busResults = try context.fetch(descriptor)
-            
-            // Filtrer en mémoire pour s'assurer que tous les tokens correspondent
-            let filteredBus = busResults.filter { stop in
-                tokens.allSatisfy { token in
-                    stop.name.localizedCaseInsensitiveContains(token)
-                }
-            }
-            
-            let groupedBus = Dictionary(grouping: filteredBus) { "\($0.name)_\($0.city)" }
+        // Filtrer en mémoire pour s'assurer que tous les tokens correspondent sans tenir compte des accents
+        let filteredBus = busResults.filter { stop in
+            StationSuggestionEngine.matchesQuery(text: stop.name, tokens: tokens)
+                || StationSuggestionEngine.matchesQuery(text: stop.city, tokens: tokens)
+        }
+        
+        let groupedBus = Dictionary(grouping: filteredBus) { "\($0.name)_\($0.city)" }
 
-            let busStations: [MapStation] = groupedBus.compactMap { (_, stops) -> MapStation? in
-                guard let first = stops.first else { return nil }
-                let name = first.name
+        let busStations: [MapStation] = groupedBus.compactMap { (_, stops) -> MapStation? in
+            guard let first = stops.first else { return nil }
+            let name = first.name
 
-                let totalLat = stops.reduce(0.0) { $0 + $1.latitude }
-                let totalLon = stops.reduce(0.0) { $0 + $1.longitude }
-                let count = Double(stops.count)
-                let center = CLLocationCoordinate2D(
-                    latitude: totalLat / count, longitude: totalLon / count)
+            let totalLat = stops.reduce(0.0) { $0 + $1.latitude }
+            let totalLon = stops.reduce(0.0) { $0 + $1.longitude }
+            let count = Double(stops.count)
+            let center = CLLocationCoordinate2D(
+                latitude: totalLat / count, longitude: totalLon / count)
 
-                let platforms = stops.map { entity -> StopPoint in
-                    let coordinate = CLLocationCoordinate2D(
-                        latitude: entity.latitude, longitude: entity.longitude)
-                    let type = mapType(entity.type)
+            let platforms = stops.map { entity -> StopPoint in
+                let coordinate = CLLocationCoordinate2D(
+                    latitude: entity.latitude, longitude: entity.longitude)
+                let type = mapType(entity.type)
 
-                    return StopPoint(
-                        id: entity.id,
-                        stopAreaId: entity.stopAreaId,
-                        name: name,
-                        coordinate: coordinate,
-                        type: type,
-                        lineName: entity.lineName
-                    )
-                }
-
-                let stationId: String = first.stopAreaId.isEmpty ? first.id : first.stopAreaId
-
-                let uniqueLines = Set(stops.map { entity in
-                    StationLine(name: entity.lineName, type: mapType(entity.type))
-                })
-                let sortedLines = Array(uniqueLines).sorted { $0.name < $1.name }
-
-                return MapStation(
-                    id: stationId,
+                return StopPoint(
+                    id: entity.id,
+                    stopAreaId: entity.stopAreaId,
                     name: name,
-                    coordinate: center,
-                    platforms: platforms,
-                    isHub: false,
-                    mainType: .bus,
-                    lines: sortedLines,
-                    city: first.city.isEmpty ? "Paris" : first.city
+                    coordinate: coordinate,
+                    type: type,
+                    lineName: entity.lineName
                 )
             }
 
-            // 3. Combiner et trier
-            var allResults = matchingRailStations + busStations
-            allResults.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-            localResults = allResults
-            searchResults = allResults
+            let stationId: String = first.stopAreaId.isEmpty ? first.id : first.stopAreaId
 
-        } catch {
-            print("❌ Search error: \(error)")
-            localResults = matchingRailStations
-            searchResults = matchingRailStations
+            let uniqueLines = Set(stops.map { entity in
+                StationLine(name: entity.lineName, type: mapType(entity.type))
+            })
+            let sortedLines = Array(uniqueLines).sorted { $0.name < $1.name }
+
+            return MapStation(
+                id: stationId,
+                name: name,
+                coordinate: center,
+                platforms: platforms,
+                isHub: false,
+                mainType: .bus,
+                lines: sortedLines,
+                city: first.city.isEmpty ? "Paris" : first.city
+            )
         }
 
-        // 3. Rechercher les adresses physiques à proximité via MapKit
+        // 3. Combiner et classer intelligemment par pertinence et proximité
+        let allResults = matchingRailStations + busStations
+        let ranked = StationSuggestionEngine.rank(
+            stations: allResults,
+            query: query,
+            userLocation: locationManager.userLocation,
+            favoriteIds: favoritesService.favoriteStationIds,
+            recentIds: Set(historyManager.recentStations.map { $0.id })
+        )
+        localResults = ranked
+        searchResults = ranked
+
+        // 4. Rechercher les adresses physiques à proximité via MapKit
         let searchRequest = MKLocalSearch.Request()
         searchRequest.naturalLanguageQuery = query
         let parisCenter = CLLocationCoordinate2D(latitude: 48.8566, longitude: 2.3522)
+        let searchCenter = locationManager.userLocation ?? parisCenter
         searchRequest.region = MKCoordinateRegion(
-            center: parisCenter,
-            latitudinalMeters: 50000,
-            longitudinalMeters: 50000
+            center: searchCenter,
+            latitudinalMeters: 30000,
+            longitudinalMeters: 30000
         )
         
         let search = MKLocalSearch(request: searchRequest)
@@ -317,8 +475,9 @@ struct SearchTabContent: View {
             }
             
             let addressStations: [MapStation] = response.mapItems.map { item in
-                let coordinate = item.placemark.coordinate
+                let coordinate = item.location.coordinate
                 let name = item.name ?? ""
+                let city = item.addressRepresentations?.cityName ?? item.name ?? "Adresse"
                 
                 return MapStation(
                     id: "address:\(coordinate.latitude),\(coordinate.longitude)",
@@ -328,7 +487,7 @@ struct SearchTabContent: View {
                     isHub: false,
                     mainType: .bus,
                     lines: [],
-                    city: item.placemark.title ?? "Adresse"
+                    city: city
                 )
             }
             
@@ -339,7 +498,13 @@ struct SearchTabContent: View {
                         merged.append(addr)
                     }
                 }
-                self.searchResults = merged
+                self.searchResults = StationSuggestionEngine.rank(
+                    stations: merged,
+                    query: query,
+                    userLocation: self.locationManager.userLocation,
+                    favoriteIds: self.favoritesService.favoriteStationIds,
+                    recentIds: Set(self.historyManager.recentStations.map { $0.id })
+                )
             }
         }
     }
@@ -356,6 +521,8 @@ struct SearchTabContent: View {
 
 struct StationRow: View {
     let station: MapStation
+    var customUserLocation: CLLocationCoordinate2D? = nil
+    @ObservedObject private var locationManager = LocationManager.shared
 
     private var transportModes: [TransportType] {
         let modes = Set(station.lines.map { $0.type })
@@ -408,13 +575,26 @@ struct StationRow: View {
         type.priority
     }
 
+    private var distanceText: String? {
+        guard let userCoord = customUserLocation ?? locationManager.userLocation else { return nil }
+        let userLoc = CLLocation(latitude: userCoord.latitude, longitude: userCoord.longitude)
+        let stationLoc = CLLocation(latitude: station.coordinate.latitude, longitude: station.coordinate.longitude)
+        let meters = userLoc.distance(from: stationLoc)
+        guard meters < 100_000 else { return nil }
+        if meters < 1000 {
+            return "\(Int(meters)) m"
+        } else {
+            return String(format: "%.1f km", meters / 1000.0)
+        }
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .center, spacing: 8) {
                     Text(station.name)
                         .font(.system(size: 17, weight: .semibold))
-                        .foregroundColor(.white)
+                        .foregroundColor(.primary)
                     
                     if station.id.hasPrefix("address:") {
                         Image(systemName: "mappin.and.ellipse")
@@ -440,19 +620,25 @@ struct StationRow: View {
                 if let city = station.city, !city.isEmpty {
                     Text(city)
                         .font(.system(size: 13))
-                        .foregroundColor(.gray)
+                        .foregroundColor(.secondary)
                 } else {
                     Text(modesString)
                         .font(.system(size: 13))
-                        .foregroundColor(.gray)
+                        .foregroundColor(.secondary)
                 }
             }
             
             Spacer()
+
+            if let distance = distanceText {
+                Text(distance)
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundColor(.secondary)
+            }
             
             Image(systemName: "chevron.right")
-                .font(.system(size: 14, weight: .bold))
-                .foregroundColor(.gray)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.secondary.opacity(0.5))
         }
         .padding(.vertical, 12)
         .contentShape(Rectangle())
@@ -492,9 +678,65 @@ extension StationRow: Equatable {
     }
 }
 
-#Preview {
-    SearchTabContent(searchText: .constant(""))
-        .environmentObject(NavigationCoordinator())
+#Preview("Search View") {
+    NavigationStack {
+        SearchTabContent(searchText: .constant(""))
+    }
+    .environmentObject(NavigationCoordinator())
+}
+
+#Preview("Station Row with Distance") {
+    VStack(spacing: 0) {
+        StationRow(
+            station: MapStation(
+                id: "1",
+                name: "Châtelet",
+                coordinate: CLLocationCoordinate2D(latitude: 48.8584, longitude: 2.3470),
+                platforms: [],
+                isHub: true,
+                mainType: .metro,
+                lines: [
+                    StationLine(name: "1", type: .metro),
+                    StationLine(name: "4", type: .metro),
+                    StationLine(name: "7", type: .metro),
+                    StationLine(name: "11", type: .metro),
+                    StationLine(name: "14", type: .metro)
+                ],
+                city: "Paris"
+            ),
+            customUserLocation: CLLocationCoordinate2D(latitude: 48.8566, longitude: 2.3522)
+        )
+        .padding(.horizontal, 16)
+
+        Divider()
+            .padding(.leading, 16)
+
+        StationRow(
+            station: MapStation(
+                id: "2",
+                name: "Gare de Lyon",
+                coordinate: CLLocationCoordinate2D(latitude: 48.8443, longitude: 2.3744),
+                platforms: [],
+                isHub: true,
+                mainType: .rer,
+                lines: [
+                    StationLine(name: "A", type: .rer),
+                    StationLine(name: "D", type: .rer),
+                    StationLine(name: "1", type: .metro),
+                    StationLine(name: "14", type: .metro)
+                ],
+                city: "Paris"
+            ),
+            customUserLocation: CLLocationCoordinate2D(latitude: 48.8566, longitude: 2.3522)
+        )
+        .padding(.horizontal, 16)
+    }
+    .background(Color(uiColor: .secondarySystemGroupedBackground))
+    .clipShape(RoundedRectangle(cornerRadius: 16))
+    .padding()
+    .onAppear {
+        LocationManager.shared.simulateLocation(latitude: 48.8566, longitude: 2.3522)
+    }
 }
 
 

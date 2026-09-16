@@ -49,43 +49,52 @@ struct FavoritesView: View {
         NavigationStack {
             Group {
                 if favoriteEntries.isEmpty {
-                    VStack(spacing: 20) {
-                        Image(systemName: "star.slash.fill")
-                            .font(.system(size: 50))
-                            .foregroundColor(.gray)
-                        Text("Aucun favori")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                        Text(
-                            "Ajoutez des lignes à vos favoris en appuyant sur l'icône de cœur à côté de chaque ligne dans le détail d'une station."
-                        )
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-                        .foregroundColor(.gray)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.horizontal, 20)
+                    emptyStateView
                 } else {
-                    List {
-                        ForEach(favoriteEntries) { entry in
-                            NavigationLink(destination: TrafficDetailView(line: getTransportLine(for: entry))) {
-                                FavoriteLineRow(entry: entry)
+                    ScrollView {
+                        LazyVStack(spacing: 14) {
+                            ForEach(favoriteEntries) { entry in
+                                NavigationLink(destination: TrafficDetailView(line: getTransportLine(for: entry))) {
+                                    FavoriteLineRow(entry: entry)
+                                }
+                                .buttonStyle(.liquidGlassInteractive)
                             }
-                            .buttonStyle(.plain)
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                        .frame(maxWidth: horizontalSizeClass == .regular ? 700 : .infinity)
+                        .frame(maxWidth: .infinity)
                     }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                    .frame(maxWidth: horizontalSizeClass == .regular ? 700 : .infinity)
-                    .frame(maxWidth: .infinity) // center within parent
                 }
             }
-            .background(Color.black.ignoresSafeArea())
+            .liquidGlassBackground()
             .navigationTitle("Favoris")
             .navigationBarTitleDisplayMode(.large)
         }
+    }
+
+    private var emptyStateView: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "star.slash.fill")
+                .font(.system(size: 54))
+                .foregroundStyle(.secondary)
+                .symbolEffect(.pulse.byLayer, options: .repeating)
+            
+            Text("Aucun favori")
+                .font(.system(.title3, design: .rounded))
+                .fontWeight(.bold)
+                .foregroundColor(.primary)
+            
+            Text("Ajoutez des lignes à vos favoris en appuyant sur l'icône de cœur dans la fiche détaillée d'une station.")
+                .font(.subheadline)
+                .multilineTextAlignment(.center)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 24)
+        }
+        .padding(24)
+        .liquidGlassCard(cornerRadius: 24, padding: 24)
+        .padding(.horizontal, 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -123,105 +132,123 @@ struct FavoriteLineRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 16) {
-                // Line Badge
-                LineIcon(line: line, size: 40)
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(lineNameString)
-                        .font(.headline)
-                        .foregroundColor(.white)
+        LiquidGlassCard(cornerRadius: 18, padding: 14) {
+            VStack(alignment: .leading, spacing: 12) {
+                // Header: Line Badge, Name, Status / Station, Heart
+                HStack(spacing: 14) {
+                    LineIcon(line: line, size: 42)
                     
-                    if let stationName = entry.stationName {
-                        Text(stationName)
-                            .font(.subheadline)
-                            .foregroundColor(.gray)
-                    } else {
-                        HStack(spacing: 6) {
-                            Image(systemName: line.status.icon)
-                                .font(.caption)
-                                .foregroundColor(line.status.color)
-                            
-                            Text(line.status.description)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(lineNameString)
+                            .font(.system(.headline, design: .rounded))
+                            .fontWeight(.bold)
+                            .foregroundColor(.primary)
+                        
+                        if let stationName = entry.stationName {
+                            Text(stationName)
                                 .font(.subheadline)
-                                .foregroundColor(line.status.color)
+                                .foregroundColor(.secondary)
+                        } else {
+                            HStack(spacing: 6) {
+                                Image(systemName: line.status.icon)
+                                    .font(.caption)
+                                    .foregroundColor(line.status.color)
+                                
+                                Text(line.status.description)
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(line.status.color)
+                            }
                         }
                     }
+                    
+                    Spacer()
+                    
+                    // Toggle Favorite Button
+                    Button(action: {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            favoritesService.toggleFavoriteLine(
+                                lineId: entry.lineId,
+                                type: entry.type,
+                                stationId: entry.stationId,
+                                stationName: entry.stationName,
+                                color: entry.color,
+                                textColor: entry.textColor
+                            )
+                        }
+                    }) {
+                        Image(systemName: "heart.fill")
+                            .foregroundColor(.red)
+                            .font(.system(size: 15, weight: .bold))
+                            .frame(width: 36, height: 36)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay(Circle().stroke(Color.primary.opacity(0.08), lineWidth: 1))
+                    }
+                    .buttonStyle(.liquidGlassInteractive)
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.secondary)
                 }
                 
-                Spacer()
-                
-                // Remove Favorite button
-                Button(action: {
-                    withAnimation {
-                        favoritesService.toggleFavoriteLine(
-                            lineId: entry.lineId,
-                            type: entry.type,
-                            stationId: entry.stationId,
-                            stationName: entry.stationName,
-                            color: entry.color,
-                            textColor: entry.textColor
-                        )
-                    }
-                }) {
-                    Image(systemName: "heart.fill")
-                        .foregroundColor(.red)
-                        .font(.system(size: 16, weight: .bold))
-                        .frame(width: 36, height: 36)
-                        .background(Color.white.opacity(0.1), in: Circle())
-                }
-                .buttonStyle(.plain)
-                
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(.gray)
-            }
-            
-            // Real-time departures (if stationId exists)
-            if entry.stationId != nil {
-                Divider()
-                    .background(Color.white.opacity(0.15))
-                
-                if isLoading && departures.isEmpty {
-                    HStack {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                        Text("Chargement des départs...")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                } else if departures.isEmpty {
-                    Text("Aucun départ prévu ou info indisponible")
-                        .font(.caption)
-                        .foregroundColor(.gray)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    let grouped = groupedDepartures
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(grouped) { group in
-                            HStack {
-                                Text(group.direction)
-                                    .font(.caption)
-                                    .foregroundColor(.white)
-                                    .lineLimit(1)
-                                
-                                Spacer()
-                                
-                                HStack(spacing: 4) {
-                                    ForEach(Array(group.times.enumerated()), id: \.offset) { tIndex, minuteValue in
-                                        HStack(spacing: 0) {
-                                            Text("\(minuteValue)")
-                                                .contentTransition(.numericText())
-                                                .animation(.spring(duration: 0.2), value: minuteValue)
-                                            Text(" min")
-                                            if tIndex < group.times.count - 1 {
-                                                Text(", ")
+                // Real-time departures
+                if entry.stationId != nil {
+                    Divider()
+                        .opacity(0.6)
+                    
+                    if isLoading && departures.isEmpty {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                            Text("Chargement des prochains départs...")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    } else if departures.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "clock")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text("Aucun départ immédiat ou info indisponible")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    } else {
+                        let grouped = groupedDepartures
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(grouped) { group in
+                                HStack(alignment: .firstTextBaseline) {
+                                    Text(group.direction)
+                                        .font(.subheadline)
+                                        .foregroundColor(.primary)
+                                        .lineLimit(1)
+                                    
+                                    Spacer()
+                                    
+                                    HStack(spacing: 6) {
+                                        // Live pulsing indicator
+                                        Circle()
+                                            .fill(LiquidGlassTheme.liveGreen(for: colorScheme))
+                                            .frame(width: 6, height: 6)
+                                        
+                                        HStack(spacing: 4) {
+                                            ForEach(Array(group.times.enumerated()), id: \.offset) { tIndex, minuteValue in
+                                                HStack(spacing: 0) {
+                                                    Text("\(minuteValue)")
+                                                        .contentTransition(.numericText())
+                                                        .animation(.spring(duration: 0.2), value: minuteValue)
+                                                    Text(" min")
+                                                    if tIndex < group.times.count - 1 {
+                                                        Text(", ")
+                                                    }
+                                                }
+                                                .font(.system(.subheadline, design: .rounded))
+                                                .fontWeight(.bold)
+                                                .foregroundColor(LiquidGlassTheme.liveGreen(for: colorScheme))
                                             }
                                         }
-                                        .font(.caption).bold()
-                                        .foregroundColor(.green)
                                     }
                                 }
                             }
@@ -229,13 +256,7 @@ struct FavoriteLineRow: View {
                     }
                 }
             }
-            
-            Divider()
-                .background(Color.white.opacity(0.15))
-                .padding(.top, 4)
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
         .onAppear {
             startFetching()
         }
@@ -270,13 +291,11 @@ struct FavoriteLineRow: View {
         }
     }
 
-    // Process and filter departures for this favorite line
     private var groupedDepartures: [FavoriteDepartureGroup] {
         var directionTimes: [String: [Int]] = [:]
         
         for dep in departures {
             let info = dep.displayInformations
-            // Match line label (case-insensitive)
             guard let label = info.label, label.lowercased() == entry.lineId.lowercased() else { continue }
             guard let date = DateFormat.navitia.date(from: dep.stopDateTime.departureDateTime) else { continue }
             
@@ -288,7 +307,6 @@ struct FavoriteLineRow: View {
         }
         
         return directionTimes.map { dir, times in
-            // Sort times ascending and keep next 2
             let sortedTimes = Array(times.sorted().prefix(2))
             return FavoriteDepartureGroup(direction: dir, times: sortedTimes)
         }.sorted { $0.direction < $1.direction }
@@ -332,6 +350,13 @@ struct FavoriteDepartureGroup: Identifiable {
     var times: [Int]
 }
 
-#Preview {
+#Preview("Favorites View") {
     FavoritesView()
+}
+
+#Preview("Favorite Card Item") {
+    if let entry = FavoriteLineEntry(key: "1|metro|IDFM:C01377|Nation|FFCD00|000000") {
+        FavoriteLineRow(entry: entry)
+            .padding()
+    }
 }
