@@ -4,9 +4,26 @@ import Foundation
 class IDFMService {
     static let shared = IDFMService()
 
-    // Clé API à définir par l'utilisateur
-    // Pour tester, l'utilisateur devra mettre sa clé ici ou via une méthode de config
-    var apiKey: String = "YOUR_IDFM_API_KEY"
+    // Clé API sécurisée (chargée depuis les variables d'environnement Xcode,
+    // un fichier local non-versionné Secrets.plist, ou UserDefaults).
+    var apiKey: String = {
+        // 1. Variable d'environnement (ex: Scheme Xcode)
+        if let envKey = ProcessInfo.processInfo.environment["IDFM_API_KEY"], !envKey.isEmpty {
+            return envKey
+        }
+        // 2. Fichier Secrets.plist local (ignoré par Git)
+        if let path = Bundle.main.path(forResource: "Secrets", ofType: "plist"),
+           let dict = NSDictionary(contentsOfFile: path) as? [String: Any],
+           let secretKey = dict["IDFM_API_KEY"] as? String, !secretKey.isEmpty {
+            return secretKey
+        }
+        // 3. UserDefaults (App Group ou standard)
+        if let groupDefaults = UserDefaults(suiteName: "group.AntoineBleuze.Flow"),
+           let storedKey = groupDefaults.string(forKey: "idfm_api_key"), !storedKey.isEmpty {
+            return storedKey
+        }
+        return UserDefaults.standard.string(forKey: "idfm_api_key") ?? ""
+    }()
 
     private let baseURL = "https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia"
 

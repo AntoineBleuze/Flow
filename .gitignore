@@ -31,3 +31,10 @@ FlowServer/.env
 .DS_Store
 **/ .DS_Store
 /AppleDoc
+
+# Local Secrets & API Keys
+Secrets.plist
+*Secrets*.plist
+*.local.env
+*.xcconfig
+!Config.xcconfig
