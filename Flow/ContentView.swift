@@ -21,6 +21,7 @@ struct ContentView: View {
     @StateObject private var coordinator = NavigationCoordinator.shared
     @ObservedObject private var navigationManager = NavigationManager.shared
     @ObservedObject private var mapData = MapDataService.shared
+    @StateObject private var voiceManager = VoiceDictationManager.shared
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.colorScheme) private var colorScheme
     @State private var searchText = ""
@@ -40,8 +41,10 @@ struct ContentView: View {
             ZStack {
                 if posture == .unfoldedDualScreen {
                     duoDualScreenLayout
+                        .environment(\.duoPosture, .unfoldedDualScreen)
                 } else {
                     classicSingleScreenLayout
+                        .environment(\.duoPosture, .foldedSingleScreen)
                 }
 
                 if showLoading {
@@ -50,7 +53,9 @@ struct ContentView: View {
                         .zIndex(999)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .ignoresSafeArea()
         .environmentObject(coordinator)
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
@@ -67,24 +72,37 @@ struct ContentView: View {
     private var duoDualScreenLayout: some View {
         DuoSplitView {
             VStack(spacing: 0) {
-                duoTopBar
-
-                if let selectedStation = coordinator.selectedStation {
+                if let journey = navigationManager.currentJourney, navigationManager.isNavigating {
+                    DuoNavigationPanel(journey: journey)
+                        .liquidGlassBackground()
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                } else if let selectedStation = coordinator.selectedStation {
                     StationDetailSheet(
                         station: selectedStation,
                         onDismiss: {
                             withAnimation(.easeInOut(duration: 0.25)) {
                                 coordinator.selectedStation = nil
+                                coordinator.previewJourney = nil
                             }
                         }
                     )
                     .transition(.move(edge: .leading).combined(with: .opacity))
+                } else if let previewJourney = coordinator.previewJourney {
+                    DuoJourneyPreviewPanel(journey: previewJourney)
+                        .liquidGlassBackground()
+                        .transition(.move(edge: .leading).combined(with: .opacity))
                 } else {
                     duoTabContent
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background {
+                            TransparentHostingView()
+                                .ignoresSafeArea()
+                        }
                         .transition(.opacity)
+
+                    duoBottomDock
                 }
             }
-            .background(.ultraThinMaterial)
         } trailing: {
             AppMapView(showControls: true)
                 .ignoresSafeArea()
@@ -94,6 +112,8 @@ struct ContentView: View {
     @ViewBuilder
     private var duoTabContent: some View {
         switch coordinator.selectedTab {
+        case "Explore":
+            DuoExplorePanelView(searchText: $searchText)
         case "Nearby":
             NearbyStationsView()
         case "Favorites":
@@ -103,14 +123,88 @@ struct ContentView: View {
                 TrafficViewContent()
                     .navigationTitle("Trafic")
             }
+            .toolbarBackground(.hidden, for: .navigationBar)
         case "Search":
             SearchTabContent(searchText: $searchText)
         default:
-            NearbyStationsView()
+            DuoExplorePanelView(searchText: $searchText)
         }
     }
 
-    private var duoTopBar: some View {
+    // MARK: - Duo Bottom Floating Dock (Search Bar + Tab Bar Concentric with Chassis)
+    private var duoBottomDock: some View {
+        VStack(spacing: 8) {
+            duoSearchBar
+            duoBottomBar
+        }
+        .padding(.leading, 24)
+        .padding(.trailing, 16)
+        .padding(.bottom, 24)
+        .padding(.top, 4)
+    }
+
+    private var duoSearchBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(.secondary)
+                .font(.system(size: 15, weight: .medium))
+
+            TextField("Rechercher station, ligne...", text: $searchText)
+                .font(.system(.subheadline, design: .rounded))
+                .submitLabel(.search)
+                .onSubmit {
+                    if !searchText.isEmpty {
+                        coordinator.selectedTab = "Search"
+                    }
+                }
+                .onChange(of: searchText) { _, newValue in
+                    if !newValue.isEmpty && coordinator.selectedTab != "Search" {
+                        coordinator.selectedTab = "Search"
+                    }
+                }
+
+            if !searchText.isEmpty {
+                Button(action: {
+                    searchText = ""
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
+                        .font(.system(size: 15))
+                }
+                .buttonStyle(.plain)
+            }
+
+            Button(action: {
+                voiceManager.toggleRecording(
+                    onUpdate: { transcript in
+                        searchText = transcript
+                    },
+                    onFinished: { finalTranscript in
+                        searchText = finalTranscript
+                        if !finalTranscript.isEmpty {
+                            coordinator.selectedTab = "Search"
+                        }
+                    }
+                )
+            }) {
+                Image(systemName: voiceManager.isRecording ? "waveform.circle.fill" : "mic.fill")
+                    .foregroundColor(voiceManager.isRecording ? .red : .secondary)
+                    .font(.system(size: 15, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial)
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.30 : 0.08), radius: 8, x: 0, y: 4)
+    }
+
+    private var duoBottomBar: some View {
         HStack(spacing: 6) {
             ForEach(duoTabs) { tab in
                 let isSelected = coordinator.selectedTab == tab.id && coordinator.selectedStation == nil
@@ -153,9 +247,7 @@ struct ContentView: View {
             Capsule()
                 .stroke(Color.primary.opacity(0.08), lineWidth: 1)
         )
-        .padding(.horizontal, 12)
-        .padding(.top, 10)
-        .padding(.bottom, 6)
+        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.30 : 0.08), radius: 8, x: 0, y: 4)
     }
 
     // MARK: - Single-Screen Standard Layout
@@ -205,6 +297,7 @@ struct TrafficViewContent: View {
     @StateObject var service = TrafficService()
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.duoPosture) private var duoPosture
     @State private var searchText: String = ""
 
     enum StatusFilter: String, CaseIterable, Identifiable {
@@ -240,9 +333,7 @@ struct TrafficViewContent: View {
                 // Header avec heure de dernière mise à jour
                 HStack {
                     if let lastUpdate = service.lastUpdateTime {
-                        let formatter = DateFormatter()
-                        let _ = (formatter.dateFormat = "HH:mm")
-                        Text("Dernière mise à jour: \(formatter.string(from: lastUpdate))")
+                        Text("Dernière mise à jour: \(lastUpdate.formatted(date: .omitted, time: .shortened))")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     } else {
@@ -346,13 +437,18 @@ struct TrafficViewContent: View {
             }
         }
         .background {
-            ZStack {
-                ShaderAnimationView(isLoading: true)
-                Rectangle()
-                    .fill(.ultraThinMaterial)
-                    .opacity(colorScheme == .dark ? 0.70 : 0.85)
+            if duoPosture == .unfoldedDualScreen {
+                TransparentHostingView()
+                    .ignoresSafeArea()
+            } else {
+                ZStack {
+                    ShaderAnimationView(isLoading: true)
+                    Rectangle()
+                        .fill(.ultraThinMaterial)
+                        .opacity(colorScheme == .dark ? 0.70 : 0.85)
+                }
+                .ignoresSafeArea()
             }
-            .ignoresSafeArea()
         }
     }
 

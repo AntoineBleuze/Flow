@@ -97,9 +97,11 @@ struct ItinerarySearchPanel: View {
         }
         .sheet(isPresented: $showStartPicker) {
             SimpleStationPicker(selectedStation: $startStation, currentLocation: nil) // TODO: pass location
+                .liquidGlassSheetBackground()
         }
         .sheet(isPresented: $showEndPicker) {
             SimpleStationPicker(selectedStation: $endStation, currentLocation: nil)
+                .liquidGlassSheetBackground()
         }
     }
     
@@ -317,7 +319,7 @@ struct ItinerarySearchPanel: View {
                                       Button(action: onStartNavigation) {
                                            Text("Démarrer la navigation")
                                                .fontWeight(.bold)
-                                               .foregroundColor(.green)
+                                               .foregroundColor(LiquidGlassTheme.liveGreen(for: colorScheme))
                                                .frame(maxWidth: .infinity)
                                                .padding()
                                        }

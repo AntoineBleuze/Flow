@@ -10,6 +10,23 @@ public enum DuoDevicePosture: Equatable {
     public var isDualScreen: Bool {
         self == .unfoldedDualScreen
     }
+    
+    public var isFolded: Bool {
+        self == .foldedSingleScreen
+    }
+}
+
+// MARK: - Environment Key pour Duo Posture
+
+private struct DuoPostureKey: EnvironmentKey {
+    static let defaultValue: DuoDevicePosture = .foldedSingleScreen
+}
+
+public extension EnvironmentValues {
+    var duoPosture: DuoDevicePosture {
+        get { self[DuoPostureKey.self] }
+        set { self[DuoPostureKey.self] = newValue }
+    }
 }
 
 /// Helper pour détecter l'état et calculer la géométrie spécifique à l'iPhone Duo
@@ -21,14 +38,35 @@ public enum DuoLayoutHelper {
     public static let primaryPaneMinWidth: CGFloat = 360.0
     public static let primaryPaneIdealWidth: CGFloat = 420.0
     
-    /// Détermine la posture selon la taille de l'écran et la classe de taille horizontale
+    /// Calcule la largeur optimale du volet gauche (écran 1)
+    public static func primaryPaneWidth(for totalWidth: CGFloat) -> CGFloat {
+        if totalWidth <= 1020 {
+            // Sur iPhone Duo (largeur ~951 pt déplié), chaque écran occupe exactement
+            // la moitié symétrique de l'espace moins la charnière centrale (467.5 pt).
+            let halfScreen = (totalWidth - hingeWidth) / 2
+            return max(primaryPaneMinWidth, halfScreen)
+        } else {
+            // Sur grands écrans (iPad Pro, Mac Catalyst)
+            return min(primaryPaneIdealWidth, max(primaryPaneMinWidth, totalWidth * 0.38))
+        }
+    }
+    
+    /// Détermine la posture selon la taille de l'écran et la classe de taille horizontale.
+    /// Gère fidèlement l'iPhone Duo (plié: 466x678, déplié: 951x669).
     public static func posture(
         horizontalSizeClass: UserInterfaceSizeClass?,
         screenSize: CGSize
     ) -> DuoDevicePosture {
-        // En mode iPad ou iPhone Duo déplié (horizontalSizeClass .regular ou ratio d'écran large > 1.05)
-        let isWideCanvas = screenSize.width / max(1, screenSize.height) > 1.05
-        if horizontalSizeClass == .regular || (screenSize.width > 600 && isWideCanvas) {
+        let minDimension = min(screenSize.width, screenSize.height)
+        let maxDimension = max(screenSize.width, screenSize.height)
+        
+        // Un appareil double écran / pliable déplié possède un écran étendu :
+        // la plus petite dimension dépasse 550 pt et la plus grande dépasse 750 pt.
+        let isDualScreenGeometry = minDimension >= 550 && maxDimension >= 750
+        
+        if isDualScreenGeometry && screenSize.width >= 650 {
+            return .unfoldedDualScreen
+        } else if horizontalSizeClass == .regular && screenSize.width >= 650 && screenSize.height >= 550 {
             return .unfoldedDualScreen
         } else {
             return .foldedSingleScreen
@@ -40,7 +78,7 @@ public enum DuoLayoutHelper {
 
 /// Conteneur 2 volets intelligent conçu pour l'iPhone Duo, iPad et grands écrans.
 /// - En mode Déplié / Duo : Affiche le panneau de contrôle à gauche et la carte / vue immersive à droite,
-///   séparés par un élégant séparateur Liquid Glass aligné sur la charnière centrale.
+///   séparés par une transition en dégradé Liquid Glass fluide et progressive vers la carte.
 /// - En mode Plié / Compact : Affiche le contenu principal avec support fluide des sheets.
 public struct DuoSplitView<LeadingContent: View, TrailingContent: View>: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -66,65 +104,95 @@ public struct DuoSplitView<LeadingContent: View, TrailingContent: View>: View {
             
             if posture == .unfoldedDualScreen {
                 unfoldedDualLayout(in: proxy.size)
+                    .environment(\.duoPosture, .unfoldedDualScreen)
             } else {
                 leadingContent
+                    .environment(\.duoPosture, .foldedSingleScreen)
             }
         }
+        .ignoresSafeArea()
     }
     
     @ViewBuilder
     private func unfoldedDualLayout(in size: CGSize) -> some View {
-        HStack(spacing: 0) {
-            // Volet 1 (Écran Gauche de l'iPhone Duo)
-            let paneWidth = max(
-                DuoLayoutHelper.primaryPaneMinWidth,
-                min(size.width * 0.40, DuoLayoutHelper.primaryPaneIdealWidth)
-            )
-            
-            ZStack {
+        let paneWidth = DuoLayoutHelper.primaryPaneWidth(for: size.width)
+        
+        ZStack(alignment: .leading) {
+            // 1. CARTE EN ARRIÈRE-PLAN PLEINE LARGEUR
+            // S'étend sur l'ensemble des deux écrans pour faire transparaître ses couleurs sous l'ultraThinMaterial
+            trailingContent
+                .frame(width: size.width, height: size.height)
+                .clipped()
+
+            // 2. FOND EN DÉGRADÉ LIQUID GLASS (TRANSITION PROGRESSIVE VERS LA CARTE)
+            // Remplace la coupure linéaire abrupte par un dégradé doux et continu de flou et de lumière
+            glassGradientBackground(paneWidth: paneWidth, size: size)
+
+            // 3. CONTENU INTERACTIF DES DEUX ÉCRANS
+            HStack(spacing: 0) {
+                // Volet 1 (Écran Gauche de l'iPhone Duo)
                 leadingContent
-            }
-            .frame(width: paneWidth)
-            .background(.ultraThinMaterial)
-            
-            // Séparateur Liquid Glass pour la charnière centrale (Hinge Gutter)
-            ZStack {
-                Rectangle()
-                    .fill(.ultraThinMaterial)
-                    .frame(width: DuoLayoutHelper.hingeWidth)
+                    .frame(width: paneWidth, height: size.height)
                 
-                // Fine ligne spéculaire centrale simulant le pli de verre
-                Rectangle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(colorScheme == .dark ? 0.25 : 0.6),
-                                Color.white.opacity(0.05),
-                                Color.black.opacity(colorScheme == .dark ? 0.3 : 0.08)
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .frame(width: 1.5)
+                // Espace correspondant à la charnière centrale
+                Color.clear
+                    .frame(width: DuoLayoutHelper.hingeWidth, height: size.height)
+                    .allowsHitTesting(false)
+                
+                // Volet 2 (Écran Droit) : transparent pour transmettre toutes les interactions tactiles à la carte
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .allowsHitTesting(false)
             }
-            .allowsHitTesting(false)
-            
-            // Volet 2 (Écran Droit de l'iPhone Duo - Carte / Détail)
-            ZStack {
-                trailingContent
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .ignoresSafeArea(.keyboard, edges: .bottom)
+        .ignoresSafeArea()
     }
-}
 
-// MARK: - View Extension pour Duo Hinge Padding
-
-public extension View {
-    /// Ajoute une marge de sécurité pour préserver le contenu du pli central sur iPhone Duo
-    func duoHingePadding(edges: Edge.Set = .horizontal) -> some View {
-        self.padding(edges, DuoLayoutHelper.hingeWidth / 2)
+    /// Fond en verre dégradé offrant une transition progressive et fluide entre le volet gauche et la carte
+    @ViewBuilder
+    private func glassGradientBackground(paneWidth: CGFloat, size: CGSize) -> some View {
+        let fadeStart = max(0, paneWidth - 30.0)
+        let fadeEnd = min(size.width, paneWidth + DuoLayoutHelper.hingeWidth + 50.0)
+        let backgroundWidth = fadeEnd
+        let startLocation = backgroundWidth > 0 ? (fadeStart / backgroundWidth) : 0
+        
+        ZStack(alignment: .leading) {
+            // Couche principale en matériau translucide ultra-fin
+            Rectangle()
+                .fill(.ultraThinMaterial)
+            
+            // Teinte adaptative Liquid Glass
+            Rectangle()
+                .fill(LiquidGlassTheme.cardBackgroundTint(for: colorScheme))
+            
+            // Halo spéculaire subtil et progressif accompagnant la transition
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0.0),
+                    .init(color: .clear, location: max(0, startLocation - 0.05)),
+                    .init(
+                        color: Color.white.opacity(colorScheme == .dark ? 0.06 : 0.22),
+                        location: (startLocation + 1.0) / 2.0
+                    ),
+                    .init(color: .clear, location: 1.0)
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        }
+        .opacity(LiquidGlassTheme.duoLeftPaneOpacity)
+        .frame(width: backgroundWidth, height: size.height)
+        .mask {
+            LinearGradient(
+                stops: [
+                    .init(color: .black, location: 0.0),
+                    .init(color: .black, location: startLocation),
+                    .init(color: .clear, location: 1.0)
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        }
+        .allowsHitTesting(false)
     }
 }

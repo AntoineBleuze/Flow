@@ -39,6 +39,7 @@ struct ItineraryResultView: View {
     @Environment(\.colorScheme) var colorScheme
     @EnvironmentObject var coordinator: NavigationCoordinator
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.duoPosture) private var duoPosture
 
     // Computed: max date = today + 7 days
     private var maxDate: Date {
@@ -59,7 +60,7 @@ struct ItineraryResultView: View {
             }) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(.white)
+                    .foregroundColor(.primary)
                     .padding(10)
             }
             .buttonStyle(.plain)
@@ -82,55 +83,62 @@ struct ItineraryResultView: View {
         .padding(.bottom, 4)
     }
 
+    private var mainContentView: some View {
+        VStack(spacing: 0) {
+            customHeaderRow
+            headerSection
+            resultsSection
+        }
+    }
+
     var body: some View {
         ZStack {
-            VStack(spacing: 0) {
-                customHeaderRow
-                
-                headerSection
-                
-                resultsSection
-            }
+            mainContentView
         }
         .toolbar(.hidden, for: .navigationBar)
+        .liquidGlassBackground()
         .onAppear {
             setupInitialStations()
         }
-        .onChange(of: startStation?.id) { _, _ in searchItinerary() }
-        .onChange(of: endStation?.id) { _, _ in searchItinerary() }
-        .onChange(of: departureDate) { _, _ in searchItinerary() }
-        .onChange(of: isArrivalTime) { _, _ in searchItinerary() }
-        .onChange(of: avoidedStations) { _, _ in searchItinerary() }
-        .onChange(of: avoidedLines) { _, _ in searchItinerary() }
-        .onChange(of: avoidedModes) { _, _ in searchItinerary() }
-        .onChange(of: isAccessible) { _, _ in searchItinerary() }
-        .sheet(isPresented: $showStartPicker) {
-            SimpleStationPicker(selectedStation: $startStation, currentLocation: currentLocation)
-        }
-        .sheet(isPresented: $showEndPicker) {
-            SimpleStationPicker(selectedStation: $endStation, currentLocation: currentLocation)
-        }
-        .sheet(isPresented: $showStationToAvoidPicker) {
-            SimpleStationPicker(selectedStation: $selectedStationToAvoid, currentLocation: currentLocation)
-        }
-        .onChange(of: selectedStationToAvoid) { _, newStation in
-            if let station = newStation {
-                if !avoidedStations.contains(where: { $0.id == station.id }) {
-                    avoidedStations.append(station)
-                }
-                selectedStationToAvoid = nil
+        .onDisappear {
+            if duoPosture == .unfoldedDualScreen && !NavigationManager.shared.isNavigating {
+                coordinator.previewJourney = nil
             }
         }
-        .fullScreenCover(item: $selectedJourneyForPreview) { journey in
-            JourneyPreviewView(
-                journey: journey,
-                destinationName: endStation?.name ?? destination?.name ?? "Destination",
-                onStartNavigation: {
-                    coordinator.startNavigation(journey: journey)
-                    selectedJourneyForPreview = nil
+        .onChange(of: viewModel.journeys.first?.id) { _, _ in
+            if duoPosture == .unfoldedDualScreen, let best = viewModel.journeys.first {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    coordinator.previewJourney = best
                 }
-            )
+            }
         }
+        .modifier(ItineraryChangesModifier(
+            startStationId: startStation?.id,
+            endStationId: endStation?.id,
+            departureDate: departureDate,
+            isArrivalTime: isArrivalTime,
+            avoidedStations: avoidedStations,
+            avoidedLines: avoidedLines,
+            avoidedModes: avoidedModes,
+            isAccessible: isAccessible,
+            onSearch: { searchItinerary() }
+        ))
+        .modifier(ItinerarySheetsModifier(
+            showStartPicker: $showStartPicker,
+            showEndPicker: $showEndPicker,
+            showStationToAvoidPicker: $showStationToAvoidPicker,
+            startStation: $startStation,
+            endStation: $endStation,
+            selectedStationToAvoid: $selectedStationToAvoid,
+            avoidedStations: $avoidedStations,
+            selectedJourneyForPreview: $selectedJourneyForPreview,
+            currentLocation: currentLocation,
+            destinationName: endStation?.name ?? destination?.name ?? "Destination",
+            onStartNavigation: { journey in
+                coordinator.startNavigation(journey: journey)
+                selectedJourneyForPreview = nil
+            }
+        ))
     }
 
     // MARK: - Header Section
@@ -227,10 +235,10 @@ struct ItineraryResultView: View {
                 }
                 .padding()
             }
-            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+            .background(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.03), in: RoundedRectangle(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                    .stroke(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.06), lineWidth: 1)
             )
             
             // Swap Button
@@ -256,10 +264,16 @@ struct ItineraryResultView: View {
                     Text(filterTitle(filter))
                         .font(.system(.subheadline, design: .rounded))
                         .fontWeight(.bold)
-                        .foregroundColor(selectedFilter == filter ? .white : .gray)
+                        .foregroundColor(selectedFilter == filter ? (colorScheme == .dark ? .white : .black) : .gray)
                         .padding(.vertical, 8)
                         .frame(maxWidth: .infinity)
-                        .background(selectedFilter == filter ? Color.white.opacity(0.15) : Color.clear, in: Capsule())
+                        .background(
+                            selectedFilter == filter
+                                ? (colorScheme == .dark ? Color.white.opacity(0.15) : Color.white)
+                                : Color.clear,
+                            in: Capsule()
+                        )
+                        .shadow(color: (selectedFilter == filter && colorScheme == .light) ? Color.black.opacity(0.08) : Color.clear, radius: 4, x: 0, y: 1)
                 }
                 .buttonStyle(.plain)
             }
@@ -287,10 +301,16 @@ struct ItineraryResultView: View {
                     Text("Départ")
                         .font(.system(.subheadline, design: .rounded))
                         .fontWeight(.bold)
-                        .foregroundColor(!isArrivalTime ? .white : .gray)
+                        .foregroundColor(!isArrivalTime ? (colorScheme == .dark ? .white : .black) : .secondary)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
-                        .background(!isArrivalTime ? Color.white.opacity(0.15) : Color.clear, in: Capsule())
+                        .background(
+                            !isArrivalTime
+                                ? (colorScheme == .dark ? Color.white.opacity(0.2) : Color.white)
+                                : Color.clear,
+                            in: Capsule()
+                        )
+                        .shadow(color: (!isArrivalTime && colorScheme == .light) ? Color.black.opacity(0.08) : Color.clear, radius: 4, x: 0, y: 1)
                 }
                 .buttonStyle(.plain)
                 
@@ -302,10 +322,16 @@ struct ItineraryResultView: View {
                     Text("Arrivée")
                         .font(.system(.subheadline, design: .rounded))
                         .fontWeight(.bold)
-                        .foregroundColor(isArrivalTime ? .white : .gray)
+                        .foregroundColor(isArrivalTime ? (colorScheme == .dark ? .white : .black) : .secondary)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
-                        .background(isArrivalTime ? Color.white.opacity(0.15) : Color.clear, in: Capsule())
+                        .background(
+                            isArrivalTime
+                                ? (colorScheme == .dark ? Color.white.opacity(0.2) : Color.white)
+                                : Color.clear,
+                            in: Capsule()
+                        )
+                        .shadow(color: (isArrivalTime && colorScheme == .light) ? Color.black.opacity(0.08) : Color.clear, radius: 4, x: 0, y: 1)
                 }
                 .buttonStyle(.plain)
             }
@@ -327,12 +353,14 @@ struct ItineraryResultView: View {
             }) {
                 HStack(spacing: 4) {
                     Image(systemName: "calendar")
-                        .foregroundColor(.green)
+                        .foregroundColor(LiquidGlassTheme.liveGreen(for: colorScheme))
                     Text(formatDateOnly(departureDate))
                         .font(.system(.subheadline, design: .rounded))
                         .fontWeight(.bold)
+                        .foregroundColor(.primary)
                     Image(systemName: showDatePicker ? "chevron.up" : "chevron.down")
                         .font(.system(size: 10))
+                        .foregroundColor(.secondary)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
@@ -355,8 +383,10 @@ struct ItineraryResultView: View {
                     Text(formatTimeOnly(departureDate))
                         .font(.system(.subheadline, design: .rounded))
                         .fontWeight(.bold)
+                        .foregroundColor(.primary)
                     Image(systemName: showTimePicker ? "chevron.up" : "chevron.down")
                         .font(.system(size: 10))
+                        .foregroundColor(.secondary)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
@@ -601,11 +631,11 @@ struct ItineraryResultView: View {
                             HStack(spacing: 4) {
                                 Image(systemName: "star.fill")
                                     .font(.caption)
-                                    .foregroundColor(.yellow)
+                                    .foregroundColor(LiquidGlassTheme.warningMetricColor(for: colorScheme))
                                 Text("MEILLEUR ITINÉRAIRE")
                                     .font(.caption)
                                     .fontWeight(.bold)
-                                    .foregroundColor(.yellow)
+                                    .foregroundColor(LiquidGlassTheme.warningMetricColor(for: colorScheme))
                             }
                             .padding(.leading, 24)
                             .padding(.top, 4)
@@ -617,7 +647,13 @@ struct ItineraryResultView: View {
                                     avoidedLines.insert(lineId)
                                 },
                                 onTap: {
-                                    selectedJourneyForPreview = bestJourney
+                                    if duoPosture == .unfoldedDualScreen {
+                                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                            coordinator.previewJourney = bestJourney
+                                        }
+                                    } else {
+                                        selectedJourneyForPreview = bestJourney
+                                    }
                                 }
                             )
                         }
@@ -636,7 +672,13 @@ struct ItineraryResultView: View {
                                     avoidedLines.insert(lineId)
                                 },
                                 onTap: {
-                                    selectedJourneyForPreview = journey
+                                    if duoPosture == .unfoldedDualScreen {
+                                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                            coordinator.previewJourney = journey
+                                        }
+                                    } else {
+                                        selectedJourneyForPreview = journey
+                                    }
                                 }
                             )
                         }
@@ -830,6 +872,7 @@ struct JourneyRow: View {
     let onAvoidLine: (String) -> Void
     let onTap: () -> Void
     
+    @Environment(\.colorScheme) var colorScheme
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var coordinator: NavigationCoordinator
 
@@ -934,7 +977,7 @@ struct JourneyRow: View {
                             .font(.system(.subheadline, design: .rounded))
                             .fontWeight(.bold)
                     }
-                    .foregroundColor(.white)
+                    .foregroundColor(.primary)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
                 }
@@ -964,12 +1007,19 @@ struct JourneyRow: View {
         .padding(.vertical, 12)
         .padding(.horizontal)
         .background(
-            isBestResult ? Color(hex: "0A84FF").opacity(0.08) : Color.clear,
+            isBestResult
+                ? (colorScheme == .dark ? Color(hex: "0A84FF").opacity(0.12) : Color(hex: "0A84FF").opacity(0.08))
+                : (colorScheme == .dark ? Color.white.opacity(0.04) : Color.white.opacity(0.5)),
             in: RoundedRectangle(cornerRadius: 16)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .stroke(isBestResult ? Color(hex: "0A84FF").opacity(0.4) : Color.clear, lineWidth: isBestResult ? 1.5 : 0)
+                .stroke(
+                    isBestResult
+                        ? Color(hex: "0A84FF").opacity(colorScheme == .dark ? 0.4 : 0.6)
+                        : (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.06)),
+                    lineWidth: isBestResult ? 1.5 : 1
+                )
         )
         .padding(.horizontal)
     }
@@ -1578,3 +1628,77 @@ struct ScrollOffsetPreferenceKey: PreferenceKey {
     }
 }
 
+
+
+// MARK: - Helper Modifiers for Fast Type Checking
+
+private struct ItinerarySheetsModifier: ViewModifier {
+    @Binding var showStartPicker: Bool
+    @Binding var showEndPicker: Bool
+    @Binding var showStationToAvoidPicker: Bool
+    @Binding var startStation: MapStation?
+    @Binding var endStation: MapStation?
+    @Binding var selectedStationToAvoid: MapStation?
+    @Binding var avoidedStations: [MapStation]
+    @Binding var selectedJourneyForPreview: Journey?
+    let currentLocation: CLLocationCoordinate2D?
+    let destinationName: String
+    let onStartNavigation: (Journey) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: selectedStationToAvoid) { _, newStation in
+                if let station = newStation {
+                    if !avoidedStations.contains(where: { $0.id == station.id }) {
+                        avoidedStations.append(station)
+                    }
+                    selectedStationToAvoid = nil
+                }
+            }
+            .sheet(isPresented: $showStartPicker) {
+                SimpleStationPicker(selectedStation: $startStation, currentLocation: currentLocation)
+                    .liquidGlassSheetBackground()
+            }
+            .sheet(isPresented: $showEndPicker) {
+                SimpleStationPicker(selectedStation: $endStation, currentLocation: currentLocation)
+                    .liquidGlassSheetBackground()
+            }
+            .sheet(isPresented: $showStationToAvoidPicker) {
+                SimpleStationPicker(selectedStation: $selectedStationToAvoid, currentLocation: currentLocation)
+                    .liquidGlassSheetBackground()
+            }
+            .fullScreenCover(item: $selectedJourneyForPreview) { journey in
+                JourneyPreviewView(
+                    journey: journey,
+                    destinationName: destinationName,
+                    onStartNavigation: {
+                        onStartNavigation(journey)
+                    }
+                )
+            }
+    }
+}
+
+private struct ItineraryChangesModifier: ViewModifier {
+    let startStationId: String?
+    let endStationId: String?
+    let departureDate: Date
+    let isArrivalTime: Bool
+    let avoidedStations: [MapStation]
+    let avoidedLines: Set<String>
+    let avoidedModes: Set<String>
+    let isAccessible: Bool
+    let onSearch: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: startStationId) { _, _ in onSearch() }
+            .onChange(of: endStationId) { _, _ in onSearch() }
+            .onChange(of: departureDate) { _, _ in onSearch() }
+            .onChange(of: isArrivalTime) { _, _ in onSearch() }
+            .onChange(of: avoidedStations) { _, _ in onSearch() }
+            .onChange(of: avoidedLines) { _, _ in onSearch() }
+            .onChange(of: avoidedModes) { _, _ in onSearch() }
+            .onChange(of: isAccessible) { _, _ in onSearch() }
+    }
+}

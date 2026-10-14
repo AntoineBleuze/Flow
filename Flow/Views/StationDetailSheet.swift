@@ -32,6 +32,7 @@ struct StationDetailSheet: View {
 
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.duoPosture) var duoPosture
 
     private var primaryGreen: Color {
         colorScheme == .dark ? Color(hex: "30D158") : Color(hex: "008543")
@@ -70,8 +71,8 @@ struct StationDetailSheet: View {
 
         if isLoading && hasActiveLines {
             ProgressView("Chargement des horaires...")
-                .tint(.white)
-                .foregroundColor(.white)
+                .tint(.primary)
+                .foregroundColor(.primary)
         } else if let error = errorMessage, hasActiveLines {
             VStack {
                 Text("Erreur: \(error)")
@@ -99,6 +100,7 @@ struct StationDetailSheet: View {
                 sheetContent
             }
             .toolbar(.hidden, for: .navigationBar)
+            .liquidGlassBackground()
             .onAppear {
                 setupStation()
             }
@@ -152,9 +154,8 @@ struct StationDetailSheet: View {
                 )
             }
         }
-        .presentationBackground(.ultraThinMaterial)
-        .presentationCornerRadius(LiquidGlassTheme.sheetCornerRadius)
-        .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+        .liquidGlassSheet()
+        .liquidGlassBackground()
     }
 
     private var stationDistanceAndWalkTime: (distanceStr: String, walkTimeMinutes: Int) {
@@ -261,83 +262,115 @@ struct StationDetailSheet: View {
 
     var contentView: some View {
         VStack(spacing: 0) {
-            // Fixed Top Bar: Localisation + Close Button
+            // Top Bar: Localisation + Close / Back Button
             HStack(alignment: .center) {
-                HStack(spacing: 4) {
-                    Image(systemName: "mappin.circle.fill")
-                        .foregroundColor(primaryGreen)
-                        .font(.footnote)
-                    Text((currentStation.city ?? "Île-de-France").uppercased())
-                        .font(.system(.caption, design: .rounded))
-                        .fontWeight(.bold)
-                        .foregroundColor(.gray)
+                if let onDismiss = onDismiss {
+                    Button(action: { onDismiss() }) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 13, weight: .bold))
+                            Text("Retour")
+                                .font(.system(.subheadline, design: .rounded))
+                                .fontWeight(.semibold)
+                        }
+                        .foregroundColor(.blue)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Capsule())
+                        .overlay(
+                            Capsule()
+                                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.liquidGlassInteractive)
+                } else {
+                    HStack(spacing: 4) {
+                        Image(systemName: "mappin.circle.fill")
+                            .foregroundColor(primaryGreen)
+                            .font(.footnote)
+                        Text((currentStation.city ?? "Île-de-France").uppercased())
+                            .font(.system(.caption, design: .rounded))
+                            .fontWeight(.bold)
+                            .foregroundColor(.gray)
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
                 
                 Spacer()
                 
-                // Close button
-                Button(action: {
-                    if let onDismiss = onDismiss {
-                        onDismiss()
-                    } else {
-                        dismiss()
+                if onDismiss != nil {
+                    HStack(spacing: 4) {
+                        Image(systemName: "mappin.circle.fill")
+                            .foregroundColor(primaryGreen)
+                            .font(.footnote)
+                        Text((currentStation.city ?? "Île-de-France").uppercased())
+                            .font(.system(.caption, design: .rounded))
+                            .fontWeight(.bold)
+                            .foregroundColor(.gray)
                     }
-                }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(.primary)
-                        .padding(14)
+                } else {
+                    Button(action: {
+                        dismiss()
+                    }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.primary)
+                            .padding(12)
+                    }
+                    .buttonStyle(.liquidGlassInteractive)
+                    .glassEffect(.regular.interactive(), in: Circle())
                 }
-                .buttonStyle(.liquidGlassInteractive)
-                .glassEffect(.regular.interactive(), in: Circle())
             }
             .padding(.horizontal)
-            .padding(.top, 16)
-            .padding(.bottom, 8)
+            .padding(.top, duoPosture == .unfoldedDualScreen ? 10 : 16)
+            .padding(.bottom, duoPosture == .unfoldedDualScreen ? 4 : 8)
 
             ScrollView {
                 VStack(spacing: 0) {
-                    // Large Title (Animated station name)
-                    VStack(alignment: .leading, spacing: 6) {
-                        let words = currentStation.name.components(separatedBy: " ")
-                        HStack(spacing: 6) {
-                            ForEach(Array(words.enumerated()), id: \.offset) { index, word in
-                                AnimatedStationWordView(text: word, sequenceIndex: index, size: 30)
+                    if duoPosture == .unfoldedDualScreen {
+                        duoCompactStationHeader
+                    } else {
+                        // Large Title (Animated station name)
+                        VStack(alignment: .leading, spacing: 6) {
+                            let words = currentStation.name.components(separatedBy: " ")
+                            HStack(spacing: 6) {
+                                ForEach(Array(words.enumerated()), id: \.offset) { index, word in
+                                    AnimatedStationWordView(text: word, sequenceIndex: index, size: 30)
+                                }
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            
+                            // Sub-header stats row (Distance only, clean styling)
+                            let stats = stationDistanceAndWalkTime
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text(stats.distanceStr)
+                                    .font(.system(size: 28, weight: .black, design: .rounded))
+                                    .foregroundColor(primaryGreen)
+                            }
+                            .padding(.top, 2)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
                         
-                        // Sub-header stats row (Distance only, clean styling)
-                        let stats = stationDistanceAndWalkTime
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(stats.distanceStr)
-                                .font(.system(size: 28, weight: .black, design: .rounded))
-                                .foregroundColor(primaryGreen)
+                        // Action button: Calculate route
+                        Button(action: { showItinerary = true }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "arrow.triangle.turn.up.right.circle.fill")
+                                    .font(.title3)
+                                Text("Calculer l'itinéraire")
+                                    .font(.system(.subheadline, design: .rounded))
+                                    .fontWeight(.bold)
+                            }
+                            .foregroundColor(colorScheme == .dark ? .black : .white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(primaryGreen)
+                            .clipShape(Capsule())
+                            .shadow(color: primaryGreen.opacity(0.3), radius: 6, y: 3)
                         }
-                        .padding(.top, 2)
+                        .buttonStyle(.liquidGlassInteractive)
+                        .padding(.horizontal)
+                        .padding(.top, 12)
                     }
-                    .padding(.horizontal)
-                    
-                    // Action button: Calculate route
-                    Button(action: { showItinerary = true }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "arrow.triangle.turn.up.right.circle.fill")
-                                .font(.title3)
-                            Text("Calculer l'itinéraire")
-                                .font(.system(.subheadline, design: .rounded))
-                                .fontWeight(.bold)
-                        }
-                        .foregroundColor(colorScheme == .dark ? .black : .white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(primaryGreen)
-                        .clipShape(Capsule())
-                        .shadow(color: primaryGreen.opacity(0.3), radius: 6, y: 3)
-                    }
-                    .buttonStyle(.liquidGlassInteractive)
-                    .padding(.horizontal)
-                    .padding(.top, 12)
                     
                     // Mode Picker
                     let groups = groupDepartures(departures)
@@ -351,51 +384,53 @@ struct StationDetailSheet: View {
                         }
                         .pickerStyle(SegmentedPickerStyle())
                         .padding(.horizontal)
-                        .padding(.top, 16)
+                        .padding(.top, duoPosture == .unfoldedDualScreen ? 6 : 16)
                     }
                     
-                    // Section Title: Details
-                    HStack {
-                        Text("Détails de la station")
-                            .font(.system(.title3, design: .rounded))
-                            .fontWeight(.bold)
-                            .foregroundColor(.primary)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(.secondary)
-                        Spacer()
-                    }
-                    .padding(.horizontal)
-                    .padding(.top, 24)
-                    
-                    // Statistics Card Grid - Encapsulated in Liquid Glass
-                    let detailsStats = stationDistanceAndWalkTime
-                    
-                    LiquidGlassCard(cornerRadius: 18, padding: 16) {
-                        VStack(spacing: 14) {
-                            HStack(spacing: 12) {
-                                metricCell(title: "TEMPS DE MARCHE", value: "\(detailsStats.walkTimeMinutes) MIN", symbol: "figure.walk", color: Color(hex: "FFCC00")) // Yellow
-                                metricCell(title: "DISTANCE À PIED", value: detailsStats.distanceStr.uppercased(), symbol: "location.fill", color: Color(hex: "30B0C7")) // Cyan/Blue
-                            }
-                            
-                            Divider().opacity(0.4)
-                            
-                            HStack(spacing: 12) {
-                                metricCell(title: "LIGNES DE TRANSPORT", value: "\(currentStation.lines.count) LIGNES", symbol: "tram", color: Color(hex: "FF453A")) // Red
-                                if let status = elevatorStatus {
-                                    if status.hasEquipments {
-                                        equipmentCell(status: status)
+                    if duoPosture != .unfoldedDualScreen {
+                        // Section Title: Details
+                        HStack {
+                            Text("Détails de la station")
+                                .font(.system(.title3, design: .rounded))
+                                .fontWeight(.bold)
+                                .foregroundColor(.primary)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(.secondary)
+                            Spacer()
+                        }
+                        .padding(.horizontal)
+                        .padding(.top, 24)
+                        
+                        // Statistics Card Grid - Encapsulated in Liquid Glass
+                        let detailsStats = stationDistanceAndWalkTime
+                        
+                        LiquidGlassCard(cornerRadius: 18, padding: 16) {
+                            VStack(spacing: 14) {
+                                HStack(spacing: 12) {
+                                    metricCell(title: "TEMPS DE MARCHE", value: "\(detailsStats.walkTimeMinutes) MIN", symbol: "figure.walk", color: LiquidGlassTheme.warningMetricColor(for: colorScheme))
+                                    metricCell(title: "DISTANCE À PIED", value: detailsStats.distanceStr.uppercased(), symbol: "location.fill", color: Color(hex: "30B0C7")) // Cyan/Blue
+                                }
+                                
+                                Divider().opacity(0.4)
+                                
+                                HStack(spacing: 12) {
+                                    metricCell(title: "LIGNES DE TRANSPORT", value: "\(currentStation.lines.count) LIGNES", symbol: "tram", color: Color(hex: "FF453A")) // Red
+                                    if let status = elevatorStatus {
+                                        if status.hasEquipments {
+                                            equipmentCell(status: status)
+                                        } else {
+                                            Spacer()
+                                        }
                                     } else {
-                                        Spacer()
+                                        metricCell(title: "ÉQUIPEMENTS", value: "CHARGEMENT...", symbol: "arrow.up.and.down.square", color: .secondary)
                                     }
-                                } else {
-                                    metricCell(title: "ÉQUIPEMENTS", value: "CHARGEMENT...", symbol: "arrow.up.and.down.square", color: .secondary)
                                 }
                             }
                         }
+                        .padding(.horizontal)
+                        .padding(.top, 8)
                     }
-                    .padding(.horizontal)
-                    .padding(.top, 8)
                     
                     // Departures / Line Group rows
                     VStack(spacing: 20) {
@@ -582,6 +617,86 @@ struct StationDetailSheet: View {
             }
             .scrollContentBackground(.hidden)
         }
+    }
+
+    private var duoCompactStationHeader: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center) {
+                Text(currentStation.name)
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+
+                Spacer()
+
+                Button(action: { showItinerary = true }) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.triangle.turn.up.right.circle.fill")
+                            .font(.system(size: 13, weight: .bold))
+                        Text("Itinéraire")
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                    }
+                    .foregroundColor(colorScheme == .dark ? .black : .white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(primaryGreen)
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.liquidGlassInteractive)
+            }
+
+            let stats = stationDistanceAndWalkTime
+            HStack(spacing: 8) {
+                HStack(spacing: 4) {
+                    Image(systemName: "location.fill")
+                        .font(.caption2)
+                        .foregroundColor(Color(hex: "30B0C7"))
+                    Text(stats.distanceStr)
+                        .font(.system(.subheadline, design: .rounded))
+                        .fontWeight(.bold)
+                        .foregroundColor(primaryGreen)
+                }
+
+                Text("•").foregroundColor(.secondary).font(.caption2)
+
+                HStack(spacing: 4) {
+                    Image(systemName: "figure.walk")
+                        .font(.caption2)
+                        .foregroundColor(LiquidGlassTheme.warningMetricColor(for: colorScheme))
+                    Text("\(stats.walkTimeMinutes) min")
+                        .font(.system(.subheadline, design: .rounded))
+                        .foregroundColor(.secondary)
+                }
+
+                Text("•").foregroundColor(.secondary).font(.caption2)
+
+                HStack(spacing: 4) {
+                    Image(systemName: "tram.fill")
+                        .font(.caption2)
+                        .foregroundColor(.red)
+                    Text("\(currentStation.lines.count) lignes")
+                        .font(.system(.subheadline, design: .rounded))
+                        .foregroundColor(.secondary)
+                }
+
+                if let status = elevatorStatus, status.hasEquipments {
+                    Text("•").foregroundColor(.secondary).font(.caption2)
+                    HStack(spacing: 3) {
+                        Image(systemName: "arrow.up.and.down.square.fill")
+                            .font(.caption2)
+                            .foregroundColor(status.elevators.functional < status.elevators.total ? Color(hex: "FF453A") : Color(hex: "BF5AF2"))
+                        Text("\(status.elevators.functional)/\(status.elevators.total)")
+                            .font(.system(.caption, design: .rounded))
+                            .fontWeight(.bold)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal)
+        .padding(.top, 4)
+        .padding(.bottom, 4)
     }
 
     private func setupStation() {
@@ -892,7 +1007,7 @@ struct StationDetailSheet: View {
                     id: lineKey,
                     label: localLine.name,
                     color: colorHex,
-                    text_color: "FFFFFF",
+                    text_color: LiquidGlassTheme.contrastHexColor(forHex: colorHex),
                     network: modeName,
                     mode: modeName,
                     directions: [],

@@ -7,9 +7,14 @@
 
 import SwiftUI
 import SwiftData
+import AppIntents
 
 @main
 struct FlowApp: App {
+    init() {
+        FlowShortcutsProvider.updateAppShortcutParameters()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()

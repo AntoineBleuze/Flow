@@ -16,7 +16,7 @@
             endingColumnNumber = "9223372036854775807"
             startingLineNumber = "558"
             endingLineNumber = "558"
-            landmarkName = "loadData()"
+            landmarkName = "loadPreviewMockData()"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>

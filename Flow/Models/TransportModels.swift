@@ -103,9 +103,27 @@ enum LineStatus: Int, Comparable {
         switch self {
         case .interrupted: return .red
         case .disrupted: return .orange
-        case .works: return .yellow
+        case .works:
+            #if canImport(UIKit)
+            return Color(uiColor: UIColor { trait in
+                trait.userInterfaceStyle == .dark
+                    ? UIColor(red: 255/255, green: 214/255, blue: 10/255, alpha: 1)
+                    : UIColor(red: 178/255, green: 94/255, blue: 0/255, alpha: 1)
+            })
+            #else
+            return .orange
+            #endif
         case .information: return .blue
         case .normal: return .primary  // "Blanc" en dark mode, Noir en light mode. Si l'utilisateur veut vraiment blanc forcé, on mettra .white mais attention au contraste.
+        }
+    }
+
+    func color(for colorScheme: ColorScheme) -> Color {
+        switch self {
+        case .works:
+            return LiquidGlassTheme.statusWorksColor(for: colorScheme)
+        default:
+            return self.color
         }
     }
 

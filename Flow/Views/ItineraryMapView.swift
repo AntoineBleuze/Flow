@@ -77,8 +77,28 @@ struct ItineraryMapViewRepresentable: UIViewRepresentable {
                 }
             }
             
-            // Fallback: connect from and to if routeCoordinates is empty
-            if routeCoordinates.isEmpty {
+            // Fallback: TransitTraceService si le trace est rectiligne/vide pour un transport en commun
+            if isTransit && routeCoordinates.count <= 2,
+               let fromPlace = section.from, let fromCoord = fromPlace.coordinate,
+               let toPlace = section.to, let toCoord = toPlace.coordinate {
+                let lineCode = section.display_informations?.code ?? section.display_informations?.label ?? ""
+                let intermediates = section.stop_date_times?.compactMap { $0.stop_point.coordinate } ?? []
+                if let precise = TransitTraceService.shared.getPreciseCoordinates(
+                    forLine: lineCode,
+                    commercialMode: section.display_informations?.commercial_mode,
+                    physicalMode: section.display_informations?.physical_mode,
+                    from: fromCoord,
+                    to: toCoord,
+                    intermediates: intermediates
+                ), precise.count > routeCoordinates.count {
+                    routeCoordinates = precise
+                    allCoordinates.append(contentsOf: precise)
+                } else if routeCoordinates.isEmpty {
+                    routeCoordinates = [fromCoord, toCoord]
+                    allCoordinates.append(fromCoord)
+                    allCoordinates.append(toCoord)
+                }
+            } else if routeCoordinates.isEmpty {
                 if let fromPlace = section.from, let fromCoord = fromPlace.coordinate,
                    let toPlace = section.to, let toCoord = toPlace.coordinate {
                     routeCoordinates = [fromCoord, toCoord]

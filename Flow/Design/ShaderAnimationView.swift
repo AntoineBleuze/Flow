@@ -4,7 +4,7 @@ struct ShaderAnimationView: View {
     let isLoading: Bool
     let station: MapStation?
     let customColors: [Color]?
-    let showMeshGradient: Bool
+    let showAmbientGradient: Bool
     
     @Environment(\.colorScheme) var colorScheme
     @State private var waveProgress: CGFloat
@@ -12,11 +12,11 @@ struct ShaderAnimationView: View {
     
     @State private var isLowPowerMode: Bool
     
-    init(isLoading: Bool, station: MapStation? = nil, customColors: [Color]? = nil, showMeshGradient: Bool = true, forceLowPowerMode: Bool? = nil) {
+    init(isLoading: Bool, station: MapStation? = nil, customColors: [Color]? = nil, showAmbientGradient: Bool = true, forceLowPowerMode: Bool? = nil) {
         self.isLoading = isLoading
         self.station = station
         self.customColors = customColors
-        self.showMeshGradient = showMeshGradient
+        self.showAmbientGradient = showAmbientGradient
         self._waveProgress = State(initialValue: isLoading ? 0.0 : 1.0)
         self._isLowPowerMode = State(initialValue: forceLowPowerMode ?? ProcessInfo.processInfo.isLowPowerModeEnabled)
     }
@@ -49,32 +49,16 @@ struct ShaderAnimationView: View {
     }
     
     private var staticBody: some View {
-        let meshColors = getMeshColors(for: colorScheme)
-        let staticPoints: [SIMD2<Float>] = [
-            SIMD2<Float>(0.0, 0.0), SIMD2<Float>(0.5, 0.0), SIMD2<Float>(1.0, 0.0),
-            SIMD2<Float>(0.0, 0.5), SIMD2<Float>(0.5, 0.5), SIMD2<Float>(1.0, 0.5),
-            SIMD2<Float>(0.0, 1.0), SIMD2<Float>(0.5, 1.0), SIMD2<Float>(1.0, 1.0)
-        ]
+        let colors = getAmbientColors(for: colorScheme)
         
         return ZStack {
             // Base background matching the theme
             colorScheme == .dark ? Color.black : Color.white
             
-            // 1. Mesh Gradient (Static ambient background)
-            if showMeshGradient && waveProgress > 0.0 {
-                if isPreview {
-                    LinearGradient(colors: meshColors, startPoint: .topLeading, endPoint: .bottomTrailing)
-                        .opacity(Double(waveProgress))
-                } else {
-                    MeshGradient(
-                        width: 3,
-                        height: 3,
-                        points: staticPoints,
-                        colors: meshColors,
-                        background: colorScheme == .dark ? .black : .white
-                    )
+            // 1. Static ambient background
+            if showAmbientGradient && waveProgress > 0.0 {
+                LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
                     .opacity(Double(waveProgress))
-                }
             }
             
             // 2. Static black background if loading
@@ -125,7 +109,7 @@ struct ShaderAnimationView: View {
     }
     
     // Resolve and compute ambient shades of the station's line colors
-    private func getMeshColors(for scheme: ColorScheme) -> [Color] {
+    private func getAmbientColors(for scheme: ColorScheme) -> [Color] {
         let target = scheme == .dark ? Color.black : Color.white
         
         let rawColors: [Color]
@@ -174,9 +158,9 @@ extension Color {
 }
 
 #Preview("Shader Only (Normal Mode)") {
-    ShaderAnimationView(isLoading: false, showMeshGradient: false, forceLowPowerMode: false)
+    ShaderAnimationView(isLoading: false, showAmbientGradient: false, forceLowPowerMode: false)
 }
 
-#Preview("Mesh Gradient (Eco Mode)") {
-    ShaderAnimationView(isLoading: false, showMeshGradient: true, forceLowPowerMode: true)
+#Preview("Linear Gradient (Eco Mode)") {
+    ShaderAnimationView(isLoading: false, showAmbientGradient: true, forceLowPowerMode: true)
 }

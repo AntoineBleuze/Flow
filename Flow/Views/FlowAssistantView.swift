@@ -240,9 +240,7 @@ public struct FlowAssistantView: View {
                 }
             }
         }
-        .presentationBackground(.ultraThinMaterial)
-        .presentationCornerRadius(LiquidGlassTheme.sheetCornerRadius)
-        .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+        .liquidGlassSheet()
         .onAppear {
             LocationManager.shared.requestLocation()
         }

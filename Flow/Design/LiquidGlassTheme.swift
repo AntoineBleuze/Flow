@@ -8,9 +8,56 @@ public enum LiquidGlassTheme {
     public static let largeCornerRadius: CGFloat = 24.0
     public static let sheetCornerRadius: CGFloat = 28.0
     
+    // MARK: - Contrôle Rapide d'Opacité des Surfaces
+    /// Opacité globale du fond .ultraThinMaterial pour toutes les sheets modales (0.0 = transparent, 1.0 = opaque standard)
+    /// 👉 Modifiez cette valeur ici pour ajuster instantanément la transparence de toutes les sheets du projet.
+    public static var sheetMaterialOpacity: Double = 0.15
+    
+    /// Opacité globale du fond en verre de l'écran de gauche en mode double écran / pliable (0.0 = totalement transparent, 1.0 = opaque standard)
+    /// 👉 Modifiez cette valeur ici pour ajuster instantanément la transparence du volet gauche.
+    public static var duoLeftPaneOpacity: Double = 0.85
+    
     /// Couleur verte dynamique pour les horaires de départs en direct
     public static func liveGreen(for colorScheme: ColorScheme) -> Color {
         colorScheme == .dark ? Color(hex: "30D158") : Color(hex: "008543")
+    }
+    
+    /// Couleur adaptative pour le statut 'Travaux' respectant les critères WCAG 2.1 AA
+    /// En mode clair, un ambre foncé (#B25E00) offre un ratio > 5:1 sur fond clair.
+    /// En mode sombre, un jaune d'alerte vif (#FFD60A) offre un ratio > 12:1.
+    public static func statusWorksColor(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? Color(hex: "FFD60A") : Color(hex: "B25E00")
+    }
+    
+    /// Couleur adaptative pour les métriques de marche et d'alerte
+    public static func warningMetricColor(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? Color(hex: "FFD60A") : Color(hex: "B25E00")
+    }
+    
+    /// Calcule une couleur de texte accessible (noir ou blanc) en fonction de la luminance du fond hexadécimal
+    public static func contrastHexColor(forHex hex: String) -> String {
+        let clean = hex.replacingOccurrences(of: "#", with: "").uppercased()
+        guard clean.count >= 6, let intVal = UInt64(clean.prefix(6), radix: 16) else {
+            return "FFFFFF"
+        }
+        let r = Double((intVal >> 16) & 0xFF) / 255.0
+        let g = Double((intVal >> 8) & 0xFF) / 255.0
+        let b = Double(intVal & 0xFF) / 255.0
+        let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        return luminance > 0.48 ? "000000" : "FFFFFF"
+    }
+    
+    /// Calcule une couleur de texte SwiftUI accessible (noir ou blanc) pour une Color
+    public static func contrastTextColor(forColor color: Color) -> Color {
+        #if canImport(UIKit)
+        let uiColor = UIColor(color)
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        if uiColor.getRed(&r, green: &g, blue: &b, alpha: &a) {
+            let luminance = 0.2126 * Double(r) + 0.7152 * Double(g) + 0.0722 * Double(b)
+            return luminance > 0.48 ? .black : .white
+        }
+        #endif
+        return .white
     }
     
     /// Couleur de bordure spéculaire (reflet de lumière sur le verre)
@@ -213,34 +260,136 @@ public struct LiquidGlassCardModifier: ViewModifier {
 
 public struct LiquidGlassSheetModifier: ViewModifier {
     let cornerRadius: CGFloat
+    let customOpacity: Double?
+    
+    public init(cornerRadius: CGFloat = LiquidGlassTheme.sheetCornerRadius, customOpacity: Double? = nil) {
+        self.cornerRadius = cornerRadius
+        self.customOpacity = customOpacity
+    }
     
     public func body(content: Content) -> some View {
         content
-            .presentationBackground(.ultraThinMaterial)
+            .presentationBackground {
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .opacity(customOpacity ?? LiquidGlassTheme.sheetMaterialOpacity)
+            }
             .presentationCornerRadius(cornerRadius)
             .presentationBackgroundInteraction(.enabled(upThrough: .medium))
     }
 }
 
+// MARK: - Transparent Navigation & Container Helper
+
+#if canImport(UIKit)
+import UIKit
+
+/// Contrôleur invisible pour effacer les fonds opaques des conteneurs UIKit (NavigationStack / UINavigationController / UIHostingController)
+public struct TransparentHostingView: UIViewControllerRepresentable {
+    public init() {}
+
+    public func makeUIViewController(context: Context) -> TransparentController {
+        TransparentController()
+    }
+
+    public func updateUIViewController(_ uiViewController: TransparentController, context: Context) {
+        uiViewController.applyTransparency()
+    }
+
+    public class TransparentController: UIViewController {
+        public override func viewDidLoad() {
+            super.viewDidLoad()
+            applyTransparency()
+        }
+
+        public override func viewWillAppear(_ animated: Bool) {
+            super.viewWillAppear(animated)
+            applyTransparency()
+        }
+
+        public override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            applyTransparency()
+        }
+
+        public override func viewDidLayoutSubviews() {
+            super.viewDidLayoutSubviews()
+            applyTransparency()
+        }
+
+        public func applyTransparency() {
+            view.backgroundColor = .clear
+
+            var currentView: UIView? = view
+            while let sv = currentView?.superview {
+                sv.backgroundColor = .clear
+                currentView = sv
+            }
+
+            var currentVC: UIViewController? = self
+            while let parent = currentVC?.parent {
+                parent.view.backgroundColor = .clear
+                if let nav = parent as? UINavigationController {
+                    clearNavController(nav)
+                }
+                currentVC = parent
+            }
+
+            if let nav = navigationController {
+                clearNavController(nav)
+            }
+        }
+
+        private func clearNavController(_ nav: UINavigationController) {
+            nav.view.backgroundColor = .clear
+            for subview in nav.view.subviews {
+                subview.backgroundColor = .clear
+            }
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithTransparentBackground()
+            appearance.backgroundColor = .clear
+            appearance.shadowColor = .clear
+            nav.navigationBar.standardAppearance = appearance
+            nav.navigationBar.scrollEdgeAppearance = appearance
+            nav.navigationBar.compactAppearance = appearance
+        }
+    }
+}
+#else
+public struct TransparentHostingView: View {
+    public init() {}
+    public var body: some View {
+        Color.clear
+    }
+}
+#endif
+
 public struct LiquidGlassBackgroundModifier: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.duoPosture) private var duoPosture
     
     public func body(content: Content) -> some View {
         content
             .background {
-                ZStack {
-                    if colorScheme == .dark {
-                        Color.black.ignoresSafeArea()
-                    } else {
-                        Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
-                    }
-                    
-                    Rectangle()
-                        .fill(.ultraThinMaterial)
-                        .opacity(colorScheme == .dark ? 0.35 : 0.85)
+                if duoPosture == .unfoldedDualScreen {
+                    TransparentHostingView()
                         .ignoresSafeArea()
+                } else {
+                    ZStack {
+                        if colorScheme == .dark {
+                            Color.black.ignoresSafeArea()
+                        } else {
+                            Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
+                        }
+                        
+                        Rectangle()
+                            .fill(.ultraThinMaterial)
+                            .opacity(colorScheme == .dark ? 0.35 : 0.85)
+                            .ignoresSafeArea()
+                    }
                 }
             }
+            .toolbarBackground(duoPosture == .unfoldedDualScreen ? .hidden : .visible, for: .navigationBar)
     }
 }
 
@@ -257,8 +406,20 @@ public extension View {
     }
     
     /// Configure une sheet modale avec les guidelines Apple Liquid Glass (ultraThinMaterial et interaction)
-    func liquidGlassSheet(cornerRadius: CGFloat = LiquidGlassTheme.sheetCornerRadius) -> some View {
-        modifier(LiquidGlassSheetModifier(cornerRadius: cornerRadius))
+    func liquidGlassSheet(
+        cornerRadius: CGFloat = LiquidGlassTheme.sheetCornerRadius,
+        opacity: Double? = nil
+    ) -> some View {
+        modifier(LiquidGlassSheetModifier(cornerRadius: cornerRadius, customOpacity: opacity))
+    }
+    
+    /// Fond ultraThinMaterial pour sheet modale avec opacité configurable
+    func liquidGlassSheetBackground(opacity: Double = LiquidGlassTheme.sheetMaterialOpacity) -> some View {
+        self.presentationBackground {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .opacity(opacity)
+        }
     }
     
     /// Fond adaptatif haute lisibilité pour les vues principales

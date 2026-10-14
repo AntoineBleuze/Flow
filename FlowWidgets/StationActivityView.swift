@@ -39,14 +39,12 @@ struct StationActivityView: View {
                     }
                     .buttonStyle(.plain)
 
-                    ZStack {
-                        Circle()
-                            .fill(Color(hex: lineColor))
-                            .frame(width: 50, height: 50)
-                        Text(lineName)
-                            .font(.system(size: 24, weight: .bold))
-                            .foregroundColor(Color(hex: textColor))
-                    }
+                    WidgetLineLogo(
+                        lineName: lineName,
+                        lineColor: lineColor,
+                        textColor: textColor,
+                        size: 46
+                    )
                 }
             }
             
@@ -60,31 +58,17 @@ struct StationActivityView: View {
                 
                 Spacer()
                 
-                HStack(spacing: 12) {
-                    ForEach(Array(nextDepartures.enumerated()), id: \.offset) { index, time in
-                        Text(time)
-                            .font(.system(.title2, design: .rounded))
-                            .bold()
-                            .foregroundColor(index == 0 ? .green : .white)
+                HStack(spacing: 16) {
+                    ForEach(nextDepartures.prefix(2), id: \.self) { departure in
+                        Text(departure)
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .foregroundStyle(.green)
+                            .monospacedDigit()
                     }
                 }
             }
         }
         .padding()
-        .activityBackgroundTint(Color.black)
-        .activitySystemActionForegroundColor(Color.white)
+        .background(Color.black.opacity(0.8))
     }
-}
-
-#Preview("Notification", traits: .sizeThatFitsLayout) {
-    StationActivityView(
-        stationName: "Châtelet",
-        lineName: "A",
-        direction: "Boissy-St-Léger",
-        nextDepartures: ["12 min", "17 min"],
-        lineColor: "E2231A",
-        textColor: "FFFFFF"
-    )
-    .padding()
-    .background(Color(UIColor.systemGroupedBackground))
 }

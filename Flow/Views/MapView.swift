@@ -24,6 +24,7 @@ struct AppMapView: View {
     }
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.duoPosture) private var duoPosture
 
     @EnvironmentObject var coordinator: NavigationCoordinator
     @State private var visibleRegion: MKCoordinateRegion?
@@ -38,9 +39,11 @@ struct AppMapView: View {
     @State private var itineraryPanelState: ItineraryPanelState = .compact
     @State private var isNavigatingImmersive = false
     @State private var sheetDetent: PresentationDetent = .medium
+    @State private var navigationSheetDetent: PresentationDetent = .fraction(0.18)
     @State private var showAIAssistant: Bool = false
     @StateObject private var voiceManager = VoiceDictationManager.shared
     @State private var aiInputPrompt: String = ""
+    @FocusState private var isAIFocused: Bool
     @State private var isAISubmitting: Bool = false
     @State private var aiSpeechTip: String? = nil
     
@@ -59,6 +62,7 @@ struct AppMapView: View {
                     userTrackingMode: $coordinator.userTrackingMode,
                     recenterTrigger: coordinator.recenterTrigger,
                     journey: navigationManager.isNavigating ? navigationManager.currentJourney : (coordinator.previewJourney ?? selectedJourney),
+                    focusedSectionId: coordinator.focusedSectionId,
                     useMainMap: showControls,
                     showAnnotations: showControls
                 )
@@ -74,41 +78,72 @@ struct AppMapView: View {
                             Spacer()
                             mapControlToolbar
                         }
-                        .padding(.trailing, 16)
+                        .padding(.trailing, duoPosture == .unfoldedDualScreen ? 24 : 16)
 
                         // 2. Either the AI Journey Action Card (if preview active) or the Bottom AI Voice/Text Input Bar
-                        if let journey = coordinator.previewJourney {
-                            aiJourneyActionCard(journey: journey)
-                                .frame(maxWidth: horizontalSizeClass == .regular ? 480 : .infinity)
+                        // On iPhone Duo unfolded, the left screen already provides full AI and journey controls
+                        if duoPosture != .unfoldedDualScreen {
+                            if let journey = coordinator.previewJourney {
+                                aiJourneyActionCard(journey: journey)
+                                    .frame(maxWidth: horizontalSizeClass == .regular ? 480 : .infinity)
+                                    .padding(.horizontal, 16)
+                                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                            } else {
+                                HStack(alignment: .center, spacing: 12) {
+                                    if horizontalSizeClass == .regular {
+                                        Spacer()
+                                    }
+                                    bottomAIPillBar
+                                        .frame(maxWidth: horizontalSizeClass == .regular ? 480 : .infinity)
+
+                                    // Espace réservé pour le bouton de recherche système (TabView) afin d'aligner parfaitement la barre IA
+                                    Color.clear
+                                        .frame(width: 50, height: 50)
+                                        .allowsHitTesting(false)
+                                }
                                 .padding(.horizontal, 16)
                                 .transition(.move(edge: .bottom).combined(with: .opacity))
-                        } else {
-                            bottomAIPillBar
-                                .frame(maxWidth: horizontalSizeClass == .regular ? 480 : .infinity)
-                                .padding(.horizontal, 16)
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                            }
                         }
                     }
-                    .padding(.bottom, 16)
+                    .padding(.bottom, duoPosture == .unfoldedDualScreen ? 24 : 16)
+                    .ignoresSafeArea(.container, edges: .bottom)
                     .zIndex(15)
                 }
                 
-                // Immersive Navigation View
-                // Immersive Navigation View
-                if navigationManager.isNavigating, let journey = navigationManager.currentJourney {
-                    ImmersiveNavigationView(
-                        journey: journey,
-                        navigationMode: $navigationManager.isNavigating,
-                        userTrackingMode: $coordinator.userTrackingMode
-                    )
-                    .zIndex(20)
-                    .transition(.move(edge: .bottom))
+                // Panneau de navigation flottant en mode fermé (ne prend pas toute la largeur et ne couvre pas la navbar)
+                if showControls && navigationManager.isNavigating && duoPosture != .unfoldedDualScreen,
+                   let journey = navigationManager.currentJourney {
+                    VStack(spacing: 8) {
+                        Spacer()
+
+                        // Bouton de recentrage au-dessus de la carte de guidage
+                        HStack {
+                            Spacer()
+                            Button(action: {
+                                coordinator.recenterMap()
+                            }) {
+                                Image(systemName: coordinator.userTrackingModeImageName)
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(coordinator.userTrackingMode == .none ? .primary : .blue)
+                                    .frame(width: 44, height: 44)
+                            }
+                            .buttonStyle(.liquidGlassInteractive)
+                            .padding(.trailing, 16)
+                        }
+
+                        // Carte de guidage flottante élégante
+                        ImmersiveNavigationView(journey: journey, isFloating: true)
+                            .frame(maxWidth: horizontalSizeClass == .regular ? 480 : .infinity)
+                            .padding(.horizontal, 14)
+                            .padding(.bottom, 12)
+                    }
+                    .zIndex(25)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
 
-
-
-                // iPad: Station detail panel at bottom-left (resizable)
-                if horizontalSizeClass == .regular, let station = coordinator.selectedStation {
+                // iPad: Station detail panel at bottom-left (resizable) - only when not in Duo dual-screen mode
+                if duoPosture != .unfoldedDualScreen && UIDevice.current.userInterfaceIdiom == .pad, let station = coordinator.selectedStation {
                     GeometryReader { geometry in
                         let maxAvailableHeight = geometry.size.height - 96
                         VStack {
@@ -160,18 +195,24 @@ struct AppMapView: View {
                     .zIndex(10)
                 }
             }
+            .ignoresSafeArea(.container, edges: .bottom)
         }
-        // iPhone: keep classic sheet behavior (iPad uses inline panel above)
+        .ignoresSafeArea(.container, edges: .bottom)
+        // iPhone folded: keep classic sheet behavior (iPad uses inline panel above, Duo unfolded uses left pane)
         .sheet(item: Binding(
-            get: { horizontalSizeClass == .regular ? nil : coordinator.selectedStation },
+            get: {
+                guard !navigationManager.isNavigating else { return nil }
+                guard duoPosture != .unfoldedDualScreen else { return nil }
+                guard UIDevice.current.userInterfaceIdiom != .pad else { return nil }
+                return coordinator.selectedStation
+            },
             set: { coordinator.selectedStation = $0 }
         )) { station in
             StationDetailSheet(station: station, selectedDetent: $sheetDetent)
                 .presentationDetents([.fraction(0.22), .medium, .large], selection: $sheetDetent)
-                .presentationBackground(.ultraThinMaterial)
-                .presentationCornerRadius(LiquidGlassTheme.sheetCornerRadius)
-                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+                .liquidGlassSheet()
         }
+
         .onAppear {
             LocationManager.shared.requestLocation()
         }
@@ -206,8 +247,7 @@ struct AppMapView: View {
                 FlowAssistantView()
                     .environmentObject(coordinator)
                     .presentationDetents([.fraction(0.35), .medium, .large])
-                    .presentationBackground(.ultraThinMaterial)
-                    .presentationCornerRadius(LiquidGlassTheme.sheetCornerRadius)
+                    .liquidGlassSheetBackground()
                     .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.35)))
             }
         }
@@ -215,6 +255,16 @@ struct AppMapView: View {
             if newVal {
                 showAIAssistant = true
                 coordinator.showAIAssistant = false
+            }
+        }
+        .onChange(of: navigationManager.isNavigating) { _, isNavigating in
+            if isNavigating {
+                navigationSheetDetent = .fraction(0.18)
+            }
+        }
+        .onAppear {
+            if data.allStations.isEmpty {
+                data.loadData()
             }
         }
     }
@@ -346,6 +396,7 @@ struct AppMapView: View {
                 voiceManager.isRecording ? "Écoute en cours..." : "Où allez-vous ? (ex: Concorde)",
                 text: $aiInputPrompt
             )
+            .focused($isAIFocused)
             .font(.system(size: 14, weight: .medium, design: .rounded))
             .textFieldStyle(.plain)
             .autocorrectionDisabled()
@@ -353,6 +404,24 @@ struct AppMapView: View {
                 submitAIPrompt()
             }
             .frame(maxWidth: .infinity)
+
+            if isAIFocused {
+                Button {
+                    isAIFocused = false
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(Color.secondary.opacity(0.12))
+                            .frame(width: 36, height: 36)
+
+                        Image(systemName: "keyboard.chevron.compact.down")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .buttonStyle(.liquidGlassInteractive)
+                .transition(.scale.combined(with: .opacity))
+            }
 
             // Voice Dictation Button
             Button {

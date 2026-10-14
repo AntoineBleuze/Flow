@@ -25,6 +25,9 @@ class IDFMItineraryService: ObservableObject {
                 forbiddenUris: forbiddenUris,
                 isAccessible: isAccessible
             )
+            .map { journeys in
+                journeys.map { TransitTraceService.shared.enrichJourney($0) }
+            }
             .catch { [weak self] error -> AnyPublisher<[Journey], Error> in
                 print("⚠️ [Server Mode] FlowServer failed: \(error.localizedDescription). Falling back to direct Navitia.")
                 guard let self = self else {
@@ -100,25 +103,21 @@ class IDFMItineraryService: ObservableObject {
         forbiddenUris: [String] = [],
         isAccessible: Bool = false
     ) -> AnyPublisher<[Journey], Error> {
-        // Format coordinates: "lon;lat"
         let fromCoord = "\(from.longitude);\(from.latitude)"
-        // Use station coordinates as destination
-        let toCoord = "\(to.coordinate.longitude);\(to.coordinate.latitude)"
+        let toCoord = "\(to.longitude);\(to.latitude)"
 
-        var components = URLComponents(string: "\(baseURL)/journeys")!
-
-        // Format date to ISO8601 for Navitia (YYYYMMDDTHHMMSS)
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd'T'HHmmss"
         let dateStr = formatter.string(from: date)
 
+        var components = URLComponents(string: "\(baseURL)/journeys")!
         var queryItems = [
             URLQueryItem(name: "from", value: fromCoord),
             URLQueryItem(name: "to", value: toCoord),
             URLQueryItem(name: "datetime", value: dateStr),
             URLQueryItem(name: "datetime_represents", value: isArrival ? "arrival" : "departure"),
             URLQueryItem(name: "count", value: "5"),
-            URLQueryItem(name: "depth", value: "3"),  // Get detailed sections
+            URLQueryItem(name: "depth", value: "3"),
         ]
 
         if isAccessible {
@@ -149,7 +148,9 @@ class IDFMItineraryService: ObservableObject {
                 }
             })
             .decode(type: ItineraryResponse.self, decoder: JSONDecoder())
-            .map(\.journeys)
+            .map { response in
+                response.journeys.map { TransitTraceService.shared.enrichJourney($0) }
+            }
             .receive(on: DispatchQueue.main)
             .eraseToAnyPublisher()
     }

@@ -24,21 +24,19 @@ struct NavigationActivityWidget: Widget {
                 }
                 
                 HStack(alignment: .center, spacing: 12) {
-                    // Icon (Line or Walking)
+                    // Icon (Line Logo or Walking)
                     if let lineName = context.state.lineName, let lineColor = context.state.lineColor {
-                        ZStack {
-                            Circle()
-                                .fill(Color(hex: lineColor))
-                                .frame(width: 36, height: 36)
-                            Text(lineName)
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundColor(Color(hex: context.state.textColor ?? "FFFFFF"))
-                        }
+                        WidgetLineLogo(
+                            lineName: lineName,
+                            lineColor: lineColor,
+                            textColor: context.state.textColor,
+                            size: 38
+                        )
                     } else {
                         Image(systemName: "figure.walk")
                             .font(.system(size: 20))
                             .foregroundColor(.blue)
-                            .frame(width: 36, height: 36)
+                            .frame(width: 38, height: 38)
                             .background(Color.blue.opacity(0.1))
                             .clipShape(Circle())
                     }
@@ -85,7 +83,7 @@ struct NavigationActivityWidget: Widget {
                         progress: context.state.progress,
                         lineColor: context.state.lineColor
                     )
-                    .padding(.top, 2)
+                    .padding(.top, 4)
                 }
             }
             .padding(.horizontal, 16)
@@ -97,18 +95,18 @@ struct NavigationActivityWidget: Widget {
                 // --- Expanded UI ---
                 DynamicIslandExpandedRegion(.leading) {
                     if let lineName = context.state.lineName, let lineColor = context.state.lineColor {
-                        ZStack {
-                            Circle()
-                                .fill(Color(hex: lineColor))
-                                .frame(width: 40, height: 40)
-                            Text(lineName)
-                                .font(.system(size: 20, weight: .bold))
-                                .foregroundColor(Color(hex: context.state.textColor ?? "FFFFFF"))
-                        }
+                        WidgetLineLogo(
+                            lineName: lineName,
+                            lineColor: lineColor,
+                            textColor: context.state.textColor,
+                            size: 34
+                        )
+                        .padding(.leading, 2)
                     } else {
                         Image(systemName: "figure.walk")
                             .font(.title2)
                             .foregroundColor(.blue)
+                            .padding(.leading, 2)
                     }
                 }
                 
@@ -119,19 +117,23 @@ struct NavigationActivityWidget: Widget {
                             .fontWeight(.bold)
                             .foregroundStyle(.green)
                             .monospacedDigit()
+                            .padding(.trailing, 2)
                     }
                 }
                 
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 8) {
-                        VStack(alignment: .leading) {
+                        VStack(alignment: .leading, spacing: 2) {
                             Text(context.state.currentInstruction)
                                 .font(.headline)
                                 .fontWeight(.bold)
+                                .foregroundColor(.white)
+                                .lineLimit(1)
                             if let direction = context.state.direction {
                                 Text("vers \(direction)")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
+                                    .lineLimit(1)
                             }
                         }
                         
@@ -144,19 +146,17 @@ struct NavigationActivityWidget: Widget {
                             )
                         }
                     }
-                    .padding(.horizontal)
+                    .padding(.horizontal, 4)
                 }
                 
             } compactLeading: {
                 if let lineName = context.state.lineName, let lineColor = context.state.lineColor {
-                    ZStack {
-                        Circle()
-                            .fill(Color(hex: lineColor))
-                            .frame(width: 20, height: 20)
-                        Text(lineName)
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(Color(hex: context.state.textColor ?? "FFFFFF"))
-                    }
+                    WidgetLineLogo(
+                        lineName: lineName,
+                        lineColor: lineColor,
+                        textColor: context.state.textColor,
+                        size: 20
+                    )
                 } else {
                     Image(systemName: "figure.walk")
                         .font(.caption2)
@@ -175,11 +175,43 @@ struct NavigationActivityWidget: Widget {
                         .foregroundStyle(.secondary)
                 }
             } minimal: {
-                Image(systemName: "location.fill")
-                    .font(.caption2)
-                    .foregroundColor(.blue)
+                if let lineName = context.state.lineName, let lineColor = context.state.lineColor {
+                    WidgetLineLogo(
+                        lineName: lineName,
+                        lineColor: lineColor,
+                        textColor: context.state.textColor,
+                        size: 16
+                    )
+                } else {
+                    Image(systemName: "figure.walk")
+                        .font(.caption2)
+                        .foregroundColor(.blue)
+                }
             }
         }
+    }
+}
+
+// Shape animable pour tracer une portion de ligne avec embouts ronds
+struct TrackLineShape: Shape {
+    var startX: CGFloat
+    var endX: CGFloat
+    var centerY: CGFloat
+
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(startX, endX) }
+        set {
+            startX = newValue.first
+            endX = newValue.second
+        }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        guard endX >= startX else { return path }
+        path.move(to: CGPoint(x: startX, y: centerY))
+        path.addLine(to: CGPoint(x: endX, y: centerY))
+        return path
     }
 }
 
@@ -194,85 +226,89 @@ struct HorizontalLinePlanView: View {
             return AnyView(EmptyView())
         }
         
-        let legIndex = currentLegIndex ?? 0
-        let prog = progress ?? 0.0
         let totalStops = stops.count
+        let legIndex = min(max(0, currentLegIndex ?? 0), totalStops - 1)
+        let prog = min(max(0.0, progress ?? 0.0), 1.0)
         
         // Track color
         let trackColor = lineColor.map { Color(hex: $0) } ?? Color.blue
         
-        // Calculate the fractional position of the user along the stops sequence:
-        // Position goes from 0.0 to 1.0
-        let userPositionFraction: Double = {
-            let index = Double(legIndex)
-            let step = Double(totalStops - 1)
-            guard step > 0 else { return 0.0 }
-            return (index + prog) / step
-        }()
+        let currentStopName = stops[safe: legIndex] ?? stops.first ?? ""
+        let destinationStopName = stops.last ?? ""
 
-        let nextStopName = (legIndex + 1 < totalStops) ? stops[legIndex + 1] : stops.last ?? ""
-        let currentStopName = stops[safe: legIndex] ?? ""
+        let dotSize: CGFloat = totalStops > 8 ? 6 : 8
+        let indicatorSize: CGFloat = 12
+        let step = CGFloat(totalStops - 1)
+        // Marge latérale concentrique évitant tout chevauchement avec les bords arrondis
+        let sideMargin: CGFloat = 8
 
         return AnyView(
             VStack(spacing: 6) {
                 // Line track and station dots
                 GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        // Background track line (dimmed)
-                        Capsule()
-                            .fill(Color.white.opacity(0.2))
-                            .frame(height: 4)
+                    let startX = sideMargin
+                    let endX = max(startX, geo.size.width - sideMargin)
+                    let usableWidth = endX - startX
+                    let activeFraction = min(max(0.0, (CGFloat(legIndex) + CGFloat(prog)) / step), 1.0)
+                    let userX = startX + usableWidth * activeFraction
+                    let centerY = geo.size.height / 2
+
+                    ZStack {
+                        // 1. Ligne de fond (dimmée) : embouts ronds parfaitement concentriques sur startX et endX
+                        TrackLineShape(startX: startX, endX: endX, centerY: centerY)
+                            .stroke(Color.white.opacity(0.22), style: StrokeStyle(lineWidth: 4, lineCap: .round))
                         
-                        // Active track line (highlighted)
-                        Capsule()
-                            .fill(trackColor)
-                            .frame(width: geo.size.width * CGFloat(userPositionFraction), height: 4)
-                        
-                        // Station dots
-                        HStack(spacing: 0) {
-                            ForEach(0..<totalStops, id: \.self) { index in
-                                Spacer(minLength: 0)
-                                Circle()
-                                    .fill(index <= legIndex ? trackColor : Color.gray)
-                                    .frame(width: 8, height: 8)
-                                    .overlay(
-                                        Circle()
-                                            .stroke(Color.black, lineWidth: 1.5)
-                                    )
-                                if index < totalStops - 1 {
-                                    Spacer(minLength: 0)
-                                }
-                            }
+                        // 2. Ligne active (pleine couleur) : reliée concentriquement de startX jusqu'au point userX
+                        if userX > startX {
+                            TrackLineShape(startX: startX, endX: userX, centerY: centerY)
+                                .stroke(trackColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
                         }
-                        .frame(width: geo.size.width)
                         
-                        // Glowing user/train indicator dot
+                        // 3. Nœuds de stations : premier arrêt concentrique à startX, dernier arrêt concentrique à endX
+                        ForEach(0..<totalStops, id: \.self) { index in
+                            let dotCenter = startX + (CGFloat(index) / step) * usableWidth
+                            Circle()
+                                .fill(index <= legIndex ? trackColor : Color.gray.opacity(0.6))
+                                .frame(width: dotSize, height: dotSize)
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color.black, lineWidth: 1.5)
+                                )
+                                .position(x: dotCenter, y: centerY)
+                        }
+                        
+                        // 4. Point indicateur temps réel lumineux concentrique sur userX
                         Circle()
                             .fill(Color.white)
-                            .frame(width: 12, height: 12)
-                            .shadow(color: trackColor.opacity(0.8), radius: 3)
+                            .frame(width: indicatorSize, height: indicatorSize)
+                            .shadow(color: trackColor.opacity(0.95), radius: 4)
                             .overlay(
                                 Circle()
-                                    .stroke(trackColor, lineWidth: 2)
+                                    .stroke(trackColor, lineWidth: 2.5)
                             )
-                            .offset(x: geo.size.width * CGFloat(userPositionFraction) - 6)
+                            .overlay(
+                                Circle()
+                                    .fill(trackColor)
+                                    .frame(width: 3.5, height: 3.5)
+                            )
+                            .position(x: userX, y: centerY)
                     }
-                    .frame(height: 12)
                 }
-                .frame(height: 12)
+                .frame(height: 14)
                 
-                // Labels below the track
+                // Labels sous la timeline alignés concentriquement avec les arrêts extrêmes
                 HStack {
                     Text(currentStopName)
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.white)
                         .lineLimit(1)
                     Spacer()
-                    Text(nextStopName)
+                    Text(destinationStopName)
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(trackColor)
                         .lineLimit(1)
                 }
+                .padding(.horizontal, sideMargin)
             }
         )
     }

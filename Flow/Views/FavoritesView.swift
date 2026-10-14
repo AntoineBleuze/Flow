@@ -71,6 +71,7 @@ struct FavoritesView: View {
             .navigationTitle("Favoris")
             .navigationBarTitleDisplayMode(.large)
         }
+        .toolbarBackground(.hidden, for: .navigationBar)
     }
 
     private var emptyStateView: some View {
@@ -89,11 +90,12 @@ struct FavoritesView: View {
                 .font(.subheadline)
                 .multilineTextAlignment(.center)
                 .foregroundColor(.secondary)
-                .padding(.horizontal, 24)
+                .padding(.horizontal, 16)
         }
+        .frame(maxWidth: .infinity)
         .padding(24)
-        .liquidGlassCard(cornerRadius: 24, padding: 24)
-        .padding(.horizontal, 24)
+        .liquidGlassCard(cornerRadius: 24, padding: 0)
+        .padding(.horizontal, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
@@ -256,6 +258,7 @@ struct FavoriteLineRow: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear {
             startFetching()

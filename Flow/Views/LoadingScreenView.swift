@@ -8,18 +8,14 @@ struct LoadingScreenView: View {
     @State private var shaderOpacity: Double = 0.0
     @State private var isLoading = true
     @State private var hasTriggeredWave = false
-    @State private var logoScale: CGFloat = 1.0
-    @State private var logoOpacity: Double = 1.0 // Immediately visible at start
+    @State private var contentScale: CGFloat = 1.0
+    @State private var contentOpacity: Double = 1.0 // Immediately visible at start
     
     var body: some View {
         ZStack {
-            // Animated Mesh Gradient mixed with black for a premium backdrop
-            ZStack {
-                Color.black
-                AnimatedMeshGradientView(colors: [.indigo.opacity(0.8), .purple.opacity(0.8), .blue.opacity(0.6), .black], speed: 0.6, intensity: 0.12)
-                    .opacity(0.7)
-            }
-            .ignoresSafeArea()
+            // Clean black backdrop
+            Color.black
+                .ignoresSafeArea()
 
             
             // 1. Metal Shader Animation in background
@@ -30,21 +26,15 @@ struct LoadingScreenView: View {
             
             // 2. Premium typography branding centered (using SF Pro font)
             VStack(spacing: 16) {
-                Image(systemName: "map.fill")
-                    .font(.system(size: 44, weight: .bold, design: .default))
-                    .foregroundColor(.white)
-                    .scaleEffect(logoScale)
-                    .opacity(logoOpacity)
-                
                 WWDCTextAnimator(text: "Flow", fontSize: 48, animationType: .reveal, speed: 0.9, delay: 0.1)
                     .foregroundColor(.white)
-                    .scaleEffect(logoScale)
-                    .opacity(logoOpacity)
+                    .scaleEffect(contentScale)
+                    .opacity(contentOpacity)
                 
                 WWDCTextAnimator(text: "Le réseau francilien en temps réel", fontSize: 14, animationType: .reveal, speed: 1.2, delay: 0.4)
                     .foregroundColor(.gray)
-                    .scaleEffect(logoScale)
-                    .opacity(logoOpacity)
+                    .scaleEffect(contentScale)
+                    .opacity(contentOpacity)
                 
                 // Subtle progress indicator to show activity
                 if isLoading && introPhase >= 1 {
@@ -84,11 +74,11 @@ struct LoadingScreenView: View {
         hasTriggeredWave = true
         isLoading = false
         
-        // Dissolve logo and fade in the shader animation (wave + mesh gradient) over 1.0s
+        // Dissolve typography and fade in the shader animation over 1.0s
         withAnimation(.easeInOut(duration: 1.0)) {
             shaderOpacity = 1.0
-            logoScale = 1.1
-            logoOpacity = 0.0
+            contentScale = 1.1
+            contentOpacity = 0.0
         }
         
         // After the 1.0s animation completes, dismiss the entire loading screen to reveal the main screen over 0.4s

@@ -12,6 +12,7 @@ class NavigationCoordinator: ObservableObject {
     @Published var previewJourney: Journey? = nil
     @Published var isAIPreviewActive: Bool = false
     @Published var showAIAssistant: Bool = false
+    @Published var focusedSectionId: String? = nil
     
     func recenterMap() {
         switch userTrackingMode {

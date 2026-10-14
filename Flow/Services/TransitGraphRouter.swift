@@ -64,6 +64,8 @@ final class TransitGraphRouter: @unchecked Sendable {
                     tType = .rer
                 } else if line.id.starts(with: "T") {
                     tType = .tram
+                } else if ["H", "J", "K", "L", "N", "P", "R", "U", "V"].contains(cleanLineName) {
+                    tType = .transilien
                 } else {
                     tType = .metro
                 }
@@ -385,12 +387,13 @@ final class TransitGraphRouter: @unchecked Sendable {
             }
         }
 
-        return Journey(
+        let journey = Journey(
             departure_date_time: nil,
             arrival_date_time: nil,
             duration: route.totalDurationSeconds,
             nb_transfers: route.numberOfTransfers,
             sections: sections
         )
+        return TransitTraceService.shared.enrichJourney(journey)
     }
 }

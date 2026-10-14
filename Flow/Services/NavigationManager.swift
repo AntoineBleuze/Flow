@@ -992,7 +992,7 @@ class NavigationManager: NSObject, ObservableObject {
                         // If device is unlocked, update in real-time as progress moves!
                         let oldProgress = self.progress
                         self.progress = t_gps ?? 0.0
-                        if !self.isDeviceLocked && abs(self.progress - oldProgress) > 0.01 {
+                        if abs(self.progress - oldProgress) > 0.01 {
                             let eta = self.calculateETA(for: section) ?? "--"
                             let destination = section.to?.name ?? "Arrêt suivant"
                             self.updateActivity(
@@ -1028,7 +1028,7 @@ class NavigationManager: NSObject, ObservableObject {
                         }
                         
                         // If device is unlocked, update in real-time as progress moves!
-                        if !self.isDeviceLocked && abs(estimation.progress - oldProgress) > 0.01 {
+                        if abs(estimation.progress - oldProgress) > 0.01 {
                             let eta = self.calculateETA(for: section) ?? "--"
                             let destination = section.to?.name ?? "Arrêt suivant"
                             self.updateActivity(
@@ -1307,21 +1307,21 @@ class NavigationManager: NSObject, ObservableObject {
         case .onBoard(let section):
             stopsList = section.stop_date_times?.compactMap { $0.stop_point.name }
             legIdx = currentLegIndex
-            if activeLine == nil { activeLine = section.display_informations?.label }
+            if activeLine == nil { activeLine = section.display_informations?.code ?? section.display_informations?.label }
             if activeDir == nil { activeDir = section.display_informations?.direction }
             if activeColor == nil { activeColor = section.display_informations?.color }
             if activeTxtColor == nil { activeTxtColor = section.display_informations?.text_color }
         case .waitingAtStation(_, let section):
             stopsList = section.stop_date_times?.compactMap { $0.stop_point.name }
             legIdx = 0
-            if activeLine == nil { activeLine = section.display_informations?.label }
+            if activeLine == nil { activeLine = section.display_informations?.code ?? section.display_informations?.label }
             if activeDir == nil { activeDir = section.display_informations?.direction }
             if activeColor == nil { activeColor = section.display_informations?.color }
             if activeTxtColor == nil { activeTxtColor = section.display_informations?.text_color }
         case .walkingToStation(_, let nextSection):
             stopsList = nextSection.stop_date_times?.compactMap { $0.stop_point.name }
             legIdx = 0
-            if activeLine == nil { activeLine = nextSection.display_informations?.label }
+            if activeLine == nil { activeLine = nextSection.display_informations?.code ?? nextSection.display_informations?.label }
             if activeDir == nil { activeDir = nextSection.display_informations?.direction }
             if activeColor == nil { activeColor = nextSection.display_informations?.color }
             if activeTxtColor == nil { activeTxtColor = nextSection.display_informations?.text_color }
@@ -1337,7 +1337,7 @@ class NavigationManager: NSObject, ObservableObject {
             lineColor: activeColor,
             textColor: activeTxtColor,
             remainingTime: nil,
-            progress: self.isDeviceLocked ? 0.0 : progress,
+            progress: progress,
             stops: stopsList,
             currentLegIndex: legIdx
         )

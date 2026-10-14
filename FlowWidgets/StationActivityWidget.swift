@@ -19,14 +19,12 @@ struct StationActivityWidget: Widget {
             DynamicIsland {
                 // --- Expanded UI ---
                 DynamicIslandExpandedRegion(.leading) {
-                    ZStack {
-                        Circle()
-                            .fill(Color(hex: context.state.lineColor))
-                            .frame(width: 36, height: 36)
-                        Text(context.state.lineName)
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundColor(Color(hex: context.state.textColor))
-                    }
+                    WidgetLineLogo(
+                        lineName: context.state.lineName,
+                        lineColor: context.state.lineColor,
+                        textColor: context.state.textColor,
+                        size: 34
+                    )
                 }
 
                 DynamicIslandExpandedRegion(.trailing) {
@@ -83,15 +81,13 @@ struct StationActivityWidget: Widget {
                 }
 
             } compactLeading: {
-                // Logo de ligne (cercle avec lettre/numéro)
-                ZStack {
-                    Circle()
-                        .fill(Color(hex: context.state.lineColor))
-                        .frame(width: 20, height: 20)
-                    Text(context.state.lineName)
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(Color(hex: context.state.textColor))
-                }
+                // Logo de ligne
+                WidgetLineLogo(
+                    lineName: context.state.lineName,
+                    lineColor: context.state.lineColor,
+                    textColor: context.state.textColor,
+                    size: 20
+                )
                 .padding(.leading, 4)
             } compactTrailing: {
                 if let first = context.state.nextDepartures.first {
@@ -107,14 +103,12 @@ struct StationActivityWidget: Widget {
                         .foregroundStyle(.gray)
                 }
             } minimal: {
-                ZStack {
-                    Circle()
-                        .fill(Color(hex: context.state.lineColor))
-                        .frame(width: 16, height: 16)
-                    Text(context.state.lineName)
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundColor(Color(hex: context.state.textColor))
-                }
+                WidgetLineLogo(
+                    lineName: context.state.lineName,
+                    lineColor: context.state.lineColor,
+                    textColor: context.state.textColor,
+                    size: 16
+                )
             }
         }
     }
@@ -133,4 +127,3 @@ struct StationActivityWidget: Widget {
         )
     
 })
-

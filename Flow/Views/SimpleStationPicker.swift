@@ -12,6 +12,7 @@ struct SimpleStationPicker: View {
 
     let currentLocation: CLLocationCoordinate2D?
     @Environment(\.modelContext) private var context
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         NavigationView {
@@ -19,7 +20,7 @@ struct SimpleStationPicker: View {
                 // Search Bar
                 HStack {
                     Image(systemName: "magnifyingglass")
-                        .foregroundColor(.gray)
+                        .foregroundColor(.secondary)
                     TextField("Rechercher une station...", text: $searchText)
                         .textFieldStyle(PlainTextFieldStyle())
                         .onChange(of: searchText) { _, newValue in
@@ -28,14 +29,18 @@ struct SimpleStationPicker: View {
                     if !searchText.isEmpty {
                         Button(action: { searchText = "" }) {
                             Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.gray)
+                                .foregroundColor(.secondary)
                         }
                     }
                 }
-                .padding()
-                .background(Color(.systemGray6))
-                .cornerRadius(10)
-                .padding()
+                .padding(12)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(LiquidGlassTheme.specularBorder(for: colorScheme), lineWidth: 1.0)
+                )
+                .padding(.horizontal)
+                .padding(.vertical, 8)
 
                 // Results
                 List {
@@ -61,6 +66,7 @@ struct SimpleStationPicker: View {
                                 Spacer()
                             }
                         }
+                        .listRowBackground(Color.clear)
                     }
 
                     ForEach(searchResults) { station in
@@ -117,9 +123,11 @@ struct SimpleStationPicker: View {
                                 }
                             }
                         }
+                        .listRowBackground(Color.clear)
                     }
                 }
                 .listStyle(PlainListStyle())
+                .scrollContentBackground(.hidden)
             }
             .navigationBarTitle("Sélectionner une station", displayMode: .inline)
             .navigationBarItems(
@@ -127,6 +135,7 @@ struct SimpleStationPicker: View {
                     dismiss()
                 })
         }
+        .liquidGlassSheetBackground()
     }
 
     private func formattedDistance(for station: MapStation) -> String? {

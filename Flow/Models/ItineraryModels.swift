@@ -13,7 +13,7 @@ struct Journey: Codable, Identifiable {
     let arrival_date_time: String?
     let duration: Int?
     let nb_transfers: Int?
-    let sections: [ItinerarySection]?
+    var sections: [ItinerarySection]?
 
     enum CodingKeys: String, CodingKey {
         case departure_date_time
@@ -21,6 +21,20 @@ struct Journey: Codable, Identifiable {
         case duration
         case nb_transfers
         case sections
+    }
+
+    init(
+        departure_date_time: String? = nil,
+        arrival_date_time: String? = nil,
+        duration: Int? = nil,
+        nb_transfers: Int? = nil,
+        sections: [ItinerarySection]? = nil
+    ) {
+        self.departure_date_time = departure_date_time
+        self.arrival_date_time = arrival_date_time
+        self.duration = duration
+        self.nb_transfers = nb_transfers
+        self.sections = sections
     }
 }
 
@@ -35,7 +49,7 @@ struct ItinerarySection: Codable, Identifiable {
     let departure_date_time: String?
     let arrival_date_time: String?
     let display_informations: DisplayInformation?
-    let geojson: GeoJSON?
+    var geojson: GeoJSON?
     let stop_date_times: [ItineraryStopDateTime]?
 
     enum CodingKeys: String, CodingKey {
@@ -50,6 +64,32 @@ struct ItinerarySection: Codable, Identifiable {
         case display_informations
         case geojson
         case stop_date_times
+    }
+
+    init(
+        id: String,
+        type: String,
+        mode: String? = nil,
+        duration: Int? = nil,
+        from: ItineraryPlace? = nil,
+        to: ItineraryPlace? = nil,
+        departure_date_time: String? = nil,
+        arrival_date_time: String? = nil,
+        display_informations: DisplayInformation? = nil,
+        geojson: GeoJSON? = nil,
+        stop_date_times: [ItineraryStopDateTime]? = nil
+    ) {
+        self.id = id
+        self.type = type
+        self.mode = mode
+        self.duration = duration
+        self.from = from
+        self.to = to
+        self.departure_date_time = departure_date_time
+        self.arrival_date_time = arrival_date_time
+        self.display_informations = display_informations
+        self.geojson = geojson
+        self.stop_date_times = stop_date_times
     }
 }
 
@@ -155,7 +195,7 @@ extension DisplayInformation {
     }
 }
 
-extension ItineraryPlace {
+extension ItineraryPlace.StopPoint {
     var coordinate: CLLocationCoordinate2D? {
         guard let coord = self.coord,
               let latStr = coord.lat,
@@ -164,5 +204,19 @@ extension ItineraryPlace {
               let lon = Double(lonStr) else { return nil }
         guard lat != 0.0 && lon != 0.0 else { return nil }
         return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+}
+
+extension ItineraryPlace {
+    var coordinate: CLLocationCoordinate2D? {
+        if let coord = self.coord,
+           let latStr = coord.lat,
+           let lonStr = coord.lon,
+           let lat = Double(latStr),
+           let lon = Double(lonStr),
+           lat != 0.0 && lon != 0.0 {
+            return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+        }
+        return stop_point?.coordinate
     }
 }

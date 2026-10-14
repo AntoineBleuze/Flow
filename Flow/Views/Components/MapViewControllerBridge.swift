@@ -73,6 +73,7 @@ struct MapViewControllerBridge: UIViewRepresentable {
     @Binding var userTrackingMode: MKUserTrackingMode
     var recenterTrigger: Bool
     
+    @Environment(\.duoPosture) var duoPosture
     @ObservedObject var locationManager = LocationManager.shared
     @ObservedObject var navigationManager = NavigationManager.shared
     var journey: Journey?  // Optional journey to display
@@ -135,6 +136,19 @@ struct MapViewControllerBridge: UIViewRepresentable {
 
     private func updateMapView(_ mapView: MKMapView, context: Context) {
         context.coordinator.parent = self
+
+        #if canImport(UIKit)
+        if duoPosture == .unfoldedDualScreen {
+            let leftMargin: CGFloat = 484.0
+            if mapView.layoutMargins.left != leftMargin {
+                mapView.layoutMargins = UIEdgeInsets(top: 0, left: leftMargin, bottom: 0, right: 0)
+            }
+        } else {
+            if mapView.layoutMargins.left != 0 {
+                mapView.layoutMargins = .zero
+            }
+        }
+        #endif
 
         // Handle Polyline Style Change (force recreation of renderers by removing and re-adding overlays)
         if context.coordinator.lastPolylineStyle != data.polylineStyle {
@@ -287,8 +301,11 @@ struct MapViewControllerBridge: UIViewRepresentable {
             }
         }
         
-        // Refresh annotations when active categories change
-        if context.coordinator.lastActiveCategories != data.activeCategories {
+        // Refresh annotations when active categories change or stations are loaded
+        let stationsChanged = context.coordinator.lastStationCount != data.allStations.count
+        let categoriesChanged = context.coordinator.lastActiveCategories != data.activeCategories
+        if categoriesChanged || stationsChanged {
+            context.coordinator.lastStationCount = data.allStations.count
             context.coordinator.lastActiveCategories = data.activeCategories
             context.coordinator.updateAnnotations(in: mapView.region, for: mapView)
         }
@@ -304,21 +321,38 @@ struct MapViewControllerBridge: UIViewRepresentable {
         var allCoordinates: [CLLocationCoordinate2D] = []
 
         for section in sections where section.type == "public_transport" {
-            guard let geojson = section.geojson,
-                let coordinates = geojson.coordinates,
-                let display = section.display_informations
-            else { continue }
+            guard let display = section.display_informations else { continue }
 
             let hexColor = display.color ?? "CCCCCC"
             let color = UIColor(hex: hexColor) ?? .blue
 
             var routeCoordinates: [CLLocationCoordinate2D] = []
-            for coord in coordinates {
-                if coord.count >= 2 {
-                    let coordinate = CLLocationCoordinate2D(latitude: coord[1], longitude: coord[0])
-                    if isValidCoordinate(coordinate) {
-                        routeCoordinates.append(coordinate)
+            if let geojson = section.geojson, let coordinates = geojson.coordinates {
+                for coord in coordinates {
+                    if coord.count >= 2 {
+                        let coordinate = CLLocationCoordinate2D(latitude: coord[1], longitude: coord[0])
+                        if isValidCoordinate(coordinate) {
+                            routeCoordinates.append(coordinate)
+                        }
                     }
+                }
+            }
+
+            // Fallback sur TransitTraceService si le trace recu est rectiligne (<= 2 points) ou manquant
+            if routeCoordinates.count <= 2,
+               let fromCoord = section.from?.coordinate,
+               let toCoord = section.to?.coordinate {
+                let lineCode = display.code ?? display.label ?? ""
+                let intermediates = section.stop_date_times?.compactMap { $0.stop_point.coordinate } ?? []
+                if let precise = TransitTraceService.shared.getPreciseCoordinates(
+                    forLine: lineCode,
+                    commercialMode: display.commercial_mode,
+                    physicalMode: display.physical_mode,
+                    from: fromCoord,
+                    to: toCoord,
+                    intermediates: intermediates
+                ), precise.count > routeCoordinates.count {
+                    routeCoordinates = precise
                 }
             }
 
@@ -707,6 +741,7 @@ struct MapViewControllerBridge: UIViewRepresentable {
         var lastRecenterTrigger = false
         var lastSimulatedTrackingMode: MKUserTrackingMode = .none
         var lastPolylineStyle: MapPolylineStyle?
+        var lastStationCount: Int = 0
 
         init(_ parent: MapViewControllerBridge) {
             self.parent = parent

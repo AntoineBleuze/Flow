@@ -552,9 +552,240 @@ class MapDataService: ObservableObject {
         }
     }
 
+    func loadPreviewMockData() {
+        let metro1Color = Color(hex: "FFCD00")
+        let metro4Color = Color(hex: "CF009E")
+        let metro14Color = Color(hex: "662583")
+        let rerAColor = Color(hex: "E3051C")
+        
+        self.lineColorCache["1"] = metro1Color
+        self.lineColorCache["4"] = metro4Color
+        self.lineColorCache["14"] = metro14Color
+        self.lineColorCache["A"] = rerAColor
+        
+        let l1 = StationLine(name: "1", type: .metro)
+        let l4 = StationLine(name: "4", type: .metro)
+        let l14 = StationLine(name: "14", type: .metro)
+        let rera = StationLine(name: "A", type: .rer)
+        
+        let sampleStations: [MapStation] = [
+            MapStation(
+                id: "mock_chatelet",
+                name: "Châtelet - Les Halles",
+                coordinate: CLLocationCoordinate2D(latitude: 48.8584, longitude: 2.3475),
+                platforms: [],
+                isHub: true,
+                mainType: .metro,
+                lines: [l1, l4, l14, rera],
+                city: "Paris"
+            ),
+            MapStation(
+                id: "mock_gdl",
+                name: "Gare de Lyon",
+                coordinate: CLLocationCoordinate2D(latitude: 48.8448, longitude: 2.3735),
+                platforms: [],
+                isHub: true,
+                mainType: .metro,
+                lines: [l1, l14, rera],
+                city: "Paris"
+            ),
+            MapStation(
+                id: "mock_bastille",
+                name: "Bastille",
+                coordinate: CLLocationCoordinate2D(latitude: 48.8531, longitude: 2.3698),
+                platforms: [],
+                isHub: true,
+                mainType: .metro,
+                lines: [l1],
+                city: "Paris"
+            ),
+            MapStation(
+                id: "mock_hotel_de_ville",
+                name: "Hôtel de Ville",
+                coordinate: CLLocationCoordinate2D(latitude: 48.8574, longitude: 2.3524),
+                platforms: [],
+                isHub: false,
+                mainType: .metro,
+                lines: [l1],
+                city: "Paris"
+            ),
+            MapStation(
+                id: "mock_palais_royal",
+                name: "Palais Royal - Musée du Louvre",
+                coordinate: CLLocationCoordinate2D(latitude: 48.8625, longitude: 2.3364),
+                platforms: [],
+                isHub: false,
+                mainType: .metro,
+                lines: [l1],
+                city: "Paris"
+            ),
+            MapStation(
+                id: "mock_concorde",
+                name: "Concorde",
+                coordinate: CLLocationCoordinate2D(latitude: 48.8656, longitude: 2.3212),
+                platforms: [],
+                isHub: true,
+                mainType: .metro,
+                lines: [l1],
+                city: "Paris"
+            ),
+            MapStation(
+                id: "mock_st_michel",
+                name: "Saint-Michel Notre-Dame",
+                coordinate: CLLocationCoordinate2D(latitude: 48.8534, longitude: 2.3444),
+                platforms: [],
+                isHub: true,
+                mainType: .metro,
+                lines: [l4],
+                city: "Paris"
+            ),
+            MapStation(
+                id: "mock_odeon",
+                name: "Odéon",
+                coordinate: CLLocationCoordinate2D(latitude: 48.8522, longitude: 2.3386),
+                platforms: [],
+                isHub: false,
+                mainType: .metro,
+                lines: [l4],
+                city: "Paris"
+            ),
+            MapStation(
+                id: "mock_st_germain",
+                name: "Saint-Germain-des-Prés",
+                coordinate: CLLocationCoordinate2D(latitude: 48.8538, longitude: 2.3333),
+                platforms: [],
+                isHub: false,
+                mainType: .metro,
+                lines: [l4],
+                city: "Paris"
+            ),
+            MapStation(
+                id: "mock_montparnasse",
+                name: "Montparnasse - Bienvenüe",
+                coordinate: CLLocationCoordinate2D(latitude: 48.8421, longitude: 2.3219),
+                platforms: [],
+                isHub: true,
+                mainType: .metro,
+                lines: [l4],
+                city: "Paris"
+            ),
+            MapStation(
+                id: "mock_st_lazare",
+                name: "Gare Saint-Lazare",
+                coordinate: CLLocationCoordinate2D(latitude: 48.8756, longitude: 2.3256),
+                platforms: [],
+                isHub: true,
+                mainType: .metro,
+                lines: [l14],
+                city: "Paris"
+            ),
+            MapStation(
+                id: "mock_etoile",
+                name: "Charles de Gaulle - Étoile",
+                coordinate: CLLocationCoordinate2D(latitude: 48.8738, longitude: 2.2950),
+                platforms: [],
+                isHub: true,
+                mainType: .metro,
+                lines: [l1, rera],
+                city: "Paris"
+            ),
+            MapStation(
+                id: "mock_defense",
+                name: "La Défense",
+                coordinate: CLLocationCoordinate2D(latitude: 48.8918, longitude: 2.2378),
+                platforms: [],
+                isHub: true,
+                mainType: .rer,
+                lines: [l1, rera],
+                city: "Puteaux"
+            ),
+            MapStation(
+                id: "mock_nation",
+                name: "Nation",
+                coordinate: CLLocationCoordinate2D(latitude: 48.8484, longitude: 2.3959),
+                platforms: [],
+                isHub: true,
+                mainType: .metro,
+                lines: [l1, rera],
+                city: "Paris"
+            )
+        ]
+        
+        self.allStations = sampleStations
+        self.unmergedStations = sampleStations
+        self.visibleStations = sampleStations
+        self.majorHubs = sampleStations.filter { $0.isHub }
+        
+        let m1Coords = [
+            CLLocationCoordinate2D(latitude: 48.8918, longitude: 2.2378),
+            CLLocationCoordinate2D(latitude: 48.8738, longitude: 2.2950),
+            CLLocationCoordinate2D(latitude: 48.8656, longitude: 2.3212),
+            CLLocationCoordinate2D(latitude: 48.8625, longitude: 2.3364),
+            CLLocationCoordinate2D(latitude: 48.8584, longitude: 2.3475),
+            CLLocationCoordinate2D(latitude: 48.8574, longitude: 2.3524),
+            CLLocationCoordinate2D(latitude: 48.8531, longitude: 2.3698),
+            CLLocationCoordinate2D(latitude: 48.8448, longitude: 2.3735),
+            CLLocationCoordinate2D(latitude: 48.8484, longitude: 2.3959)
+        ]
+        let m4Coords = [
+            CLLocationCoordinate2D(latitude: 48.8809, longitude: 2.3553),
+            CLLocationCoordinate2D(latitude: 48.8697, longitude: 2.3537),
+            CLLocationCoordinate2D(latitude: 48.8584, longitude: 2.3475),
+            CLLocationCoordinate2D(latitude: 48.8534, longitude: 2.3444),
+            CLLocationCoordinate2D(latitude: 48.8522, longitude: 2.3386),
+            CLLocationCoordinate2D(latitude: 48.8538, longitude: 2.3333),
+            CLLocationCoordinate2D(latitude: 48.8421, longitude: 2.3219)
+        ]
+        let m14Coords = [
+            CLLocationCoordinate2D(latitude: 48.8756, longitude: 2.3256),
+            CLLocationCoordinate2D(latitude: 48.8584, longitude: 2.3475),
+            CLLocationCoordinate2D(latitude: 48.8448, longitude: 2.3735)
+        ]
+        let rerACoords = [
+            CLLocationCoordinate2D(latitude: 48.8918, longitude: 2.2378),
+            CLLocationCoordinate2D(latitude: 48.8738, longitude: 2.2950),
+            CLLocationCoordinate2D(latitude: 48.8584, longitude: 2.3475),
+            CLLocationCoordinate2D(latitude: 48.8448, longitude: 2.3735),
+            CLLocationCoordinate2D(latitude: 48.8484, longitude: 2.3959)
+        ]
+        
+        let p1 = ColoredPolyline(coordinates: m1Coords, count: m1Coords.count)
+        p1.color = MapPlatformColor(metro1Color)
+        p1.lineName = "1"
+        p1.type = .metro
+        
+        let p4 = ColoredPolyline(coordinates: m4Coords, count: m4Coords.count)
+        p4.color = MapPlatformColor(metro4Color)
+        p4.lineName = "4"
+        p4.type = .metro
+        
+        let p14 = ColoredPolyline(coordinates: m14Coords, count: m14Coords.count)
+        p14.color = MapPlatformColor(metro14Color)
+        p14.lineName = "14"
+        p14.type = .metro
+        
+        let pra = ColoredPolyline(coordinates: rerACoords, count: rerACoords.count)
+        pra.color = MapPlatformColor(rerAColor)
+        pra.lineName = "A"
+        pra.type = .rer
+        
+        self.cachedOverlays = [p1, p4, p14, pra]
+        
+        let t1 = LineTrace(id: "1", name: "1", color: metro1Color, polylines: [p1], type: .metro)
+        let t4 = LineTrace(id: "4", name: "4", color: metro4Color, polylines: [p4], type: .metro)
+        let t14 = LineTrace(id: "14", name: "14", color: metro14Color, polylines: [p14], type: .metro)
+        let tra = LineTrace(id: "A", name: "A", color: rerAColor, polylines: [pra], type: .rer)
+        self.lines = [t1, t4, t14, tra]
+    }
+
     func loadData() {
         #if DEBUG
         if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" {
+            let tracesLoaded = self.loadTracesFromCache()
+            let stationsLoaded = self.loadStationsFromCache()
+            if !tracesLoaded || !stationsLoaded || self.allStations.isEmpty {
+                self.loadPreviewMockData()
+            }
             loadingProgress = 1.0
             return
         }
@@ -568,7 +799,7 @@ class MapDataService: ObservableObject {
         
         let appVersion = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
         let cachedVersion = UserDefaults.standard.string(forKey: "cached_data_version")
-        let tracesVersion = "v2_projets_gpe"
+        let tracesVersion = "v3_traces_enrichment"
         let cachedTracesVersion = UserDefaults.standard.string(forKey: "cached_traces_version")
         if cachedVersion != appVersion || cachedTracesVersion != tracesVersion {
             print("🔄 Nouvelle version de l'application ou des tracés détectée (\(cachedVersion ?? "aucune") -> \(appVersion), \(cachedTracesVersion ?? "aucune") -> \(tracesVersion)). Purge du cache...")
@@ -729,10 +960,11 @@ class MapDataService: ObservableObject {
                 guard !group.polylines.isEmpty else { continue }
 
                 let type = self.mapTransportType(group.type, lineName: group.lineName)
-                let color = resolveLineColor(group.lineName, type: type)
+                let finalName = (type == .tram && !group.lineName.uppercased().hasPrefix("T")) ? "T\(group.lineName)" : group.lineName
+                let color = resolveLineColor(finalName, type: type)
 
                 let line = LineTrace(
-                    id: UUID().uuidString, name: group.lineName, color: color,
+                    id: UUID().uuidString, name: finalName, color: color,
                     polylines: group.polylines, type: type)
                 newLines.append(line)
 
@@ -1778,7 +2010,7 @@ class MapDataService: ObservableObject {
         // 1. Dézoomé (delta >= 0.05) : pôles majeurs uniquement (majorHubs)
         // 2. Zoomé (delta < 0.05) : toutes les stations fusionnées (allStations)
         let source: [MapStation]
-        if span.latitudeDelta < 0.05 {
+        if span.latitudeDelta < 0.05 || self.majorHubs.isEmpty {
             source = self.allStations
         } else {
             source = self.majorHubs
