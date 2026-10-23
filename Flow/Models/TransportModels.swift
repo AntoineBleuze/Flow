@@ -121,7 +121,7 @@ enum LineStatus: Int, Comparable {
     func color(for colorScheme: ColorScheme) -> Color {
         switch self {
         case .works:
-            return LiquidGlassTheme.statusWorksColor(for: colorScheme)
+            return FlowTheme.statusWorksColor(for: colorScheme)
         default:
             return self.color
         }

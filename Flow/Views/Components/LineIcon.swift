@@ -69,7 +69,7 @@ struct LineIcon: View {
         } else {
             // Rendu vectoriel natif selon la charte IDFM
             let effectiveBg = customColor ?? type.accentColor
-            let textColor = LiquidGlassTheme.contrastTextColor(forColor: effectiveBg)
+            let textColor = FlowTheme.contrastTextColor(forColor: effectiveBg)
             let clean = cleanLineId
             
             switch type {

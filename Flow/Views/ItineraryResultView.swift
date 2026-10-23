@@ -96,7 +96,7 @@ struct ItineraryResultView: View {
             mainContentView
         }
         .toolbar(.hidden, for: .navigationBar)
-        .liquidGlassBackground()
+        .flowAdaptiveBackground()
         .onAppear {
             setupInitialStations()
         }
@@ -353,7 +353,7 @@ struct ItineraryResultView: View {
             }) {
                 HStack(spacing: 4) {
                     Image(systemName: "calendar")
-                        .foregroundColor(LiquidGlassTheme.liveGreen(for: colorScheme))
+                        .foregroundColor(FlowTheme.liveGreen(for: colorScheme))
                     Text(formatDateOnly(departureDate))
                         .font(.system(.subheadline, design: .rounded))
                         .fontWeight(.bold)
@@ -631,11 +631,11 @@ struct ItineraryResultView: View {
                             HStack(spacing: 4) {
                                 Image(systemName: "star.fill")
                                     .font(.caption)
-                                    .foregroundColor(LiquidGlassTheme.warningMetricColor(for: colorScheme))
+                                    .foregroundColor(FlowTheme.warningMetricColor(for: colorScheme))
                                 Text("MEILLEUR ITINÉRAIRE")
                                     .font(.caption)
                                     .fontWeight(.bold)
-                                    .foregroundColor(LiquidGlassTheme.warningMetricColor(for: colorScheme))
+                                    .foregroundColor(FlowTheme.warningMetricColor(for: colorScheme))
                             }
                             .padding(.leading, 24)
                             .padding(.top, 4)
@@ -1657,15 +1657,15 @@ private struct ItinerarySheetsModifier: ViewModifier {
             }
             .sheet(isPresented: $showStartPicker) {
                 SimpleStationPicker(selectedStation: $startStation, currentLocation: currentLocation)
-                    .liquidGlassSheetBackground()
+                    .presentationBackground(.ultraThinMaterial)
             }
             .sheet(isPresented: $showEndPicker) {
                 SimpleStationPicker(selectedStation: $endStation, currentLocation: currentLocation)
-                    .liquidGlassSheetBackground()
+                    .presentationBackground(.ultraThinMaterial)
             }
             .sheet(isPresented: $showStationToAvoidPicker) {
                 SimpleStationPicker(selectedStation: $selectedStationToAvoid, currentLocation: currentLocation)
-                    .liquidGlassSheetBackground()
+                    .presentationBackground(.ultraThinMaterial)
             }
             .fullScreenCover(item: $selectedJourneyForPreview) { journey in
                 JourneyPreviewView(

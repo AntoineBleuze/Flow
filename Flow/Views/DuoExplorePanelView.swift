@@ -47,7 +47,7 @@ struct DuoExplorePanelView: View {
             .padding(.bottom, 24)
         }
         .safeAreaPadding(.top)
-        .liquidGlassBackground()
+        .flowAdaptiveBackground()
         .onAppear {
             locationManager.requestLocation()
             if mapData.allStations.isEmpty {
@@ -93,13 +93,9 @@ struct DuoExplorePanelView: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(Color.purple.opacity(0.12), in: Capsule())
-                .overlay(
-                    Capsule()
-                        .stroke(Color.purple.opacity(0.2), lineWidth: 1)
-                )
             }
-            .buttonStyle(.liquidGlassInteractive)
+            .buttonStyle(.plain)
+            .glassEffect(.regular.interactive(), in: Capsule())
         }
     }
 
@@ -157,12 +153,7 @@ struct DuoExplorePanelView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-            )
+            .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .onTapGesture {
                 coordinator.selectedTab = "Trafic"
             }
@@ -199,8 +190,7 @@ struct DuoExplorePanelView: View {
                         .padding(.vertical, 14)
                     Spacer()
                 }
-                .background(.ultraThinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             } else {
                 VStack(spacing: 6) {
                     ForEach(nearbyStations.prefix(4)) { station in
@@ -249,20 +239,16 @@ struct DuoExplorePanelView: View {
 
                                     if let stationName = entry.stationName {
                                         Text(stationName)
-                                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                                            .font(.system(size: 13, weight: .medium, design: .rounded))
                                             .foregroundColor(.primary)
                                             .lineLimit(1)
                                     }
                                 }
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .background(.ultraThinMaterial, in: Capsule())
-                                .overlay(
-                                    Capsule()
-                                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                                )
                             }
-                            .buttonStyle(.liquidGlassInteractive)
+                            .buttonStyle(.plain)
+                            .glassEffect(.regular.interactive(), in: Capsule())
                         }
                     }
                 }
@@ -331,11 +317,6 @@ struct DuoStationRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
-        )
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }

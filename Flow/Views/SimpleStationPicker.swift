@@ -34,11 +34,7 @@ struct SimpleStationPicker: View {
                     }
                 }
                 .padding(12)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(LiquidGlassTheme.specularBorder(for: colorScheme), lineWidth: 1.0)
-                )
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .padding(.horizontal)
                 .padding(.vertical, 8)
 
@@ -135,7 +131,7 @@ struct SimpleStationPicker: View {
                     dismiss()
                 })
         }
-        .liquidGlassSheetBackground()
+        .presentationBackground(.ultraThinMaterial)
     }
 
     private func formattedDistance(for station: MapStation) -> String? {
@@ -288,36 +284,4 @@ struct SimpleStationPicker: View {
         if folded.contains("train") || folded.contains("transilien") || folded.contains("rail") { return .transilien }
         return .bus
     }
-
-    func iconName(for type: TransportType) -> String {
-        switch type {
-        case .metro: return "tram.fill"
-        case .rer: return "tram.circle.fill"
-        case .transilien: return "train.side.front.car"
-        case .tram: return "tram"
-        case .bus: return "bus"
-        case .train: return "train.side.front.car"
-        case .cable: return "tram.fill.tunnel"  // Icone temporaire ou "cablecar" si dispo en SF Symbols
-        }
-    }
-
-    func color(for type: TransportType) -> Color {
-        switch type {
-        case .metro: return .blue
-        case .rer: return .red
-        case .transilien: return .green
-        case .tram: return .purple
-        case .bus: return .orange
-        case .train: return .green
-        case .cable: return .gray
-        }
-    }
 }
-
-#Preview {
-    SimpleStationPicker(
-        selectedStation: .constant(PreviewMockData.mockStation),
-        currentLocation: CLLocationCoordinate2D(latitude: 48.8239, longitude: 2.2743)
-    )
-}
-

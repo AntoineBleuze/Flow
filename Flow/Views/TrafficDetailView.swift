@@ -9,28 +9,28 @@ struct TrafficDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 // Header Hero Card avec l'icône et le statut
-                LiquidGlassCard(cornerRadius: 20, padding: 16) {
-                    HStack(spacing: 16) {
-                        LineIcon(line: line, size: 52)
+                HStack(spacing: 16) {
+                    LineIcon(line: line, size: 52)
 
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Ligne \(line.lineId)")
-                                .font(.system(.title2, design: .rounded))
-                                .fontWeight(.bold)
-                                .foregroundColor(.primary)
-                            
-                            HStack(spacing: 6) {
-                                Image(systemName: line.status.icon)
-                                    .font(.subheadline)
-                                Text(line.status.description)
-                                    .font(.system(.subheadline, design: .rounded))
-                                    .fontWeight(.semibold)
-                            }
-                            .foregroundColor(line.status.color)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Ligne \(line.lineId)")
+                            .font(.system(.title2, design: .rounded))
+                            .fontWeight(.bold)
+                            .foregroundColor(.primary)
+                        
+                        HStack(spacing: 6) {
+                            Image(systemName: line.status.icon)
+                                .font(.subheadline)
+                            Text(line.status.description)
+                                .font(.system(.subheadline, design: .rounded))
+                                .fontWeight(.semibold)
                         }
-                        Spacer()
+                        .foregroundColor(line.status.color)
                     }
+                    Spacer()
                 }
+                .padding(16)
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
 
                 // Section: Détails des incidents
                 let activeInfos = deduplicateInfos(
@@ -52,18 +52,18 @@ struct TrafficDetailView: View {
                         }
                     }
                 } else if line.status == .normal {
-                    LiquidGlassCard(cornerRadius: 18, padding: 16) {
-                        HStack(spacing: 12) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.title3)
-                                .foregroundColor(.green)
-                            Text("Trafic fluide sur l'ensemble de la ligne.")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                                .foregroundColor(.primary)
-                            Spacer()
-                        }
+                    HStack(spacing: 12) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.title3)
+                            .foregroundColor(.green)
+                        Text("Trafic fluide sur l'ensemble de la ligne.")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(.primary)
+                        Spacer()
                     }
+                    .padding(16)
+                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
 
                 // Section: Travaux et événements à venir
@@ -93,7 +93,7 @@ struct TrafficDetailView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
         }
-        .liquidGlassBackground()
+        .flowAdaptiveBackground()
         .navigationTitle("Info Trafic")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -122,84 +122,80 @@ struct TrafficInfoCard: View {
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
-        LiquidGlassCard(cornerRadius: 18, padding: 16) {
-            VStack(alignment: .leading, spacing: 12) {
-                // Header
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: isActive ? info.severity.icon : "calendar")
-                        .font(.body)
+        VStack(alignment: .leading, spacing: 12) {
+            // Header
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: isActive ? info.severity.icon : "calendar")
+                    .font(.body)
+                    .foregroundColor(isActive ? info.severity.color : .blue)
+                    .frame(width: 28, height: 28)
+                    .background((isActive ? info.severity.color : Color.blue).opacity(0.12), in: Circle())
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(info.title)
+                        .font(.system(.subheadline, design: .rounded))
+                        .fontWeight(.bold)
+                        .foregroundColor(.primary)
+                }
+                Spacer()
+            }
+
+            // Message épuré
+            let messageText = formatMessage(info.message)
+            Text(.init(messageText))
+                .font(.subheadline)
+                .lineSpacing(3)
+                .foregroundColor(.primary.opacity(0.9))
+
+            // Section impactée (si dispo)
+            if let section = info.impactedSection {
+                HStack(spacing: 6) {
+                    Image(systemName: "mappin.and.ellipse")
+                        .font(.caption2)
+                    Text(section)
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                }
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .glassEffect(.regular, in: Capsule())
+            }
+
+            // Bouton Plan de ligne
+            let hasLineData = LocalDataService.shared.getLineData(type: line.type, lineId: line.lineId) != nil
+            if hasLineData {
+                VStack(alignment: .leading, spacing: 8) {
+                    Button(action: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                            showPlan.toggle()
+                        }
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "map")
+                            Text(showPlan ? "Masquer le plan" : "Visualiser sur le plan")
+                            Image(systemName: showPlan ? "chevron.up" : "chevron.down")
+                                .font(.caption2)
+                        }
+                        .font(.system(.caption, design: .rounded))
+                        .fontWeight(.bold)
                         .foregroundColor(isActive ? info.severity.color : .blue)
-                        .frame(width: 28, height: 28)
-                        .background((isActive ? info.severity.color : Color.blue).opacity(0.12), in: Circle())
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .glassEffect(.regular.interactive(), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
                     
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(info.title)
-                            .font(.system(.subheadline, design: .rounded))
-                            .fontWeight(.bold)
-                            .foregroundColor(.primary)
-                    }
-                    Spacer()
-                }
-
-                // Message épuré
-                let messageText = formatMessage(info.message)
-                Text(.init(messageText))
-                    .font(.subheadline)
-                    .lineSpacing(3)
-                    .foregroundColor(.primary.opacity(0.9))
-
-                // Section impactée (si dispo)
-                if let section = info.impactedSection {
-                    HStack(spacing: 6) {
-                        Image(systemName: "mappin.and.ellipse")
-                            .font(.caption2)
-                        Text(section)
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                    }
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(.ultraThinMaterial, in: Capsule())
-                }
-
-                // Bouton Plan de ligne
-                let hasLineData = LocalDataService.shared.getLineData(type: line.type, lineId: line.lineId) != nil
-                if hasLineData {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Button(action: {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                showPlan.toggle()
-                            }
-                        }) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "map")
-                                Text(showPlan ? "Masquer le plan" : "Visualiser sur le plan")
-                                Image(systemName: showPlan ? "chevron.up" : "chevron.down")
-                                    .font(.caption2)
-                            }
-                            .font(.system(.caption, design: .rounded))
-                            .fontWeight(.bold)
-                            .foregroundColor(isActive ? info.severity.color : .blue)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(.ultraThinMaterial, in: Capsule())
-                            .overlay(
-                                Capsule()
-                                    .stroke((isActive ? info.severity.color : Color.blue).opacity(0.3), lineWidth: 1)
-                            )
-                        }
-                        .buttonStyle(.liquidGlassInteractive)
-                        
-                        if showPlan {
-                            MiniLinePlanView(line: line, info: info)
-                                .padding(.top, 4)
-                                .transition(.opacity.combined(with: .move(edge: .top)))
-                        }
+                    if showPlan {
+                        MiniLinePlanView(line: line, info: info)
+                            .padding(.top, 4)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                 }
             }
         }
+        .padding(16)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func formatMessage(_ message: String) -> String {

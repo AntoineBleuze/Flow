@@ -43,7 +43,7 @@ struct DuoJourneyPreviewPanel: View {
             }
             .padding(16)
         }
-        .liquidGlassBackground()
+        .flowAdaptiveBackground()
     }
 
     private var headerView: some View {
@@ -78,7 +78,7 @@ struct DuoJourneyPreviewPanel: View {
                     .font(.system(size: 22))
                     .foregroundColor(.secondary)
             }
-            .buttonStyle(.liquidGlassInteractive)
+            .buttonStyle(.plain)
         }
     }
 
@@ -199,7 +199,7 @@ struct DuoJourneyPreviewPanel: View {
             )
             .shadow(color: Color.blue.opacity(0.35), radius: 8, y: 3)
         }
-        .buttonStyle(.liquidGlassInteractive)
+        .buttonStyle(.plain)
     }
 }
 
@@ -235,7 +235,7 @@ struct DuoNavigationPanel: View {
                 .padding(16)
             }
         }
-        .liquidGlassBackground()
+        .flowAdaptiveBackground()
     }
 
     private var headerBar: some View {

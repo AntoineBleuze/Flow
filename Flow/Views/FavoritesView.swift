@@ -57,7 +57,7 @@ struct FavoritesView: View {
                                 NavigationLink(destination: TrafficDetailView(line: getTransportLine(for: entry))) {
                                     FavoriteLineRow(entry: entry)
                                 }
-                                .buttonStyle(.liquidGlassInteractive)
+                                .buttonStyle(.plain)
                             }
                         }
                         .padding(.horizontal, 16)
@@ -67,7 +67,7 @@ struct FavoritesView: View {
                     }
                 }
             }
-            .liquidGlassBackground()
+            .flowAdaptiveBackground()
             .navigationTitle("Favoris")
             .navigationBarTitleDisplayMode(.large)
         }
@@ -94,7 +94,7 @@ struct FavoritesView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(24)
-        .liquidGlassCard(cornerRadius: 24, padding: 0)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .padding(.horizontal, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -134,122 +134,119 @@ struct FavoriteLineRow: View {
     }
 
     var body: some View {
-        LiquidGlassCard(cornerRadius: 18, padding: 14) {
-            VStack(alignment: .leading, spacing: 12) {
-                // Header: Line Badge, Name, Status / Station, Heart
-                HStack(spacing: 14) {
-                    LineIcon(line: line, size: 42)
+        VStack(alignment: .leading, spacing: 12) {
+            // Header: Line Badge, Name, Status / Station, Heart
+            HStack(spacing: 14) {
+                LineIcon(line: line, size: 42)
+                
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(lineNameString)
+                        .font(.system(.headline, design: .rounded))
+                        .fontWeight(.bold)
+                        .foregroundColor(.primary)
                     
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(lineNameString)
-                            .font(.system(.headline, design: .rounded))
-                            .fontWeight(.bold)
-                            .foregroundColor(.primary)
-                        
-                        if let stationName = entry.stationName {
-                            Text(stationName)
+                    if let stationName = entry.stationName {
+                        Text(stationName)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    } else {
+                        HStack(spacing: 6) {
+                            Image(systemName: line.status.icon)
+                                .font(.caption)
+                                .foregroundColor(line.status.color)
+                            
+                            Text(line.status.description)
                                 .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        } else {
-                            HStack(spacing: 6) {
-                                Image(systemName: line.status.icon)
-                                    .font(.caption)
-                                    .foregroundColor(line.status.color)
-                                
-                                Text(line.status.description)
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                    .foregroundColor(line.status.color)
-                            }
+                                .fontWeight(.medium)
+                                .foregroundColor(line.status.color)
                         }
                     }
-                    
-                    Spacer()
-                    
-                    // Toggle Favorite Button
-                    Button(action: {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            favoritesService.toggleFavoriteLine(
-                                lineId: entry.lineId,
-                                type: entry.type,
-                                stationId: entry.stationId,
-                                stationName: entry.stationName,
-                                color: entry.color,
-                                textColor: entry.textColor
-                            )
-                        }
-                    }) {
-                        Image(systemName: "heart.fill")
-                            .foregroundColor(.red)
-                            .font(.system(size: 15, weight: .bold))
-                            .frame(width: 36, height: 36)
-                            .background(.ultraThinMaterial, in: Circle())
-                            .overlay(Circle().stroke(Color.primary.opacity(0.08), lineWidth: 1))
-                    }
-                    .buttonStyle(.liquidGlassInteractive)
-                    
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.secondary)
                 }
                 
-                // Real-time departures
-                if entry.stationId != nil {
-                    Divider()
-                        .opacity(0.6)
-                    
-                    if isLoading && departures.isEmpty {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                            Text("Chargement des prochains départs...")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.vertical, 2)
-                    } else if departures.isEmpty {
-                        HStack(spacing: 6) {
-                            Image(systemName: "clock")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Text("Aucun départ immédiat ou info indisponible")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.vertical, 2)
-                    } else {
-                        let grouped = groupedDepartures
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(grouped) { group in
-                                HStack(alignment: .firstTextBaseline) {
-                                    Text(group.direction)
-                                        .font(.subheadline)
-                                        .foregroundColor(.primary)
-                                        .lineLimit(1)
+                Spacer()
+                
+                // Toggle Favorite Button
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        favoritesService.toggleFavoriteLine(
+                            lineId: entry.lineId,
+                            type: entry.type,
+                            stationId: entry.stationId,
+                            stationName: entry.stationName,
+                            color: entry.color,
+                            textColor: entry.textColor
+                        )
+                    }
+                }) {
+                    Image(systemName: "heart.fill")
+                        .foregroundColor(.red)
+                        .font(.system(size: 15, weight: .bold))
+                        .frame(width: 36, height: 36)
+                        .glassEffect(.regular.interactive(), in: .circle)
+                }
+                .buttonStyle(.plain)
+                
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.secondary)
+            }
+            
+            // Real-time departures
+            if entry.stationId != nil {
+                Divider()
+                    .opacity(0.6)
+                
+                if isLoading && departures.isEmpty {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("Chargement des prochains départs...")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 2)
+                } else if departures.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "clock")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text("Aucun départ immédiat ou info indisponible")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 2)
+                } else {
+                    let grouped = groupedDepartures
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(grouped) { group in
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(group.direction)
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                                    .lineLimit(1)
+                                
+                                Spacer()
+                                
+                                HStack(spacing: 6) {
+                                    // Live pulsing indicator
+                                    Circle()
+                                        .fill(FlowTheme.liveGreen(for: colorScheme))
+                                        .frame(width: 6, height: 6)
                                     
-                                    Spacer()
-                                    
-                                    HStack(spacing: 6) {
-                                        // Live pulsing indicator
-                                        Circle()
-                                            .fill(LiquidGlassTheme.liveGreen(for: colorScheme))
-                                            .frame(width: 6, height: 6)
-                                        
-                                        HStack(spacing: 4) {
-                                            ForEach(Array(group.times.enumerated()), id: \.offset) { tIndex, minuteValue in
-                                                HStack(spacing: 0) {
-                                                    Text("\(minuteValue)")
-                                                        .contentTransition(.numericText())
-                                                        .animation(.spring(duration: 0.2), value: minuteValue)
-                                                    Text(" min")
-                                                    if tIndex < group.times.count - 1 {
-                                                        Text(", ")
-                                                    }
+                                    HStack(spacing: 4) {
+                                        ForEach(Array(group.times.enumerated()), id: \.offset) { tIndex, minuteValue in
+                                            HStack(spacing: 0) {
+                                                Text("\(minuteValue)")
+                                                    .contentTransition(.numericText())
+                                                    .animation(.spring(duration: 0.2), value: minuteValue)
+                                                Text(" min")
+                                                if tIndex < group.times.count - 1 {
+                                                    Text(", ")
                                                 }
-                                                .font(.system(.subheadline, design: .rounded))
-                                                .fontWeight(.bold)
-                                                .foregroundColor(LiquidGlassTheme.liveGreen(for: colorScheme))
                                             }
+                                            .font(.system(.subheadline, design: .rounded))
+                                            .fontWeight(.bold)
+                                            .foregroundColor(FlowTheme.liveGreen(for: colorScheme))
                                         }
                                     }
                                 }
@@ -258,8 +255,10 @@ struct FavoriteLineRow: View {
                     }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .onAppear {
             startFetching()
         }

@@ -45,7 +45,7 @@ struct SearchTabContent: View {
     var body: some View {
         NavigationStack {
             stationSearchView
-                .liquidGlassBackground()
+                .flowAdaptiveBackground()
                 .navigationTitle("Recherche")
                 .navigationBarTitleDisplayMode(.large)
                 .searchPresentationToolbarBehavior(.avoidHidingContent)
@@ -121,7 +121,7 @@ struct SearchTabContent: View {
                         .font(.footnote.weight(.medium))
                         .foregroundColor(.blue)
                 }
-                .buttonStyle(.liquidGlassInteractive)
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, 4)
 
@@ -133,7 +133,7 @@ struct SearchTabContent: View {
                         }) {
                             StationRow(station: station)
                         }
-                        .buttonStyle(.liquidGlassInteractive)
+                        .buttonStyle(.plain)
 
                         Button(action: {
                             withAnimation(.easeInOut(duration: 0.2)) {
@@ -146,7 +146,7 @@ struct SearchTabContent: View {
                                 .padding(8)
                                 .contentShape(Rectangle())
                         }
-                        .buttonStyle(.liquidGlassInteractive)
+                        .buttonStyle(.plain)
                     }
                     .padding(.horizontal, 16)
 
@@ -185,7 +185,7 @@ struct SearchTabContent: View {
                     }) {
                         StationRow(station: station)
                     }
-                    .buttonStyle(.liquidGlassInteractive)
+                    .buttonStyle(.plain)
                     .padding(.horizontal, 16)
 
                     if station.id != nearbyStations.last?.id {
@@ -225,7 +225,7 @@ struct SearchTabContent: View {
                     }) {
                         StationRow(station: station)
                     }
-                    .buttonStyle(.liquidGlassInteractive)
+                    .buttonStyle(.plain)
                     .padding(.horizontal, 16)
 
                     if station.id != favStations.last?.id {
@@ -312,7 +312,7 @@ struct SearchTabContent: View {
                 }) {
                     StationRow(station: station)
                 }
-                .buttonStyle(.liquidGlassInteractive)
+                .buttonStyle(.plain)
                 .padding(.horizontal, 16)
 
                 if station.id != searchResults.last?.id {

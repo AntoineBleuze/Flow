@@ -78,7 +78,7 @@ public enum DuoLayoutHelper {
 
 /// Conteneur 2 volets intelligent conçu pour l'iPhone Duo, iPad et grands écrans.
 /// - En mode Déplié / Duo : Affiche le panneau de contrôle à gauche et la carte / vue immersive à droite,
-///   séparés par une transition en dégradé Liquid Glass fluide et progressive vers la carte.
+///   séparés par une transition en dégradé douce et progressive vers la carte.
 /// - En mode Plié / Compact : Affiche le contenu principal avec support fluide des sheets.
 public struct DuoSplitView<LeadingContent: View, TrailingContent: View>: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -124,7 +124,7 @@ public struct DuoSplitView<LeadingContent: View, TrailingContent: View>: View {
                 .frame(width: size.width, height: size.height)
                 .clipped()
 
-            // 2. FOND EN DÉGRADÉ LIQUID GLASS (TRANSITION PROGRESSIVE VERS LA CARTE)
+            // 2. FOND EN DÉGRADÉ (TRANSITION PROGRESSIVE VERS LA CARTE)
             // Remplace la coupure linéaire abrupte par un dégradé doux et continu de flou et de lumière
             glassGradientBackground(paneWidth: paneWidth, size: size)
 
@@ -161,11 +161,11 @@ public struct DuoSplitView<LeadingContent: View, TrailingContent: View>: View {
             Rectangle()
                 .fill(.ultraThinMaterial)
             
-            // Teinte adaptative Liquid Glass
+            // Teinte adaptative
             Rectangle()
-                .fill(LiquidGlassTheme.cardBackgroundTint(for: colorScheme))
+                .fill(FlowTheme.cardBackgroundTint(for: colorScheme))
             
-            // Halo spéculaire subtil et progressif accompagnant la transition
+            // Halo subtil et progressif accompagnant la transition
             LinearGradient(
                 stops: [
                     .init(color: .clear, location: 0.0),
@@ -180,7 +180,7 @@ public struct DuoSplitView<LeadingContent: View, TrailingContent: View>: View {
                 endPoint: .trailing
             )
         }
-        .opacity(LiquidGlassTheme.duoLeftPaneOpacity)
+        .opacity(FlowTheme.duoLeftPaneOpacity)
         .frame(width: backgroundWidth, height: size.height)
         .mask {
             LinearGradient(

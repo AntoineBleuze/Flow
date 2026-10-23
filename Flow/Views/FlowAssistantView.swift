@@ -90,7 +90,6 @@ private struct LiquidAuraBackground: View {
 
 private struct LiquidThinkingIndicator: View {
     @State private var phase: CGFloat = 0
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         HStack(spacing: 10) {
@@ -123,15 +122,7 @@ private struct LiquidThinkingIndicator: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background {
-            Capsule()
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    Capsule()
-                        .strokeBorder(LiquidGlassTheme.specularBorder(for: colorScheme), lineWidth: 1)
-                )
-        }
-        .clipShape(Capsule())
+        .glassEffect(.regular, in: Capsule())
         .shadow(color: Color.purple.opacity(0.15), radius: 8, x: 0, y: 2)
         .onAppear {
             withAnimation(.linear(duration: 2.2).repeatForever(autoreverses: false)) {
@@ -170,77 +161,72 @@ public struct FlowAssistantView: View {
     public init() {}
 
     public var body: some View {
-        NavigationStack {
-            ZStack {
-                // 1. Futuristic Ambient Liquid Aura
-                LiquidAuraBackground()
+        GlassEffectContainer {
+            NavigationStack {
+                ZStack {
+                    // 1. Futuristic Ambient Liquid Aura
+                    LiquidAuraBackground()
 
-                // 2. Chat Contents
-                VStack(spacing: 0) {
-                    // Header Subtitle Badge
-                    aiEngineBadge
-                        .padding(.top, 4)
-                        .padding(.bottom, 6)
+                    // 2. Chat Contents
+                    VStack(spacing: 0) {
+                        // Header Subtitle Badge
+                        aiEngineBadge
+                            .padding(.top, 4)
+                            .padding(.bottom, 6)
 
-                    // Quick Suggestion Chips
-                    suggestionChipsBar
+                        // Quick Suggestion Chips
+                        suggestionChipsBar
 
-                    // Messages View
-                    messagesScrollView
+                        // Messages View
+                        messagesScrollView
 
-                    // Floating Liquid Glass Input Bar
-                    floatingInputBar
-                }
-            }
-            .navigationTitle("Copilote Flow")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.secondary)
-                            .padding(7)
-                            .background(.ultraThinMaterial, in: Circle())
-                            .overlay(
-                                Circle()
-                                    .strokeBorder(LiquidGlassTheme.specularBorder(for: colorScheme), lineWidth: 0.8)
-                            )
+                        // Floating Native Liquid Glass Input Bar
+                        floatingInputBar
                     }
-                    .buttonStyle(.liquidGlassInteractive)
                 }
-
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        triggerHaptic(style: .light)
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                            aiService.resetConversation()
-                            messages = [
-                                AssistantChatMessage(
-                                    isUser: false,
-                                    text: "Conversation réinitialisée. En quoi puis-je vous aider ?"
-                                )
-                            ]
+                .navigationTitle("Copilote Flow")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            dismiss()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.secondary)
+                                .frame(width: 32, height: 32)
                         }
-                    } label: {
-                        Image(systemName: "arrow.counterclockwise")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.secondary)
-                            .padding(7)
-                            .background(.ultraThinMaterial, in: Circle())
-                            .overlay(
-                                Circle()
-                                    .strokeBorder(LiquidGlassTheme.specularBorder(for: colorScheme), lineWidth: 0.8)
-                            )
+                        .buttonStyle(.plain)
+                        .glassEffect(.regular.interactive(), in: .circle)
                     }
-                    .buttonStyle(.liquidGlassInteractive)
-                    .disabled(aiService.isGenerating)
+
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            triggerHaptic(style: .light)
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                aiService.resetConversation()
+                                messages = [
+                                    AssistantChatMessage(
+                                        isUser: false,
+                                        text: "Conversation réinitialisée. En quoi puis-je vous aider ?"
+                                    )
+                                ]
+                            }
+                        } label: {
+                            Image(systemName: "arrow.counterclockwise")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.secondary)
+                                .frame(width: 32, height: 32)
+                        }
+                        .buttonStyle(.plain)
+                        .glassEffect(.regular.interactive(), in: .circle)
+                        .disabled(aiService.isGenerating)
+                    }
                 }
             }
         }
-        .liquidGlassSheet()
+        .presentationBackground(.ultraThinMaterial)
+        .presentationCornerRadius(FlowTheme.sheetCornerRadius)
         .onAppear {
             LocationManager.shared.requestLocation()
         }
@@ -261,14 +247,7 @@ public struct FlowAssistantView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
-        .background {
-            Capsule()
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    Capsule()
-                        .strokeBorder(LiquidGlassTheme.specularBorder(for: colorScheme), lineWidth: 0.8)
-                )
-        }
+        .glassEffect(.regular, in: Capsule())
     }
 
     private var suggestionChipsBar: some View {
@@ -290,23 +269,15 @@ public struct FlowAssistantView: View {
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 9)
-                        .background {
-                            Capsule()
-                                .fill(.ultraThinMaterial)
-                                .overlay(
-                                    Capsule()
-                                        .strokeBorder(LiquidGlassTheme.specularBorder(for: colorScheme), lineWidth: 1)
-                                )
-                        }
-                        .clipShape(Capsule())
-                        .shadow(
-                            color: colorScheme == .dark ? Color.black.opacity(0.3) : Color.black.opacity(0.04),
-                            radius: 6,
-                            x: 0,
-                            y: 2
-                        )
                     }
-                    .buttonStyle(.liquidGlassInteractive)
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.interactive(), in: Capsule())
+                    .shadow(
+                        color: colorScheme == .dark ? Color.black.opacity(0.3) : Color.black.opacity(0.04),
+                        radius: 6,
+                        x: 0,
+                        y: 2
+                    )
                     .disabled(aiService.isGenerating)
                 }
             }
@@ -372,7 +343,7 @@ public struct FlowAssistantView: View {
                     submitCurrentInput()
                 }
 
-            // Animated Liquid Glass Send Button
+            // Animated Send Button
             Button {
                 submitCurrentInput()
             } label: {
@@ -402,25 +373,14 @@ public struct FlowAssistantView: View {
                 }
                 .frame(width: 38, height: 38)
             }
-            .buttonStyle(.liquidGlassInteractive)
+            .buttonStyle(.plain)
             .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || aiService.isGenerating)
             .scaleEffect(isSendButtonHovered ? 1.05 : 1.0)
             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: inputText)
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 6)
-        .background {
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 26, style: .continuous)
-                        .strokeBorder(
-                            LiquidGlassTheme.specularBorder(for: colorScheme),
-                            lineWidth: 1.2
-                        )
-                )
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         .shadow(
             color: colorScheme == .dark ? Color.black.opacity(0.5) : Color.black.opacity(0.10),
             radius: 16,
@@ -449,7 +409,7 @@ public struct FlowAssistantView: View {
                                 endPoint: .bottomTrailing
                             )
                         )
-                        .frame(width: 32, height: 32)
+                        .frame(width: 28, height: 28)
                         .shadow(color: Color.purple.opacity(0.4), radius: 6, x: 0, y: 2)
 
                     Image(systemName: "sparkles")
@@ -496,7 +456,7 @@ public struct FlowAssistantView: View {
                         .clipShape(Capsule())
                         .shadow(color: Color.blue.opacity(0.35), radius: 6, x: 0, y: 2)
                     }
-                    .buttonStyle(.liquidGlassInteractive)
+                    .buttonStyle(.plain)
                     .padding(.top, 4)
                 }
             }
@@ -504,7 +464,6 @@ public struct FlowAssistantView: View {
             .padding(.vertical, 12)
             .background {
                 if message.isUser {
-                    // Liquid Iridescent User Bubble
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
                         .fill(
                             LinearGradient(
@@ -517,46 +476,18 @@ public struct FlowAssistantView: View {
                                 endPoint: .bottomTrailing
                             )
                         )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                .strokeBorder(
-                                    LinearGradient(
-                                        colors: [
-                                            Color.white.opacity(0.40),
-                                            Color.white.opacity(0.10),
-                                            Color.clear
-                                        ],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 1
-                                )
-                        )
                         .shadow(color: Color.blue.opacity(0.35), radius: 10, x: 0, y: 4)
-                } else {
-                    // Liquid Glass Specular Assistant Bubble
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                .fill(LiquidGlassTheme.cardBackgroundTint(for: colorScheme))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                .strokeBorder(
-                                    LiquidGlassTheme.specularBorder(for: colorScheme),
-                                    lineWidth: 1
-                                )
-                        )
-                        .shadow(
-                            color: colorScheme == .dark ? Color.black.opacity(0.35) : Color.black.opacity(0.06),
-                            radius: 10,
-                            x: 0,
-                            y: 4
-                        )
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .if(!message.isUser) { view in
+                view.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .shadow(
+                        color: colorScheme == .dark ? Color.black.opacity(0.35) : Color.black.opacity(0.06),
+                        radius: 10,
+                        x: 0,
+                        y: 4
+                    )
+            }
 
             if !message.isUser {
                 Spacer(minLength: 44)
@@ -630,6 +561,18 @@ public struct FlowAssistantView: View {
         generator.prepare()
         generator.impactOccurred()
         #endif
+    }
+}
+
+// MARK: - Conditional View Extension Helper
+private extension View {
+    @ViewBuilder
+    func `if`<Transform: View>(_ condition: Bool, transform: (Self) -> Transform) -> some View {
+        if condition {
+            transform(self)
+        } else {
+            self
+        }
     }
 }
 

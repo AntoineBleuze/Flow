@@ -12,7 +12,7 @@ struct NearbyStationsView: View {
     var body: some View {
         NavigationStack {
             nearbyStationsContent
-                .liquidGlassBackground()
+                .flowAdaptiveBackground()
                 .navigationTitle("À Proximité")
                 .navigationBarTitleDisplayMode(.large)
         }
@@ -38,7 +38,7 @@ struct NearbyStationsView: View {
                 .foregroundColor(.secondary)
             }
             .padding(24)
-            .liquidGlassCard(cornerRadius: 24, padding: 24)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             .padding(.horizontal, 24)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if viewModel.userLocation == nil {
@@ -71,12 +71,12 @@ struct NearbyStationsView: View {
                         .clipShape(Capsule())
                         .shadow(color: Color.blue.opacity(0.35), radius: 8, y: 3)
                 }
-                .buttonStyle(.liquidGlassInteractive)
+                .buttonStyle(.plain)
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
             }
             .padding(24)
-            .liquidGlassCard(cornerRadius: 24, padding: 24)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             .padding(.horizontal, 24)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if viewModel.nearbyStations.isEmpty {
@@ -106,7 +106,7 @@ struct NearbyStationsView: View {
                         .foregroundColor(.secondary)
                     }
                     .padding(24)
-                    .liquidGlassCard(cornerRadius: 24, padding: 24)
+                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                     .padding(.horizontal, 20)
                 }
                 Spacer()
@@ -134,7 +134,7 @@ struct NearbyStationsView: View {
                             }) {
                                 NearbyStationRow(station: station)
                             }
-                            .buttonStyle(.liquidGlassInteractive)
+                            .buttonStyle(.plain)
                         }
                     }
                     .padding(.horizontal, 16)
@@ -180,11 +180,7 @@ struct RadiusSelector: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-            )
+            .glassEffect(.regular.interactive(), in: Capsule())
         }
     }
 
@@ -229,111 +225,108 @@ struct NearbyStationRow: View {
     }
 
     var body: some View {
-        LiquidGlassCard(cornerRadius: 18, padding: 14) {
-            VStack(alignment: .leading, spacing: 10) {
-                // Station Header: Name, Transport Badges, Distance Pill
-                HStack(alignment: .center) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(station.name)
-                            .font(.system(.headline, design: .rounded))
-                            .fontWeight(.bold)
-                            .foregroundColor(.primary)
-                            .lineLimit(1)
-
-                        HStack(spacing: 4) {
-                            let lines = displayedStationLines
-                            ForEach(lines.prefix(5), id: \.id) { line in
-                                LineIcon(type: line.type, lineId: line.name, size: 18)
-                            }
-
-                            if station.mainType != .bus && station.lines.contains(where: { $0.type == .bus }) {
-                                Image("Bus")
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(height: 18)
-                            }
-                        }
-                    }
-
-                    Spacer()
-
-                    if let distance = distanceFromUser(station: station) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "figure.walk")
-                                .font(.caption2)
-                            Text(distance)
-                                .font(.system(.caption, design: .rounded))
-                                .fontWeight(.bold)
-                        }
+        VStack(alignment: .leading, spacing: 10) {
+            // Station Header: Name, Transport Badges, Distance Pill
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(station.name)
+                        .font(.system(.headline, design: .rounded))
+                        .fontWeight(.bold)
                         .foregroundColor(.primary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(.ultraThinMaterial, in: Capsule())
-                        .overlay(Capsule().stroke(Color.primary.opacity(0.08), lineWidth: 1))
+                        .lineLimit(1)
+
+                    HStack(spacing: 4) {
+                        let lines = displayedStationLines
+                        ForEach(lines.prefix(5), id: \.id) { line in
+                            LineIcon(type: line.type, lineId: line.name, size: 18)
+                        }
+
+                        if station.mainType != .bus && station.lines.contains(where: { $0.type == .bus }) {
+                            Image("Bus")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(height: 18)
+                        }
                     }
-                    
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.secondary)
-                        .padding(.leading, 4)
                 }
 
-                // Departures Preview
-                if isLoading {
-                    HStack(spacing: 6) {
-                        ProgressView()
-                            .scaleEffect(0.75)
-                        Text("Recherche des horaires...")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                Spacer()
+
+                if let distance = distanceFromUser(station: station) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "figure.walk")
+                            .font(.caption2)
+                        Text(distance)
+                            .font(.system(.caption, design: .rounded))
+                            .fontWeight(.bold)
                     }
-                    .padding(.top, 2)
-                } else if groupedDepartures.isEmpty {
-                    Text("Aucun départ immédiat")
+                    .foregroundColor(.primary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .glassEffect(.regular, in: Capsule())
+                }
+                
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .padding(.leading, 4)
+            }
+
+            // Departures Preview
+            if isLoading {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .scaleEffect(0.75)
+                    Text("Recherche des horaires...")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                        .padding(.top, 2)
-                } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Divider().opacity(0.5)
-                        
-                        ForEach(groupedDepartures.keys.sorted { a, b in
-                            if let numA = Int(a), let numB = Int(b) { return numA < numB }
-                            if Int(a) != nil { return true }
-                            if Int(b) != nil { return false }
-                            return a.localizedStandardCompare(b) == .orderedAscending
-                        }.prefix(3), id: \.self) { lineKey in
-                            if let directions = groupedDepartures[lineKey] {
-                                let firstDep = directions.values.first?.first
-                                let type = determineType(from: firstDep?.displayInformations)
-                                
-                                HStack(alignment: .center, spacing: 8) {
-                                    LineIcon(type: type, lineId: lineKey, size: 20)
+                }
+                .padding(.top, 2)
+            } else if groupedDepartures.isEmpty {
+                Text("Aucun départ immédiat")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(.top, 2)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    Divider().opacity(0.5)
+                    
+                    ForEach(groupedDepartures.keys.sorted { a, b in
+                        if let numA = Int(a), let numB = Int(b) { return numA < numB }
+                        if Int(a) != nil { return true }
+                        if Int(b) != nil { return false }
+                        return a.localizedStandardCompare(b) == .orderedAscending
+                    }.prefix(3), id: \.self) { lineKey in
+                        if let directions = groupedDepartures[lineKey] {
+                            let firstDep = directions.values.first?.first
+                            let type = determineType(from: firstDep?.displayInformations)
+                            
+                            HStack(alignment: .center, spacing: 8) {
+                                LineIcon(type: type, lineId: lineKey, size: 20)
 
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        ForEach(directions.keys.sorted().prefix(1), id: \.self) { directionKey in
-                                            if let deps = directions[directionKey] {
-                                                HStack {
-                                                    Text(directionKey)
-                                                        .font(.caption)
-                                                        .foregroundColor(.secondary)
-                                                        .lineLimit(1)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    ForEach(directions.keys.sorted().prefix(1), id: \.self) { directionKey in
+                                        if let deps = directions[directionKey] {
+                                            HStack {
+                                                Text(directionKey)
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                                    .lineLimit(1)
 
-                                                    Spacer()
+                                                Spacer()
 
-                                                    HStack(spacing: 4) {
-                                                        Circle()
-                                                            .fill(LiquidGlassTheme.liveGreen(for: colorScheme))
-                                                            .frame(width: 5, height: 5)
-                                                        
-                                                        Text(
-                                                            deps.prefix(2).map(formatDepartureTime)
-                                                                .joined(separator: ", ")
-                                                        )
-                                                        .font(.system(.caption, design: .rounded))
-                                                        .fontWeight(.bold)
-                                                        .foregroundColor(LiquidGlassTheme.liveGreen(for: colorScheme))
-                                                    }
+                                                HStack(spacing: 4) {
+                                                    Circle()
+                                                        .fill(FlowTheme.liveGreen(for: colorScheme))
+                                                        .frame(width: 5, height: 5)
+                                                    
+                                                    Text(
+                                                        deps.prefix(2).map(formatDepartureTime)
+                                                            .joined(separator: ", ")
+                                                    )
+                                                    .font(.system(.caption, design: .rounded))
+                                                    .fontWeight(.bold)
+                                                    .foregroundColor(FlowTheme.liveGreen(for: colorScheme))
                                                 }
                                             }
                                         }
@@ -342,10 +335,12 @@ struct NearbyStationRow: View {
                             }
                         }
                     }
-                    .padding(.top, 2)
                 }
+                .padding(.top, 2)
             }
         }
+        .padding(14)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .onAppear {
             loadPreview()
         }
@@ -451,31 +446,13 @@ struct NearbyStationRow: View {
 
     private func determineType(from info: DisplayInformations?) -> TransportType {
         guard let info = info else { return .bus }
-        let mode = (info.commercial_mode ?? "").lowercased()
-
-        if mode.contains("rer") { return .rer }
-        if mode.contains("metro") || mode.contains("métro") { return .metro }
-        if mode.contains("tram") { return .tram }
-        if mode.contains("train") || mode.contains("transilien") || mode.contains("rail") { return .transilien }
-        if mode.contains("cable") || mode.contains("funiculaire") { return .cable }
+        if let commercialMode = info.commercial_mode?.lowercased() {
+            if commercialMode.contains("metro") { return .metro }
+            if commercialMode.contains("rer") { return .rer }
+            if commercialMode.contains("tram") { return .tram }
+            if commercialMode.contains("train") { return .train }
+            if commercialMode.contains("bus") { return .bus }
+        }
         return .bus
     }
-}
-
-// Extension pour récupérer la couleur du type de transport
-extension TransportType {
-    static func color(for type: TransportType) -> Color {
-        switch type {
-        case .metro: return .blue
-        case .rer: return .red
-        case .train, .transilien: return .orange
-        case .tram: return .purple
-        case .bus: return .cyan
-        case .cable: return .gray
-        }
-    }
-}
-
-#Preview {
-    NearbyStationsView()
 }

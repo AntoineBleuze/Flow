@@ -100,7 +100,7 @@ struct StationDetailSheet: View {
                 sheetContent
             }
             .toolbar(.hidden, for: .navigationBar)
-            .liquidGlassBackground()
+            .flowAdaptiveBackground()
             .onAppear {
                 setupStation()
             }
@@ -116,7 +116,7 @@ struct StationDetailSheet: View {
                 if let newDepartures = notification.userInfo?["departures"] as? [Departure] {
                     guard !newDepartures.isEmpty else { return }
                     
-                    // Accumuler dans le buffer (dédupliqué par ID)
+                    // Accumuler dans le buffer (dédoublonné par ID)
                     for dep in newDepartures {
                         departureBuffer[dep.id] = dep
                     }
@@ -154,8 +154,8 @@ struct StationDetailSheet: View {
                 )
             }
         }
-        .liquidGlassSheet()
-        .liquidGlassBackground()
+        .presentationBackground(.ultraThinMaterial)
+        .presentationCornerRadius(FlowTheme.sheetCornerRadius)
     }
 
     private var stationDistanceAndWalkTime: (distanceStr: String, walkTimeMinutes: Int) {
@@ -283,7 +283,7 @@ struct StationDetailSheet: View {
                                 .stroke(Color.primary.opacity(0.08), lineWidth: 1)
                         )
                     }
-                    .buttonStyle(.liquidGlassInteractive)
+                    .buttonStyle(.plain)
                 } else {
                     HStack(spacing: 4) {
                         Image(systemName: "mappin.circle.fill")
@@ -317,7 +317,7 @@ struct StationDetailSheet: View {
                             .foregroundColor(.primary)
                             .padding(12)
                     }
-                    .buttonStyle(.liquidGlassInteractive)
+                    .buttonStyle(.plain)
                     .glassEffect(.regular.interactive(), in: Circle())
                 }
             }
@@ -367,7 +367,7 @@ struct StationDetailSheet: View {
                             .clipShape(Capsule())
                             .shadow(color: primaryGreen.opacity(0.3), radius: 6, y: 3)
                         }
-                        .buttonStyle(.liquidGlassInteractive)
+                        .buttonStyle(.plain)
                         .padding(.horizontal)
                         .padding(.top, 12)
                     }
@@ -405,29 +405,29 @@ struct StationDetailSheet: View {
                         // Statistics Card Grid - Encapsulated in Liquid Glass
                         let detailsStats = stationDistanceAndWalkTime
                         
-                        LiquidGlassCard(cornerRadius: 18, padding: 16) {
-                            VStack(spacing: 14) {
-                                HStack(spacing: 12) {
-                                    metricCell(title: "TEMPS DE MARCHE", value: "\(detailsStats.walkTimeMinutes) MIN", symbol: "figure.walk", color: LiquidGlassTheme.warningMetricColor(for: colorScheme))
-                                    metricCell(title: "DISTANCE À PIED", value: detailsStats.distanceStr.uppercased(), symbol: "location.fill", color: Color(hex: "30B0C7")) // Cyan/Blue
-                                }
-                                
-                                Divider().opacity(0.4)
-                                
-                                HStack(spacing: 12) {
-                                    metricCell(title: "LIGNES DE TRANSPORT", value: "\(currentStation.lines.count) LIGNES", symbol: "tram", color: Color(hex: "FF453A")) // Red
-                                    if let status = elevatorStatus {
-                                        if status.hasEquipments {
-                                            equipmentCell(status: status)
-                                        } else {
-                                            Spacer()
-                                        }
+                        VStack(spacing: 14) {
+                            HStack(spacing: 12) {
+                                metricCell(title: "TEMPS DE MARCHE", value: "\(detailsStats.walkTimeMinutes) MIN", symbol: "figure.walk", color: FlowTheme.warningMetricColor(for: colorScheme))
+                                metricCell(title: "DISTANCE À PIED", value: detailsStats.distanceStr.uppercased(), symbol: "location.fill", color: Color(hex: "30B0C7")) // Cyan/Blue
+                            }
+                            
+                            Divider().opacity(0.4)
+                            
+                            HStack(spacing: 12) {
+                                metricCell(title: "LIGNES DE TRANSPORT", value: "\(currentStation.lines.count) LIGNES", symbol: "tram", color: Color(hex: "FF453A")) // Red
+                                if let status = elevatorStatus {
+                                    if status.hasEquipments {
+                                        equipmentCell(status: status)
                                     } else {
-                                        metricCell(title: "ÉQUIPEMENTS", value: "CHARGEMENT...", symbol: "arrow.up.and.down.square", color: .secondary)
+                                        Spacer()
                                     }
+                                } else {
+                                    metricCell(title: "ÉQUIPEMENTS", value: "CHARGEMENT...", symbol: "arrow.up.and.down.square", color: .secondary)
                                 }
                             }
                         }
+                        .padding(16)
+                        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                         .padding(.horizontal)
                         .padding(.top, 8)
                     }
@@ -546,65 +546,65 @@ struct StationDetailSheet: View {
                                     .padding(.top, 14)
                                 
                                 ForEach(gpeLines) { gpeLine in
-                                    LiquidGlassCard(cornerRadius: 18, padding: 14) {
-                                        VStack(alignment: .leading, spacing: 10) {
-                                            HStack(spacing: 10) {
-                                                if UIImage(named: gpeLine.assetName) != nil {
-                                                    Image(gpeLine.assetName)
-                                                        .resizable()
-                                                        .scaledToFit()
-                                                        .frame(width: 36, height: 36)
-                                                } else {
-                                                    Circle()
-                                                        .fill(resolveLineColor(gpeLine.name, type: .metro))
-                                                        .frame(width: 30, height: 30)
-                                                        .overlay(
-                                                            Text(gpeLine.name)
-                                                                .font(.subheadline)
-                                                                .bold()
-                                                                .foregroundColor(.white)
-                                                        )
-                                                }
-                                                
-                                                VStack(alignment: .leading, spacing: 2) {
-                                                    Text("Métro Ligne \(gpeLine.name)")
-                                                        .font(.subheadline)
-                                                        .fontWeight(.semibold)
-                                                        .foregroundColor(.primary)
-                                                    Text("Société des Grands Projets")
-                                                        .font(.caption)
-                                                        .foregroundColor(.secondary)
-                                                }
-                                                Spacer()
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        HStack(spacing: 10) {
+                                            if UIImage(named: gpeLine.assetName) != nil {
+                                                Image(gpeLine.assetName)
+                                                    .resizable()
+                                                    .scaledToFit()
+                                                    .frame(width: 36, height: 36)
+                                            } else {
+                                                Circle()
+                                                    .fill(resolveLineColor(gpeLine.name, type: .metro))
+                                                    .frame(width: 30, height: 30)
+                                                    .overlay(
+                                                        Text(gpeLine.name)
+                                                            .font(.subheadline)
+                                                            .bold()
+                                                            .foregroundColor(.white)
+                                                    )
                                             }
                                             
-                                            // Delivery Date Box
-                                            HStack {
-                                                VStack(alignment: .leading, spacing: 4) {
-                                                    Text("Date de livraison estimée")
-                                                        .font(.caption)
-                                                        .foregroundColor(.secondary)
-                                                    
-                                                    Text(getGPEDeliveryDate(lineName: gpeLine.name, stationName: currentStation.name))
-                                                        .font(.subheadline)
-                                                        .bold()
-                                                        .foregroundColor(.blue)
-                                                }
-                                                Spacer()
-                                                Image(systemName: "calendar")
-                                                    .font(.title3)
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text("Métro Ligne \(gpeLine.name)")
+                                                    .font(.subheadline)
+                                                    .fontWeight(.semibold)
+                                                    .foregroundColor(.primary)
+                                                Text("Société des Grands Projets")
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                            Spacer()
+                                        }
+                                        
+                                        // Delivery Date Box
+                                        HStack {
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text("Date de livraison estimée")
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                                
+                                                Text(getGPEDeliveryDate(lineName: gpeLine.name, stationName: currentStation.name))
+                                                    .font(.subheadline)
+                                                    .bold()
                                                     .foregroundColor(.blue)
                                             }
-                                            .padding(.horizontal, 14)
-                                            .padding(.vertical, 12)
-                                            .background(cardBackground)
-                                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 12)
-                                                    .stroke(cardBorder, lineWidth: 1)
-                                            )
+                                            Spacer()
+                                            Image(systemName: "calendar")
+                                                .font(.title3)
+                                                .foregroundColor(.blue)
                                         }
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 12)
+                                        .background(cardBackground)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .stroke(cardBorder, lineWidth: 1)
+                                        )
                                     }
+                                    .padding(14)
+                                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                                     .padding(.horizontal)
                                     .padding(.vertical, 4)
                                 }
@@ -643,7 +643,7 @@ struct StationDetailSheet: View {
                     .background(primaryGreen)
                     .clipShape(Capsule())
                 }
-                .buttonStyle(.liquidGlassInteractive)
+                .buttonStyle(.plain)
             }
 
             let stats = stationDistanceAndWalkTime
@@ -663,7 +663,7 @@ struct StationDetailSheet: View {
                 HStack(spacing: 4) {
                     Image(systemName: "figure.walk")
                         .font(.caption2)
-                        .foregroundColor(LiquidGlassTheme.warningMetricColor(for: colorScheme))
+                        .foregroundColor(FlowTheme.warningMetricColor(for: colorScheme))
                     Text("\(stats.walkTimeMinutes) min")
                         .font(.system(.subheadline, design: .rounded))
                         .foregroundColor(.secondary)
@@ -1007,7 +1007,7 @@ struct StationDetailSheet: View {
                     id: lineKey,
                     label: localLine.name,
                     color: colorHex,
-                    text_color: LiquidGlassTheme.contrastHexColor(forHex: colorHex),
+                    text_color: FlowTheme.contrastHexColor(forHex: colorHex),
                     network: modeName,
                     mode: modeName,
                     directions: [],
@@ -1117,7 +1117,7 @@ struct StationDetailSheet: View {
             }
         }
         
-        print("🏪 Station: \(activeStation.name)")
+        print("🚏 Station: \(activeStation.name)")
         print("📡 Constructed Query IDs: \(queryIds)")
         
         if queryIds.isEmpty {
@@ -1204,7 +1204,7 @@ struct StationDetailSheet: View {
         // Optimisation :
         // 1. Filtrer les quais qui correspondent à la ligne sélectionnée
         // 2. Utiliser les stop_area_id si disponibles (1 requête au lieu de N)
-        // 3. Dédupliquer
+        // 3. Dédoupliquer
         let relevantPlatforms = currentStation.platforms.filter { $0.lineName == lineName }
         
         let optimizedIds: Set<String> = Set(relevantPlatforms.compactMap { platform in
@@ -1336,6 +1336,7 @@ struct StationDetailSheet: View {
         }
     }
 }
+
 // MARK: - Sub-view extraite pour éviter les timeouts du compilateur Swift
 private struct LineGroupRowSheet: View {
     // Types locaux miroirs de StationDetailSheet
@@ -1363,19 +1364,19 @@ private struct LineGroupRowSheet: View {
     }
 
     var body: some View {
-        LiquidGlassCard(cornerRadius: 18, padding: 14) {
-            VStack(alignment: .leading, spacing: 12) {
-                // En-tête : badge ligne + réseau
-                lineHeader
-                
-                // Contenu
-                if let resume = group.resumeTime {
-                    nightServiceView(resume: resume)
-                } else {
-                    directionsView
-                }
+        VStack(alignment: .leading, spacing: 12) {
+            // En-tête : badge ligne + réseau
+            lineHeader
+            
+            // Contenu
+            if let resume = group.resumeTime {
+                nightServiceView(resume: resume)
+            } else {
+                directionsView
             }
         }
+        .padding(14)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .padding(.horizontal)
         .padding(.vertical, 4)
     }
@@ -1432,7 +1433,7 @@ private struct LineGroupRowSheet: View {
                         .background(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.06))
                         .clipShape(Capsule())
                     }
-                    .buttonStyle(.liquidGlassInteractive)
+                    .buttonStyle(.plain)
                 }
                 
                 let lineType = mapModeToType(group.mode)
@@ -1451,9 +1452,9 @@ private struct LineGroupRowSheet: View {
                         .foregroundColor(.red)
                         .font(.system(size: 14, weight: .bold))
                         .frame(width: 32, height: 32)
-                        .background(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.06), in: Circle())
                 }
-                .buttonStyle(.liquidGlassInteractive)
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: .circle)
             }
         }
     }
@@ -1635,7 +1636,7 @@ private struct LineGroupRowSheet: View {
                         .foregroundColor(isActive ? timeColor : .pink)
                         .frame(width: 44, height: 44)
                 }
-                .buttonStyle(.liquidGlassInteractive)
+                .buttonStyle(.plain)
                 .glassEffect(.regular.interactive(), in: .circle)
             }
             .padding(.horizontal, 14)
@@ -1804,5 +1805,3 @@ private struct MetricValueView: View {
         }
     }
 }
-
-

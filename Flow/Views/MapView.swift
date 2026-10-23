@@ -2,7 +2,6 @@ import MapKit
 import SwiftUI
 import Combine
 
-
 struct AppMapView: View {
     // 1. Définition de la région par défaut (Paris)
     static let defaultRegion = MKCoordinateRegion(
@@ -134,7 +133,8 @@ struct AppMapView: View {
                                     .foregroundColor(coordinator.userTrackingMode == .none ? .primary : .blue)
                                     .frame(width: 44, height: 44)
                             }
-                            .buttonStyle(.liquidGlassInteractive)
+                            .buttonStyle(.plain)
+                            .glassEffect(.regular.interactive(), in: .circle)
                             .padding(.trailing, 16)
                         }
 
@@ -216,7 +216,9 @@ struct AppMapView: View {
         )) { station in
             StationDetailSheet(station: station, selectedDetent: $sheetDetent)
                 .presentationDetents([.fraction(0.22), .medium, .large], selection: $sheetDetent)
-                .liquidGlassSheet()
+                .presentationBackground(.ultraThinMaterial)
+                .presentationCornerRadius(FlowTheme.sheetCornerRadius)
+                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
         }
 
         .onAppear {
@@ -253,7 +255,8 @@ struct AppMapView: View {
                 FlowAssistantView()
                     .environmentObject(coordinator)
                     .presentationDetents([.fraction(0.35), .medium, .large])
-                    .liquidGlassSheetBackground()
+                    .presentationBackground(.ultraThinMaterial)
+                    .presentationCornerRadius(FlowTheme.sheetCornerRadius)
                     .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.35)))
             }
         }
@@ -275,7 +278,7 @@ struct AppMapView: View {
         }
     }
 
-    // MARK: - Liquid Glass Map Subviews
+    // MARK: - Native Liquid Glass Map Subviews
 
     // 1. Horizontal Liquid Glass Control Toolbar
     private var mapControlToolbar: some View {
@@ -289,7 +292,7 @@ struct AppMapView: View {
                     .foregroundColor(coordinator.userTrackingMode == .none ? .primary : .blue)
                     .frame(width: 40, height: 40)
             }
-            .buttonStyle(.liquidGlassInteractive)
+            .buttonStyle(.plain)
 
             Divider()
                 .frame(height: 20)
@@ -319,7 +322,7 @@ struct AppMapView: View {
                     .foregroundColor(data.activeCategories.count < 4 ? .blue : .primary)
                     .frame(width: 40, height: 40)
             }
-            .buttonStyle(.liquidGlassInteractive)
+            .buttonStyle(.plain)
 
             Divider()
                 .frame(height: 20)
@@ -345,23 +348,10 @@ struct AppMapView: View {
                     .foregroundColor(data.polylineStyle != .classic ? .blue : .primary)
                     .frame(width: 40, height: 40)
             }
-            .buttonStyle(.liquidGlassInteractive)
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
-        .background {
-            Capsule()
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    Capsule()
-                        .fill(LiquidGlassTheme.cardBackgroundTint(for: colorScheme))
-                )
-                .overlay(
-                    Capsule()
-                        .strokeBorder(LiquidGlassTheme.specularBorder(for: colorScheme), lineWidth: 1.0)
-                )
-        }
-        .clipShape(Capsule())
         .glassEffect(.regular.interactive(), in: Capsule())
         .shadow(
             color: colorScheme == .dark ? Color.black.opacity(0.35) : Color.black.opacity(0.12),
@@ -371,10 +361,10 @@ struct AppMapView: View {
         )
     }
 
-    // MARK: - 2. Bottom Liquid Glass AI Search & Dictation Pill Bar
+    // MARK: - 2. Bottom Native Liquid Glass AI Search & Dictation Pill Bar
     private var bottomAIPillBar: some View {
         HStack(spacing: 8) {
-            // Flow AI Icon & Full Assistant Modal Trigger
+            // Sparkle / Assistant Trigger Button
             Button {
                 showAIAssistant = true
             } label: {
@@ -382,7 +372,7 @@ struct AppMapView: View {
                     Circle()
                         .fill(
                             LinearGradient(
-                                colors: [Color.purple, Color.blue, Color.cyan],
+                                colors: [.purple, .blue],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
@@ -395,7 +385,7 @@ struct AppMapView: View {
                         .foregroundColor(.white)
                 }
             }
-            .buttonStyle(.liquidGlassInteractive)
+            .buttonStyle(.plain)
 
             // Direct Text Input Field
             TextField(
@@ -425,7 +415,7 @@ struct AppMapView: View {
                             .foregroundColor(.secondary)
                     }
                 }
-                .buttonStyle(.liquidGlassInteractive)
+                .buttonStyle(.plain)
                 .transition(.scale.combined(with: .opacity))
             }
 
@@ -458,7 +448,7 @@ struct AppMapView: View {
                         .symbolEffect(.pulse, isActive: voiceManager.isRecording)
                 }
             }
-            .buttonStyle(.liquidGlassInteractive)
+            .buttonStyle(.plain)
 
             // Send / Action Button
             if isAISubmitting {
@@ -486,25 +476,12 @@ struct AppMapView: View {
                             .foregroundColor(.white)
                     }
                 }
-                .buttonStyle(.liquidGlassInteractive)
+                .buttonStyle(.plain)
                 .transition(.scale.combined(with: .opacity))
             }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background {
-            Capsule()
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    Capsule()
-                        .fill(LiquidGlassTheme.cardBackgroundTint(for: colorScheme))
-                )
-                .overlay(
-                    Capsule()
-                        .strokeBorder(LiquidGlassTheme.specularBorder(for: colorScheme), lineWidth: 1.0)
-                )
-        }
-        .clipShape(Capsule())
         .glassEffect(.regular.interactive(), in: Capsule())
         .shadow(
             color: colorScheme == .dark ? Color.black.opacity(0.35) : Color.black.opacity(0.1),
@@ -594,7 +571,7 @@ struct AppMapView: View {
         }
     }
 
-    // MARK: - 3. Liquid Glass AI Journey Action Card
+    // MARK: - 3. Native Liquid Glass AI Journey Action Card
     private func aiJourneyActionCard(journey: Journey) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             // Header: Sparkles badge + Close button
@@ -632,7 +609,7 @@ struct AppMapView: View {
                         .font(.system(size: 22))
                         .foregroundColor(.secondary)
                 }
-                .buttonStyle(.liquidGlassInteractive)
+                .buttonStyle(.plain)
             }
 
             // Duration, Transfers & Line Badges
@@ -720,23 +697,10 @@ struct AppMapView: View {
                         )
                 }
             }
-            .buttonStyle(.liquidGlassInteractive)
+            .buttonStyle(.plain)
         }
         .padding(16)
-        .background {
-            RoundedRectangle(cornerRadius: LiquidGlassTheme.largeCornerRadius, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: LiquidGlassTheme.largeCornerRadius, style: .continuous)
-                        .fill(LiquidGlassTheme.cardBackgroundTint(for: colorScheme))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: LiquidGlassTheme.largeCornerRadius, style: .continuous)
-                        .strokeBorder(LiquidGlassTheme.specularBorder(for: colorScheme), lineWidth: 1.2)
-                )
-        }
-        .clipShape(RoundedRectangle(cornerRadius: LiquidGlassTheme.largeCornerRadius, style: .continuous))
-        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: LiquidGlassTheme.largeCornerRadius, style: .continuous))
+        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: FlowTheme.largeCornerRadius, style: .continuous))
         .shadow(
             color: colorScheme == .dark ? Color.black.opacity(0.5) : Color.black.opacity(0.12),
             radius: 16,

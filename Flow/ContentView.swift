@@ -92,7 +92,7 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 if let journey = navigationManager.currentJourney, navigationManager.isNavigating {
                     DuoNavigationPanel(journey: journey)
-                        .liquidGlassBackground()
+                        .flowAdaptiveBackground()
                         .transition(.move(edge: .leading).combined(with: .opacity))
                 } else if let selectedStation = coordinator.selectedStation {
                     StationDetailSheet(
@@ -107,7 +107,7 @@ struct ContentView: View {
                     .transition(.move(edge: .leading).combined(with: .opacity))
                 } else if let previewJourney = coordinator.previewJourney {
                     DuoJourneyPreviewPanel(journey: previewJourney)
-                        .liquidGlassBackground()
+                        .flowAdaptiveBackground()
                         .transition(.move(edge: .leading).combined(with: .opacity))
                 } else {
                     duoTabContent
@@ -213,13 +213,7 @@ struct ContentView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.30 : 0.08), radius: 8, x: 0, y: 4)
+        .glassEffect(.regular, in: Capsule())
     }
 
     private var duoBottomBar: some View {
@@ -247,25 +241,15 @@ struct ContentView: View {
                     .background {
                         if isSelected {
                             Capsule()
-                                .fill(.ultraThinMaterial)
-                                .overlay(
-                                    Capsule()
-                                        .stroke(Color.primary.opacity(0.10), lineWidth: 1)
-                                )
+                                .fill(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.08))
                         }
                     }
                 }
-                .buttonStyle(.liquidGlassInteractive)
+                .buttonStyle(.plain)
             }
         }
         .padding(6)
-        .background(.ultraThinMaterial)
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.30 : 0.08), radius: 8, x: 0, y: 4)
+        .glassEffect(.regular.interactive(), in: Capsule())
     }
 
     // MARK: - Single-Screen Standard Layout
@@ -386,12 +370,7 @@ struct TrafficViewContent: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .background(.ultraThinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                )
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .padding(.horizontal)
 
                 // Filtres par statut
@@ -424,14 +403,9 @@ struct TrafficViewContent: View {
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Capsule())
-                        .overlay(
-                            Capsule()
-                                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                        )
                     }
-                    .buttonStyle(.liquidGlassInteractive)
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.interactive(), in: Capsule())
 
                     Spacer()
                 }
@@ -454,86 +428,39 @@ struct TrafficViewContent: View {
                 }
             }
         }
-        .background {
-            if duoPosture == .unfoldedDualScreen {
-                TransparentHostingView()
-                    .ignoresSafeArea()
-            } else {
-                ZStack {
-                    ShaderAnimationView(isLoading: true)
-                    Rectangle()
-                        .fill(.ultraThinMaterial)
-                        .opacity(colorScheme == .dark ? 0.70 : 0.85)
-                }
-                .ignoresSafeArea()
-            }
-        }
     }
 
-    // MARK: - Vue par défaut (Modes structurants & bus perturbés)
+    // MARK: - Vue par défaut (par type de transport structurant)
     @ViewBuilder
     private var defaultSectionsView: some View {
-        let isIPad = horizontalSizeClass == .regular
+        let isIPad = UIDevice.current.userInterfaceIdiom == .pad
+        let showCompact = duoPosture == .unfoldedDualScreen
 
-        // Réseaux structurants (Métro, RER, Tram, Transilien, Train, Câble)
         ForEach(defaultTransportTypes, id: \.self) { type in
             let filteredLines = lines(for: type)
-
             if !filteredLines.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 12) {
                     Text(type.rawValue.uppercased())
-                        .font(.system(.caption, design: .rounded))
+                        .font(.system(.subheadline, design: .rounded))
                         .fontWeight(.bold)
                         .foregroundColor(.secondary)
-                        .padding(.leading, 20)
+                        .padding(.horizontal)
 
-                    GlassEffectContainer(spacing: isIPad ? 20 : 16) {
+                    GlassEffectContainer(spacing: showCompact ? 10 : (isIPad ? 20 : 16)) {
                         LazyVGrid(
                             columns: [
-                                GridItem(.adaptive(minimum: isIPad ? 100 : 80, maximum: isIPad ? 130 : 100), spacing: isIPad ? 20 : 16)
-                            ], spacing: isIPad ? 20 : 16
+                                GridItem(
+                                    .adaptive(
+                                        minimum: showCompact ? 60 : (isIPad ? 100 : 80),
+                                        maximum: showCompact ? 80 : (isIPad ? 130 : 100)
+                                    ),
+                                    spacing: showCompact ? 10 : (isIPad ? 20 : 16)
+                                )
+                            ],
+                            spacing: showCompact ? 10 : (isIPad ? 20 : 16)
                         ) {
                             ForEach(filteredLines) { line in
-                                TrafficLineCell(line: line, isIPad: isIPad)
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
-                }
-            }
-        }
-
-        // Section Bus (Perturbations en cours uniquement s'il y en a)
-        let activeBusLines = service.lines.filter { line in
-            line.type == .bus && line.status != .normal
-        }
-
-        if !activeBusLines.isEmpty && (selectedFilter == .all || selectedFilter.matchingStatus != nil) {
-            let filteredBus = activeBusLines.filter { line in
-                selectedFilter == .all ? true : line.status == selectedFilter.matchingStatus
-            }
-
-            if !filteredBus.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(.orange)
-                            .font(.caption)
-                        Text("BUS PERTURBÉS EN COURS")
-                            .font(.system(.caption, design: .rounded))
-                            .fontWeight(.bold)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.leading, 20)
-
-                    GlassEffectContainer(spacing: isIPad ? 20 : 16) {
-                        LazyVGrid(
-                            columns: [
-                                GridItem(.adaptive(minimum: isIPad ? 100 : 80, maximum: isIPad ? 130 : 100), spacing: isIPad ? 20 : 16)
-                            ], spacing: isIPad ? 20 : 16
-                        ) {
-                            ForEach(filteredBus) { line in
-                                TrafficLineCell(line: line, isIPad: isIPad)
+                                TrafficLineCell(line: line, isIPad: isIPad && !showCompact)
                             }
                         }
                     }
@@ -543,83 +470,64 @@ struct TrafficViewContent: View {
         }
     }
 
-    // MARK: - Résultats de Recherche
+    // MARK: - Résultats de recherche (avec support bus à la volée)
     @ViewBuilder
     private var searchResultsView: some View {
+        let isIPad = UIDevice.current.userInterfaceIdiom == .pad
+        let results = searchLines(query: searchText)
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let results = searchLines(query: trimmed)
-        let isIPad = horizontalSizeClass == .regular
 
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("RÉSULTATS POUR « \(trimmed) »")
-                    .font(.system(.caption, design: .rounded))
-                    .fontWeight(.bold)
-                    .foregroundColor(.secondary)
-                Spacer()
-                Text("\(results.count) ligne\(results.count > 1 ? "s" : "")")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
-            .padding(.horizontal, 20)
-
-            if results.isEmpty {
-                // Si aucune ligne existante ne correspond, proposer la ligne de bus recherchée
+        if results.isEmpty && !trimmed.isEmpty {
+            VStack(spacing: 12) {
                 let fallbackBusLine = TransportLine(
                     type: .bus,
-                    lineId: trimmed.uppercased(),
-                    status: .normal
+                    lineId: trimmed,
+                    status: .normal,
+                    colorHex: "008B5E"
                 )
 
-                VStack(spacing: 12) {
-                    Text("Aucune perturbation signalée sur le réseau pour cette recherche.")
-                        .font(.system(.subheadline, design: .rounded))
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 10)
+                Text("Ligne non répertoriée dans le flux d'alertes principal.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
 
-                    NavigationLink(destination: TrafficDetailView(line: fallbackBusLine)) {
-                        HStack(spacing: 12) {
-                            LineIcon(line: fallbackBusLine, size: 40)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Ligne de bus \(trimmed)")
-                                    .font(.system(.subheadline, design: .rounded))
-                                    .fontWeight(.bold)
-                                    .foregroundColor(.primary)
-                                Text("Trafic normal / Aucune alerte active")
-                                    .font(.caption)
-                                    .foregroundColor(.green)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
+                NavigationLink(destination: TrafficDetailView(line: fallbackBusLine)) {
+                    HStack(spacing: 12) {
+                        LineIcon(line: fallbackBusLine, size: 40)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Ligne de bus \(trimmed)")
+                                .font(.system(.subheadline, design: .rounded))
+                                .fontWeight(.bold)
+                                .foregroundColor(.primary)
+                            Text("Trafic normal / Aucune alerte active")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(.green)
                         }
-                        .padding(14)
-                        .background(.ultraThinMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                        )
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
-                    .buttonStyle(.liquidGlassInteractive)
+                    .padding(14)
                 }
-                .padding(.horizontal)
-            } else {
-                GlassEffectContainer(spacing: isIPad ? 20 : 16) {
-                    LazyVGrid(
-                        columns: [
-                            GridItem(.adaptive(minimum: isIPad ? 100 : 80, maximum: isIPad ? 130 : 100), spacing: isIPad ? 20 : 16)
-                        ], spacing: isIPad ? 20 : 16
-                    ) {
-                        ForEach(results) { line in
-                            TrafficLineCell(line: line, isIPad: isIPad)
-                        }
-                    }
-                }
-                .padding(.horizontal)
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
+            .padding(.horizontal)
+        } else {
+            GlassEffectContainer(spacing: isIPad ? 20 : 16) {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.adaptive(minimum: isIPad ? 100 : 80, maximum: isIPad ? 130 : 100), spacing: isIPad ? 20 : 16)
+                    ], spacing: isIPad ? 20 : 16
+                ) {
+                    ForEach(results) { line in
+                        TrafficLineCell(line: line, isIPad: isIPad)
+                    }
+                }
+            }
+            .padding(.horizontal)
         }
     }
 
@@ -703,7 +611,7 @@ private struct TrafficLineCell: View {
                     statusBadge
                 }
         }
-        .buttonStyle(.liquidGlassInteractive)
+        .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
