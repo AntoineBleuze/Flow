@@ -13,19 +13,21 @@ private let duoTabs: [DuoTabItem] = [
     DuoTabItem(id: "Explore", icon: "map", label: "Explore"),
     DuoTabItem(id: "Nearby", icon: "location.circle.fill", label: "Proximité"),
     DuoTabItem(id: "Favorites", icon: "star.fill", label: "Favoris"),
-    DuoTabItem(id: "Trafic", icon: "tram.fill", label: "Trafic"),
-    DuoTabItem(id: "Search", icon: "magnifyingglass", label: "Recherche")
+    DuoTabItem(id: "Trafic", icon: "tram.fill", label: "Trafic")
 ]
 
 struct ContentView: View {
     @StateObject private var coordinator = NavigationCoordinator.shared
     @ObservedObject private var navigationManager = NavigationManager.shared
+    @ObservedObject private var routeManager = RouteNavigationManager.shared
     @ObservedObject private var mapData = MapDataService.shared
     @StateObject private var voiceManager = VoiceDictationManager.shared
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.colorScheme) private var colorScheme
     @State private var searchText = ""
     @State private var showLoading: Bool
+    @State private var exploreSheetDetent: PresentationDetent = .fraction(0.12)
+    @State private var isExploreSheetPresented: Bool = true
 
     init(showLoading: Bool = true) {
         _showLoading = State(initialValue: showLoading)
@@ -124,8 +126,6 @@ struct ContentView: View {
                     .navigationTitle("Trafic")
             }
             .toolbarBackground(.hidden, for: .navigationBar)
-        case "Search":
-            SearchTabContent(searchText: $searchText)
         default:
             DuoExplorePanelView(searchText: $searchText)
         }
@@ -154,12 +154,12 @@ struct ContentView: View {
                 .submitLabel(.search)
                 .onSubmit {
                     if !searchText.isEmpty {
-                        coordinator.selectedTab = "Search"
+                        coordinator.selectedTab = "Explore"
                     }
                 }
                 .onChange(of: searchText) { _, newValue in
-                    if !newValue.isEmpty && coordinator.selectedTab != "Search" {
-                        coordinator.selectedTab = "Search"
+                    if !newValue.isEmpty && coordinator.selectedTab != "Explore" {
+                        coordinator.selectedTab = "Explore"
                     }
                 }
 
@@ -182,7 +182,7 @@ struct ContentView: View {
                     onFinished: { finalTranscript in
                         searchText = finalTranscript
                         if !finalTranscript.isEmpty {
-                            coordinator.selectedTab = "Search"
+                            coordinator.selectedTab = "Explore"
                         }
                     }
                 )
@@ -252,42 +252,128 @@ struct ContentView: View {
 
     // MARK: - Single-Screen Standard Layout
     private var classicSingleScreenLayout: some View {
-        TabView(selection: $coordinator.selectedTab) {
-            Tab("Explore", systemImage: "map", value: "Explore") {
-                AppMapView(showControls: true)
-                    .ignoresSafeArea(edges: .top)
-            }
+        ZStack(alignment: .bottom) {
+            TabView(selection: $coordinator.selectedTab) {
+                Tab("Explore", systemImage: "map", value: "Explore") {
+                    singleScreenExploreView
+                }
 
-            Tab("À Proximité", systemImage: "location.circle.fill", value: "Nearby") {
-                NearbyStationsView()
-            }
+                Tab("À Proximité", systemImage: "location.circle.fill", value: "Nearby") {
+                    NearbyStationsView()
+                }
 
-            Tab("Favoris", systemImage: "star.fill", value: "Favorites") {
-                FavoritesView()
-            }
+                Tab("Favoris", systemImage: "star.fill", value: "Favorites") {
+                    FavoritesView()
+                }
 
-            Tab("Trafic", systemImage: "tram.fill", value: "Trafic") {
-                NavigationStack {
-                    TrafficViewContent()
-                        .navigationTitle("Trafic")
+                Tab("Trafic", systemImage: "tram.fill", value: "Trafic") {
+                    NavigationStack {
+                        TrafficViewContent()
+                            .navigationTitle("Trafic")
+                    }
+                }
+            }
+            .toolbarVisibility(.hidden, for: .tabBar)
+            .accentColor(.blue)
+#if os(iOS)
+            .tabBarMinimizeBehavior(.onScrollDown)
+#endif
+            .onChange(of: navigationManager.shouldSwitchToMap) { _, shouldSwitch in
+                if shouldSwitch {
+                    coordinator.selectedTab = "Explore"
+                    navigationManager.shouldSwitchToMap = false
                 }
             }
 
-            Tab("Recherche", systemImage: "magnifyingglass", value: "Search", role: .search) {
-                SearchTabContent(searchText: $searchText)
+            // Floating Bottom Dock: Active Route Resume Pill + Floating Liquid Glass TabBar
+            VStack(spacing: 8) {
+                if routeManager.isRouteActive && (!routeManager.isShowingRouteSheet || coordinator.selectedTab != "Explore") {
+                    ActiveRouteResumePill(routeManager: routeManager)
+                        .padding(.horizontal, 16)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
+                LiquidGlassFloatingTabBar(
+                    selectedTab: $coordinator.selectedTab,
+                    onSelectTab: { tab in
+                        if tab == "Explore" {
+                            coordinator.selectedStation = nil
+                        }
+                    }
+                )
+            }
+            .padding(.bottom, 8)
+            .ignoresSafeArea(.keyboard)
+        }
+    }
+
+    private var singleScreenExploreView: some View {
+        ZStack {
+            AppMapView(showControls: true)
+                .ignoresSafeArea()
+        }
+        .sheet(isPresented: $isExploreSheetPresented) {
+            unifiedExploreSheet
+                .presentationDetents([.fraction(0.12), .medium, .large], selection: $exploreSheetDetent)
+                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+                .presentationCornerRadius(38)
+                .liquidGlassSheetBackground()
+                .interactiveDismissDisabled(true)
+        }
+        .onChange(of: coordinator.selectedStation?.id) { oldId, newId in
+            if newId != nil {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    exploreSheetDetent = .medium
+                }
             }
         }
-        .searchable(text: $searchText, prompt: "Rechercher une station...")
-        .tabViewSearchActivation(.searchTabSelection)
-        .accentColor(.blue)
-#if os(iOS)
-        .tabBarMinimizeBehavior(.onScrollDown)
-#endif
-        .onChange(of: navigationManager.shouldSwitchToMap) { _, shouldSwitch in
-            if shouldSwitch {
-                coordinator.selectedTab = "Explore"
-                navigationManager.shouldSwitchToMap = false
+        .onChange(of: routeManager.isShowingRouteSheet) { _, isShowing in
+            if isShowing {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    exploreSheetDetent = .medium
+                }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var unifiedExploreSheet: some View {
+        VStack(spacing: 0) {
+            LiquidGlassSheetGrabber()
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+
+            Group {
+                if routeManager.isRouteActive && routeManager.isShowingRouteSheet,
+                   let journey = routeManager.activeJourney ?? navigationManager.currentJourney {
+                    ImmersiveNavigationView(journey: journey, isFloating: false)
+                } else if let station = coordinator.selectedStation {
+                    StationDetailSheet(
+                        station: station,
+                        onDismiss: {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                coordinator.selectedStation = nil
+                            }
+                        },
+                        selectedDetent: $exploreSheetDetent
+                    )
+                } else if let previewJourney = coordinator.previewJourney {
+                    DuoJourneyPreviewPanel(journey: previewJourney)
+                } else {
+                    EmbeddedSearchSheetContent(
+                        searchText: $searchText,
+                        selectedDetent: $exploreSheetDetent,
+                        showsSearchBar: true,
+                        onSelectStation: { station in
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                coordinator.selectedStation = station
+                                exploreSheetDetent = .medium
+                            }
+                        }
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }
@@ -428,6 +514,7 @@ struct TrafficViewContent: View {
             }
             .padding(.vertical)
         }
+        .scrollContentBackground(.hidden)
         .refreshable {
             await withCheckedContinuation { continuation in
                 service.refresh()

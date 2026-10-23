@@ -1265,28 +1265,11 @@ struct StationDetailSheet: View {
             }
         }
 
-        // 2. Extraire les dates réelles des prochains départs pour cette direction
-        let now = Date()
-        let matchingDates = departures.filter { dep in
-            let label = dep.displayInformations.label ?? dep.displayInformations.code ?? ""
-            let labelMatches = label.lowercased() == lineName.lowercased() ||
-                              label.replacingOccurrences(of: "T", with: "").lowercased() == lineName.replacingOccurrences(of: "T", with: "").lowercased()
-            let dir = dep.displayInformations.direction ?? ""
-            let dirMatches = dir == direction ||
-                             dir.lowercased().contains(direction.lowercased()) ||
-                             direction.lowercased().contains(dir.lowercased())
-            return labelMatches && dirMatches
-        }.compactMap { dep -> Date? in
-            guard let date = DateFormat.navitia.date(from: dep.stopDateTime.departureDateTime) else { return nil }
-            return date.timeIntervalSince(now) >= -30 ? date : nil
-        }.sorted()
-
         LiveActivityManager.shared.startLiveActivity(
             stationName: currentStation.name,
             lineName: lineName,
             direction: direction,
             nextDepartures: departuresToUse,
-            departureDates: Array(matchingDates.prefix(2)),
             stopIds: Array(targetStopIds),
             lineColor: lineColor,
             textColor: textColor

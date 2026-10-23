@@ -43,6 +43,7 @@ struct DuoJourneyPreviewPanel: View {
             }
             .padding(16)
         }
+        .scrollContentBackground(.hidden)
         .liquidGlassBackground()
     }
 

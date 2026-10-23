@@ -662,6 +662,7 @@ struct ItineraryResultView: View {
                 }
                 .padding(.vertical)
             }
+            .scrollContentBackground(.hidden)
         }
     }
 
@@ -1587,6 +1588,7 @@ struct JourneyPreviewView: View {
                 .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
                     self.scrollOffset = value
                 }
+                .scrollContentBackground(.hidden)
                 .ignoresSafeArea(edges: .bottom)
                 
                 // Bouton de fermeture flottant dans la zone de sécurité (ne dépasse plus)

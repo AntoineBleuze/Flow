@@ -159,7 +159,7 @@ class StationExitsService {
         }
     }
     
-    func closestExit(to coordinate: CLLocationCoordinate2D, stationId: String? = nil) -> StationExit? {
+    func closestExit(to coordinate: CLLocationCoordinate2D, stationId: String? = nil, stationName: String? = nil) -> StationExit? {
         let target = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
         let candidates: [StationExit]
         if let stationId = stationId {
@@ -168,6 +168,22 @@ class StationExitsService {
             candidates = allExits
         }
         return candidates.filter { $0.is_exit }.min { a, b in
+            guard let cA = a.coordinates, let cB = b.coordinates else { return false }
+            let distA = target.distance(from: CLLocation(latitude: cA.lat, longitude: cA.lon))
+            let distB = target.distance(from: CLLocation(latitude: cB.lat, longitude: cB.lon))
+            return distA < distB
+        }
+    }
+
+    func closestEntry(to coordinate: CLLocationCoordinate2D, stationId: String? = nil, stationName: String? = nil) -> StationExit? {
+        let target = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        let candidates: [StationExit]
+        if let stationId = stationId {
+            candidates = exitsForStation(id: stationId)
+        } else {
+            candidates = allExits
+        }
+        return candidates.filter { $0.is_entry }.min { a, b in
             guard let cA = a.coordinates, let cB = b.coordinates else { return false }
             let distA = target.distance(from: CLLocation(latitude: cA.lat, longitude: cA.lon))
             let distB = target.distance(from: CLLocation(latitude: cB.lat, longitude: cB.lon))

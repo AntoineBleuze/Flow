@@ -178,6 +178,26 @@ struct LocalStation: Codable, Identifiable {
     var id: String { nom }
     let nom: String
     let correspondances: [String]
+    var isUnderConstruction: Bool = false
+
+    enum CodingKeys: String, CodingKey {
+        case nom
+        case correspondances
+        case isUnderConstruction
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        nom = try container.decode(String.self, forKey: .nom)
+        correspondances = try container.decodeIfPresent([String].self, forKey: .correspondances) ?? []
+        isUnderConstruction = try container.decodeIfPresent(Bool.self, forKey: .isUnderConstruction) ?? false
+    }
+
+    init(nom: String, correspondances: [String], isUnderConstruction: Bool = false) {
+        self.nom = nom
+        self.correspondances = correspondances
+        self.isUnderConstruction = isUnderConstruction
+    }
 }
 
 struct LocalNetworkData: Codable {

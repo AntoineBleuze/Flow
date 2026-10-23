@@ -68,78 +68,18 @@ struct AppMapView: View {
                 )
                 .ignoresSafeArea()
                 
-                if showControls && !navigationManager.isNavigating {
-                    // Bottom Stack: Controls Toolbar on right + Bottom AI Bar or AI Action Card
-                    VStack(spacing: 12) {
+                if showControls {
+                    // Controls Toolbar on the right (Recentering, Polyline Style, Traffic)
+                    VStack {
                         Spacer()
-
-                        // 1. Controls Toolbar on the right
                         HStack {
                             Spacer()
                             mapControlToolbar
                         }
                         .padding(.trailing, duoPosture == .unfoldedDualScreen ? 24 : 16)
-
-                        // 2. Either the AI Journey Action Card (if preview active) or the Bottom AI Voice/Text Input Bar
-                        // On iPhone Duo unfolded, the left screen already provides full AI and journey controls
-                        if duoPosture != .unfoldedDualScreen {
-                            if let journey = coordinator.previewJourney {
-                                aiJourneyActionCard(journey: journey)
-                                    .frame(maxWidth: horizontalSizeClass == .regular ? 480 : .infinity)
-                                    .padding(.horizontal, 16)
-                                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                            } else {
-                                HStack(alignment: .center, spacing: 12) {
-                                    if horizontalSizeClass == .regular {
-                                        Spacer()
-                                    }
-                                    bottomAIPillBar
-                                        .frame(maxWidth: horizontalSizeClass == .regular ? 480 : .infinity)
-
-                                    // Espace réservé pour le bouton de recherche système (TabView) afin d'aligner parfaitement la barre IA
-                                    Color.clear
-                                        .frame(width: 50, height: 50)
-                                        .allowsHitTesting(false)
-                                }
-                                .padding(.horizontal, 16)
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
-                            }
-                        }
+                        .padding(.bottom, duoPosture == .unfoldedDualScreen ? 24 : (UIDevice.current.userInterfaceIdiom == .pad ? 40 : 130))
                     }
-                    .padding(.bottom, duoPosture == .unfoldedDualScreen ? 24 : 16)
-                    .ignoresSafeArea(.container, edges: .bottom)
                     .zIndex(15)
-                }
-                
-                // Panneau de navigation flottant en mode fermé (ne prend pas toute la largeur et ne couvre pas la navbar)
-                if showControls && navigationManager.isNavigating && duoPosture != .unfoldedDualScreen,
-                   let journey = navigationManager.currentJourney {
-                    VStack(spacing: 8) {
-                        Spacer()
-
-                        // Bouton de recentrage au-dessus de la carte de guidage
-                        HStack {
-                            Spacer()
-                            Button(action: {
-                                coordinator.recenterMap()
-                            }) {
-                                Image(systemName: coordinator.userTrackingModeImageName)
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundColor(coordinator.userTrackingMode == .none ? .primary : .blue)
-                                    .frame(width: 44, height: 44)
-                            }
-                            .buttonStyle(.liquidGlassInteractive)
-                            .padding(.trailing, 16)
-                        }
-
-                        // Carte de guidage flottante élégante
-                        ImmersiveNavigationView(journey: journey, isFloating: true)
-                            .frame(maxWidth: horizontalSizeClass == .regular ? 480 : .infinity)
-                            .padding(.horizontal, 14)
-                            .padding(.bottom, 12)
-                    }
-                    .zIndex(25)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
 
                 // iPad: Station detail panel at bottom-left (resizable) - only when not in Duo dual-screen mode
@@ -198,20 +138,7 @@ struct AppMapView: View {
             .ignoresSafeArea(.container, edges: .bottom)
         }
         .ignoresSafeArea(.container, edges: .bottom)
-        // iPhone folded: keep classic sheet behavior (iPad uses inline panel above, Duo unfolded uses left pane)
-        .sheet(item: Binding(
-            get: {
-                guard !navigationManager.isNavigating else { return nil }
-                guard duoPosture != .unfoldedDualScreen else { return nil }
-                guard UIDevice.current.userInterfaceIdiom != .pad else { return nil }
-                return coordinator.selectedStation
-            },
-            set: { coordinator.selectedStation = $0 }
-        )) { station in
-            StationDetailSheet(station: station, selectedDetent: $sheetDetent)
-                .presentationDetents([.fraction(0.22), .medium, .large], selection: $sheetDetent)
-                .liquidGlassSheet()
-        }
+
 
         .onAppear {
             LocationManager.shared.requestLocation()

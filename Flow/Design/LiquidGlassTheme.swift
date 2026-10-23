@@ -6,7 +6,19 @@ public enum LiquidGlassTheme {
     /// Rayon d'angle standard pour les surfaces et cartes Liquid Glass
     public static let standardCornerRadius: CGFloat = 18.0
     public static let largeCornerRadius: CGFloat = 24.0
-    public static let sheetCornerRadius: CGFloat = 28.0
+    public static let sheetCornerRadius: CGFloat = 38.0
+
+    /// Bordure spéculaire (Rim Light) : LinearGradient vertical (Haut: blanc 0.65, Bas: blanc 0.10)
+    public static var specularRimLight: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color.white.opacity(0.65),
+                Color.white.opacity(0.10)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
     
     // MARK: - Contrôle Rapide d'Opacité des Surfaces
     /// Opacité globale du fond .ultraThinMaterial pour toutes les sheets modales (0.0 = transparent, 1.0 = opaque standard)
@@ -275,26 +287,38 @@ public struct LiquidGlassDynamicSheetBackground: View {
     public var body: some View {
         GeometryReader { proxy in
             let height = proxy.size.height
-            // Hauteur compacte standard (~160-200 pt) -> minOpacity
-            // Hauteur étendue / plein écran (~700-850 pt) -> maxOpacity
-            let minH: CGFloat = 160.0
+            let minH: CGFloat = 120.0
             let maxH: CGFloat = 720.0
             let progress = min(1.0, max(0.0, (height - minH) / (maxH - minH)))
-            let currentOpacity = minOpacity + progress * (maxOpacity - minOpacity)
             
             ZStack {
+                // Fond ultraThinMaterial de base
                 Rectangle()
                     .fill(.ultraThinMaterial)
-                    .opacity(currentOpacity)
                 
-                // Teinte subtile spéculaire de verre qui s'intensifie avec l'élévation
+                // Teinte lumineuse subtile (Position basse & moyenne)
                 if colorScheme == .dark {
-                    Color.white.opacity(0.01 + progress * 0.04)
+                    Color.white.opacity(0.04)
                 } else {
-                    Color.white.opacity(0.08 + progress * 0.16)
+                    Color.white.opacity(0.12)
                 }
+                
+                // Position haute : couche lactée superposée pour contraste parfait
+                #if canImport(UIKit)
+                Color(uiColor: .systemBackground)
+                    .opacity(0.55 * progress)
+                #else
+                Color.black.opacity(0.55 * progress)
+                #endif
             }
-            .animation(.interactiveSpring(response: 0.25, dampingFraction: 0.85), value: currentOpacity)
+            .overlay(alignment: .top) {
+                // Liseré spéculaire supérieur (Rim light 1pt)
+                Rectangle()
+                    .fill(LiquidGlassTheme.specularRimLight)
+                    .frame(height: 1)
+            }
+            .animation(.interactiveSpring(response: 0.25, dampingFraction: 0.85), value: progress)
+            .shadow(color: Color.black.opacity(0.12), radius: 24, x: 0, y: -4)
             .ignoresSafeArea()
         }
     }
@@ -451,9 +475,9 @@ public struct LiquidGlassCircleButton: View {
     
     public init(
         icon: String,
-        size: CGFloat = 36,
-        iconSize: CGFloat = 15,
-        iconWeight: Font.Weight = .bold,
+        size: CGFloat = 40,
+        iconSize: CGFloat = 16,
+        iconWeight: Font.Weight = .semibold,
         foregroundColor: Color? = nil,
         action: @escaping () -> Void
     ) {
@@ -474,7 +498,7 @@ public struct LiquidGlassCircleButton: View {
                 .background(.ultraThinMaterial, in: Circle())
                 .overlay(
                     Circle()
-                        .strokeBorder(LiquidGlassTheme.specularBorder(for: colorScheme), lineWidth: 1.0)
+                        .strokeBorder(LiquidGlassTheme.specularRimLight, lineWidth: 0.5)
                 )
                 .shadow(
                     color: colorScheme == .dark ? Color.black.opacity(0.35) : Color.black.opacity(0.08),
@@ -602,11 +626,101 @@ public struct LiquidGlassSheetGrabber: View {
     
     public var body: some View {
         Capsule()
-            .fill(Color.secondary.opacity(0.35))
+            .fill(Color.primary.opacity(0.22))
             .frame(width: 36, height: 5)
             .padding(.top, 8)
             .padding(.bottom, 4)
             .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Liquid Glass Floating Pill TabBar (Style Apple Localiser)
+
+public struct LiquidGlassTabItem: Identifiable, Sendable, Equatable {
+    public let id: String
+    public let icon: String
+    public let label: String
+
+    public init(id: String, icon: String, label: String) {
+        self.id = id
+        self.icon = icon
+        self.label = label
+    }
+
+    public static let unifiedTabs: [LiquidGlassTabItem] = [
+        LiquidGlassTabItem(id: "Explore", icon: "map", label: "Explore"),
+        LiquidGlassTabItem(id: "Nearby", icon: "location.circle.fill", label: "Proximité"),
+        LiquidGlassTabItem(id: "Favorites", icon: "star.fill", label: "Favoris"),
+        LiquidGlassTabItem(id: "Trafic", icon: "tram.fill", label: "Trafic")
+    ]
+}
+
+/// Barre d'onglets unifiée en pilule flottante Liquid Glass (Capsule 64pt, padding horizontal 16pt)
+public struct LiquidGlassFloatingTabBar: View {
+    @Binding public var selectedTab: String
+    public var tabs: [LiquidGlassTabItem]
+    public var onSelectTab: ((String) -> Void)?
+    @Environment(\.colorScheme) private var colorScheme
+
+    public init(
+        selectedTab: Binding<String>,
+        tabs: [LiquidGlassTabItem] = LiquidGlassTabItem.unifiedTabs,
+        onSelectTab: ((String) -> Void)? = nil
+    ) {
+        self._selectedTab = selectedTab
+        self.tabs = tabs
+        self.onSelectTab = onSelectTab
+    }
+
+    public var body: some View {
+        HStack(spacing: 4) {
+            ForEach(tabs) { tab in
+                let isSelected = selectedTab == tab.id
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                        selectedTab = tab.id
+                        onSelectTab?(tab.id)
+                    }
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: tab.icon)
+                            .font(.system(size: 15, weight: isSelected ? .bold : .semibold))
+
+                        if isSelected {
+                            Text(tab.label)
+                                .font(.system(.subheadline, design: .rounded))
+                                .fontWeight(.bold)
+                                .lineLimit(1)
+                                .transition(.scale.combined(with: .opacity))
+                        }
+                    }
+                    .foregroundColor(isSelected ? .blue : .secondary)
+                    .padding(.horizontal, isSelected ? 14 : 10)
+                    .frame(height: 48)
+                    .background {
+                        if isSelected {
+                            Capsule()
+                                .fill(Color.blue.opacity(0.18))
+                                .overlay(
+                                    Capsule()
+                                        .strokeBorder(Color.blue.opacity(0.35), lineWidth: 1)
+                                )
+                        }
+                    }
+                }
+                .buttonStyle(.liquidGlassInteractive)
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 64)
+        .background(.ultraThinMaterial)
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .strokeBorder(LiquidGlassTheme.specularRimLight, lineWidth: 1.0)
+        )
+        .shadow(color: Color.black.opacity(0.12), radius: 24, x: 0, y: -4)
+        .padding(.horizontal, 16)
     }
 }
 

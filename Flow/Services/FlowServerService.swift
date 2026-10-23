@@ -118,6 +118,22 @@ class FlowServerService: ObservableObject {
         }.resume()
     }
 
+    /// Vérifie de manière asynchrone si le serveur backend est accessible
+    func checkHealthAsync() async -> Bool {
+        guard let url = URL(string: "\(baseURL)/api/health") else { return false }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 4.0
+        do {
+            let (_, response) = try await session.data(for: request)
+            if let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) {
+                return true
+            }
+            return false
+        } catch {
+            return false
+        }
+    }
+
     #if os(iOS)
     @objc private func appWillEnterForeground() {
         isAppInBackground = false

@@ -87,6 +87,7 @@ struct EmbeddedSearchSheetContent: View {
                 .padding(.top, 4)
                 .padding(.bottom, 24)
             }
+            .scrollContentBackground(.hidden)
         }
         .liquidGlassBackground()
         .onChange(of: searchText) { _, newValue in

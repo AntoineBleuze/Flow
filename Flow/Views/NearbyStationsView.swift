@@ -149,6 +149,7 @@ struct NearbyStationsView: View {
                 .frame(maxWidth: horizontalSizeClass == .regular ? 700 : .infinity)
                 .frame(maxWidth: .infinity)
             }
+            .scrollContentBackground(.hidden)
         }
     }
 }

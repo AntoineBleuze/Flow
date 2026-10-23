@@ -44,6 +44,15 @@ class NavigationManager: NSObject, ObservableObject {
     @Published var activeRameId: String? = nil
     @Published var departuresList: [Departure] = []
     @Published var selectedDeparture: Departure? = nil
+    @Published var upcomingStationsReserve: [String: StationRealTimeReserve] = [:]
+    @Published var activeIncident: RouteIncident? = nil
+    @Published var isOfflineMode: Bool = false
+    @Published var isServerResponding: Bool = true
+
+    func dismissIncidentProposal() {
+        self.activeIncident = nil
+    }
+
     private var lastLocationUpdateTime: Date?
 
     var isLocationWorking: Bool {
