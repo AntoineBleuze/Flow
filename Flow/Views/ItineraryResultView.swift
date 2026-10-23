@@ -55,16 +55,9 @@ struct ItineraryResultView: View {
 
     private var customHeaderRow: some View {
         HStack(alignment: .center) {
-            Button(action: {
+            LiquidGlassCircleButton(icon: "chevron.left", size: 36, iconSize: 14, iconWeight: .bold) {
                 dismiss()
-            }) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(.primary)
-                    .padding(10)
             }
-            .buttonStyle(.plain)
-            .glassEffect(.regular.interactive(), in: .circle)
             
             Spacer()
             
@@ -235,51 +228,34 @@ struct ItineraryResultView: View {
                 }
                 .padding()
             }
-            .background(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.03), in: RoundedRectangle(cornerRadius: 12))
+            .background {
+                RoundedRectangle(cornerRadius: LiquidGlassTheme.standardCornerRadius, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: LiquidGlassTheme.standardCornerRadius, style: .continuous)
+                            .fill(LiquidGlassTheme.cardBackgroundTint(for: colorScheme))
+                    )
+            }
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.06), lineWidth: 1)
+                RoundedRectangle(cornerRadius: LiquidGlassTheme.standardCornerRadius, style: .continuous)
+                    .strokeBorder(LiquidGlassTheme.specularBorder(for: colorScheme), lineWidth: 1)
             )
+            .clipShape(RoundedRectangle(cornerRadius: LiquidGlassTheme.standardCornerRadius, style: .continuous))
             
             // Swap Button
-            Button(action: swapStations) {
-                Image(systemName: "arrow.up.arrow.down")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.blue)
-                    .frame(width: 44, height: 44)
+            LiquidGlassCircleButton(icon: "arrow.up.arrow.down", size: 44, iconSize: 16, iconWeight: .semibold, foregroundColor: .blue) {
+                swapStations()
             }
-            .buttonStyle(.plain)
-            .glassEffect(.regular.interactive(), in: .circle)
         }
     }
 
     private var filterPicker: some View {
-        HStack(spacing: 4) {
+        Picker("Filtre d'itinéraire", selection: $selectedFilter) {
             ForEach([ItineraryFilter.fastest, ItineraryFilter.lessWalking, ItineraryFilter.fewerTransfers], id: \.self) { filter in
-                Button(action: {
-                    withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
-                        selectedFilter = filter
-                    }
-                }) {
-                    Text(filterTitle(filter))
-                        .font(.system(.subheadline, design: .rounded))
-                        .fontWeight(.bold)
-                        .foregroundColor(selectedFilter == filter ? (colorScheme == .dark ? .white : .black) : .gray)
-                        .padding(.vertical, 8)
-                        .frame(maxWidth: .infinity)
-                        .background(
-                            selectedFilter == filter
-                                ? (colorScheme == .dark ? Color.white.opacity(0.15) : Color.white)
-                                : Color.clear,
-                            in: Capsule()
-                        )
-                        .shadow(color: (selectedFilter == filter && colorScheme == .light) ? Color.black.opacity(0.08) : Color.clear, radius: 4, x: 0, y: 1)
-                }
-                .buttonStyle(.plain)
+                Text(filterTitle(filter)).tag(filter)
             }
         }
-        .padding(4)
-        .glassEffect(.regular.interactive(), in: Capsule())
+        .pickerStyle(.segmented)
     }
 
     private func filterTitle(_ filter: ItineraryFilter) -> String {
@@ -921,6 +897,10 @@ struct JourneyRow: View {
                     }
 
                     Spacer()
+
+                    if let affluence = journey.overallAffluence {
+                        AffluenceBadgeView(level: affluence)
+                    }
                 }
             }
             .buttonStyle(.plain)
@@ -995,13 +975,8 @@ struct JourneyRow: View {
                             .font(.system(.subheadline, design: .rounded))
                             .fontWeight(.bold)
                     }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color(hex: "0A84FF"))
-                    .clipShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.glassProminent)
             }
         }
         .padding(.vertical, 12)
@@ -1075,20 +1050,24 @@ struct SectionDetailView: View {
     @State private var isStopsExpanded = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            // Timeline indicator
+        HStack(alignment: .top, spacing: 14) {
+            // Timeline indicator: fixed width 24 pt, perfectly centered
             VStack(spacing: 0) {
-                Circle()
-                    .fill(circleColor)
-                    .frame(width: 12, height: 12)
+                ZStack {
+                    Circle()
+                        .fill(circleColor)
+                        .frame(width: 12, height: 12)
+                }
+                .frame(width: 24, height: 24)
 
                 if !isLast {
                     Rectangle()
                         .fill(lineColor)
-                        .frame(width: 2)
-                        .padding(.vertical, 4)
+                        .frame(width: 3)
+                        .frame(maxHeight: .infinity)
                 }
             }
+            .frame(width: 24)
 
             // Section content
             VStack(alignment: .leading, spacing: 6) {
@@ -1166,26 +1145,50 @@ struct SectionDetailView: View {
 
                             // Intermediate stops section
                             if let stops = section.stop_date_times, !stops.isEmpty {
+                                let skippedStops = stops.filter { $0.isSkipped }
+                                let activeStopsCount = max(0, stops.count - skippedStops.count)
+
                                 Button(action: {
                                     withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                                         isStopsExpanded.toggle()
                                     }
                                 }) {
-                                    HStack(spacing: 4) {
+                                    HStack(spacing: 6) {
                                         Image(systemName: isStopsExpanded ? "chevron.down" : "chevron.right")
                                             .font(.caption2)
-                                        Text("\(stops.count) arrêt\(stops.count > 1 ? "s" : "") (\((section.duration ?? 0) / 60) min)")
-                                            .font(.system(.caption, design: .rounded))
-                                            .fontWeight(.medium)
+                                        if skippedStops.isEmpty {
+                                            Text("\(stops.count) arrêt\(stops.count > 1 ? "s" : "") (\((section.duration ?? 0) / 60) min)")
+                                                .font(.system(.caption, design: .rounded))
+                                                .fontWeight(.medium)
+                                        } else {
+                                            Text("\(activeStopsCount) arrêt\(activeStopsCount > 1 ? "s" : "") (\(skippedStops.count) non desservi) (\((section.duration ?? 0) / 60) min)")
+                                                .font(.system(.caption, design: .rounded))
+                                                .fontWeight(.medium)
+                                            Image(systemName: "exclamationmark.triangle.fill")
+                                                .font(.system(size: 10))
+                                                .foregroundColor(.orange)
+                                        }
                                     }
-                                    .foregroundColor(.blue)
+                                    .foregroundColor(skippedStops.isEmpty ? .blue : .orange)
                                     .padding(.vertical, 4)
                                     .padding(.horizontal, 8)
-                                    .background(Color.blue.opacity(0.08))
+                                    .background((skippedStops.isEmpty ? Color.blue : Color.orange).opacity(0.08))
                                     .clipShape(Capsule())
                                 }
                                 .buttonStyle(.plain)
                                 .padding(.leading, 8)
+
+                                if !skippedStops.isEmpty && !isStopsExpanded {
+                                    let names = skippedStops.compactMap { $0.stop_point.name }.joined(separator: ", ")
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "info.circle.fill")
+                                            .font(.system(size: 10))
+                                        Text("Arrêt \(names) fermé / non desservi")
+                                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                                    }
+                                    .foregroundColor(.orange)
+                                    .padding(.leading, 8)
+                                }
 
                                 if isStopsExpanded {
                                     VerticalItineraryStopsView(section: section)
@@ -1205,6 +1208,12 @@ struct SectionDetailView: View {
                             }
                         }
                         .padding(.leading, 16)
+
+                        if let affluence = section.estimated_affluence {
+                            AffluenceSectionCard(affluence: affluence)
+                                .padding(.leading, 16)
+                                .padding(.top, 2)
+                        }
 
                         if let duration = section.duration {
                             Text("\(duration / 60) min")
@@ -1401,8 +1410,8 @@ struct JourneyPreviewView: View {
             let blurRadius = min(12.0, (scrolledDistance / 150.0) * 12.0)
             
             ZStack(alignment: .top) {
-                // Fond opaque global qui fait toute la page
-                Color(uiColor: .systemBackground)
+                // Fond transparent Liquid Glass
+                Color.clear
                     .ignoresSafeArea()
                 
                 // La carte d'itinéraire en arrière-plan
@@ -1411,8 +1420,9 @@ struct JourneyPreviewView: View {
                     .blur(radius: blurRadius)
                     .ignoresSafeArea(edges: .top)
                 
-                // Overlay opaque qui s'affiche progressivement pour rendre le fond opaque au scroll
-                Color(uiColor: .systemBackground)
+                // Overlay en verre qui s'opacifie progressivement au scroll
+                Rectangle()
+                    .fill(.ultraThinMaterial)
                     .frame(height: mapHeight)
                     .opacity(fadeProgress)
                     .ignoresSafeArea(edges: .top)
@@ -1473,7 +1483,7 @@ struct JourneyPreviewView: View {
                                         .font(.system(.caption, design: .rounded))
                                         .fontWeight(.bold)
                                         .foregroundColor(.secondary)
-                                    Text("\(walkingTime / 60) MIN")
+                                    Text("\(walkingTime / 60) min")
                                         .font(.system(size: 24, weight: .black, design: .rounded))
                                         .foregroundColor(.yellow)
                                 }
@@ -1489,26 +1499,39 @@ struct JourneyPreviewView: View {
                                         .font(.system(size: 24, weight: .black, design: .rounded))
                                         .foregroundColor(.red)
                                 }
+
+                                if let affluence = journey.overallAffluence {
+                                    Spacer()
+
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("AFFLUENCE")
+                                            .font(.system(.caption, design: .rounded))
+                                            .fontWeight(.bold)
+                                            .foregroundColor(.secondary)
+                                        Text(affluence.title)
+                                            .font(.system(size: 20, weight: .black, design: .rounded))
+                                            .foregroundColor(affluenceColor(for: affluence))
+                                    }
+                                }
                             }
                             .padding(.vertical, 8)
                         }
                         .padding(.horizontal)
                         .padding(.bottom, 20)
-                        // Gradient de lisibilité derrière le texte sur la carte
+                        // Gradient de lisibilité Liquid Glass
                         .background(
                             LinearGradient(
                                 colors: [
                                     .clear,
-                                    Color(uiColor: .systemBackground).opacity(0.40),
-                                    Color(uiColor: .systemBackground).opacity(0.85),
-                                    Color(uiColor: .systemBackground)
+                                    (colorScheme == .dark ? Color.black : Color.white).opacity(0.35),
+                                    (colorScheme == .dark ? Color.black : Color.white).opacity(0.70)
                                 ],
                                 startPoint: .top,
                                 endPoint: .bottom
                             )
                         )
                         
-                        // Fiche de détails opaque
+                        // Fiche de détails en verre
                         VStack(spacing: 20) {
                             Divider()
                                 .background(Color.secondary.opacity(0.2))
@@ -1541,25 +1564,23 @@ struct JourneyPreviewView: View {
                                 }
                             }
                             
-                            // Bouton Démarrer la navigation avec effet de verre
+                            // Bouton Démarrer la navigation avec style Liquid Glass Prominent
                             Button(action: onStartNavigation) {
                                 HStack {
                                     Image(systemName: "location.fill")
                                     Text("Démarrer la navigation")
                                         .fontWeight(.bold)
                                 }
-                                .foregroundColor(.white)
                                 .frame(maxWidth: .infinity)
-                                .padding()
+                                .padding(.vertical, 4)
                             }
-                            .buttonStyle(.plain)
-                            .glassEffect(.regular.interactive(), in: Capsule())
+                            .buttonStyle(.glassProminent)
                             .padding(.horizontal)
                             .padding(.top, 16)
                             .padding(.bottom, 24)
                         }
                         .frame(minHeight: max(0, geometry.size.height - mapHeight), alignment: .top)
-                        .background(Color(uiColor: .systemBackground))
+                        .background(.ultraThinMaterial)
                     }
                 }
                 .coordinateSpace(name: "scroll")
@@ -1607,6 +1628,19 @@ struct JourneyPreviewView: View {
             return "\(hours)h\(String(format: "%02d", mins))"
         }
         return "\(mins) min"
+    }
+
+    private func affluenceColor(for level: CrowdLevel) -> Color {
+        switch level {
+        case .low:
+            return LiquidGlassTheme.liveGreen(for: colorScheme)
+        case .moderate:
+            return LiquidGlassTheme.statusWorksColor(for: colorScheme)
+        case .high:
+            return colorScheme == .dark ? Color(hex: "FF9F0A") : Color(hex: "D96B00")
+        case .veryHigh:
+            return colorScheme == .dark ? Color(hex: "FF453A") : Color(hex: "D70015")
+        }
     }
 }
 
@@ -1657,15 +1691,15 @@ private struct ItinerarySheetsModifier: ViewModifier {
             }
             .sheet(isPresented: $showStartPicker) {
                 SimpleStationPicker(selectedStation: $startStation, currentLocation: currentLocation)
-                    .liquidGlassSheetBackground()
+                    .liquidGlassSheet()
             }
             .sheet(isPresented: $showEndPicker) {
                 SimpleStationPicker(selectedStation: $endStation, currentLocation: currentLocation)
-                    .liquidGlassSheetBackground()
+                    .liquidGlassSheet()
             }
             .sheet(isPresented: $showStationToAvoidPicker) {
                 SimpleStationPicker(selectedStation: $selectedStationToAvoid, currentLocation: currentLocation)
-                    .liquidGlassSheetBackground()
+                    .liquidGlassSheet()
             }
             .fullScreenCover(item: $selectedJourneyForPreview) { journey in
                 JourneyPreviewView(

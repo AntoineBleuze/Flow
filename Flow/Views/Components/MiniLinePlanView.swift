@@ -5,6 +5,7 @@ struct TimelineItem: Identifiable {
     let name: String
     let isAffected: Bool
     let isGap: Bool
+    var isUnderConstruction: Bool = false
 }
 
 struct HorizontalTimelineCell: View {
@@ -17,33 +18,36 @@ struct HorizontalTimelineCell: View {
     let hasLineAfter: Bool
     let isLineBeforeAffected: Bool
     let isLineAfterAffected: Bool
+    var isLineBeforeDashed: Bool = false
+    var isLineAfterDashed: Bool = false
     let normalOpacity: Double
+    var isTerminus: Bool = false
     
     var body: some View {
         VStack(spacing: 0) {
             // Station name at top, rotated at -45°
             if !item.isGap {
-                HStack(spacing: 2) {
+                HStack(spacing: 3) {
                     Text(item.name)
-                        .font(.system(size: 10, weight: isAffected ? .bold : .medium))
-                        .foregroundColor(isAffected ? severityColor : .primary)
+                        .font(.system(size: 11, weight: isAffected || isTerminus ? .bold : .medium, design: .rounded))
+                        .foregroundColor(isAffected ? severityColor : (item.isUnderConstruction ? .secondary : .primary))
                         .lineLimit(1)
                         .fixedSize()
                     if isAffected {
                         Image(systemName: severityIcon)
-                            .font(.system(size: 8, weight: .bold))
+                            .font(.system(size: 9, weight: .bold))
                             .foregroundColor(severityColor)
                     }
                 }
                 .rotationEffect(.degrees(-45), anchor: .bottomLeading)
-                .frame(width: 16, height: 70, alignment: .bottomLeading)
-                .padding(.bottom, 4)
+                .frame(width: 20, height: 105, alignment: .bottomLeading)
+                .padding(.bottom, 6)
             } else {
                 Text("...")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 11, weight: .bold))
                     .foregroundColor(.secondary)
-                    .frame(width: 16, height: 70, alignment: .bottom)
-                    .padding(.bottom, 4)
+                    .frame(width: 20, height: 105, alignment: .bottom)
+                    .padding(.bottom, 6)
             }
             
             // Horizontal timeline graphic (dot + line segments)
@@ -51,21 +55,51 @@ struct HorizontalTimelineCell: View {
                 // Horizontal line segments
                 HStack(spacing: 0) {
                     if hasLineBefore {
-                        Rectangle()
-                            .fill(isLineBeforeAffected ? severityColor : lineColor)
-                            .opacity(isLineBeforeAffected ? 1.0 : normalOpacity)
-                            .frame(width: 14, height: 4)
+                        let beforeColor = isLineBeforeAffected ? severityColor : lineColor.opacity(normalOpacity)
+                        if isLineBeforeDashed {
+                            Canvas { context, size in
+                                var path = Path()
+                                path.move(to: CGPoint(x: 0, y: size.height / 2))
+                                path.addLine(to: CGPoint(x: size.width, y: size.height / 2))
+                                context.stroke(
+                                    path,
+                                    with: .color(beforeColor),
+                                    style: StrokeStyle(lineWidth: 4, lineCap: .round, dash: [3, 3])
+                                )
+                            }
+                            .frame(width: 19, height: 5)
+                        } else {
+                            Rectangle()
+                                .fill(isLineBeforeAffected ? severityColor : lineColor)
+                                .opacity(isLineBeforeAffected ? 1.0 : normalOpacity)
+                                .frame(width: 19, height: 5)
+                        }
                     } else {
-                        Spacer().frame(width: 14)
+                        Spacer().frame(width: 19)
                     }
                     
                     if hasLineAfter {
-                        Rectangle()
-                            .fill(isLineAfterAffected ? severityColor : lineColor)
-                            .opacity(isLineAfterAffected ? 1.0 : normalOpacity)
-                            .frame(width: 14, height: 4)
+                        let afterColor = isLineAfterAffected ? severityColor : lineColor.opacity(normalOpacity)
+                        if isLineAfterDashed {
+                            Canvas { context, size in
+                                var path = Path()
+                                path.move(to: CGPoint(x: 0, y: size.height / 2))
+                                path.addLine(to: CGPoint(x: size.width, y: size.height / 2))
+                                context.stroke(
+                                    path,
+                                    with: .color(afterColor),
+                                    style: StrokeStyle(lineWidth: 4, lineCap: .round, dash: [3, 3])
+                                )
+                            }
+                            .frame(width: 19, height: 5)
+                        } else {
+                            Rectangle()
+                                .fill(isLineAfterAffected ? severityColor : lineColor)
+                                .opacity(isLineAfterAffected ? 1.0 : normalOpacity)
+                                .frame(width: 19, height: 5)
+                        }
                     } else {
-                        Spacer().frame(width: 14)
+                        Spacer().frame(width: 19)
                     }
                 }
                 
@@ -79,26 +113,37 @@ struct HorizontalTimelineCell: View {
                         }
                     }
                 } else {
+                    let dotSize: CGFloat = isTerminus ? 15 : 12
                     ZStack {
                         Circle()
-                            .fill(Color(UIColor.systemBackground))
-                            .frame(width: 12, height: 12)
+                            .fill(.ultraThinMaterial)
+                            .frame(width: dotSize + 2, height: dotSize + 2)
                         if isAffected {
                             Circle()
                                 .fill(severityColor)
-                                .frame(width: 10, height: 10)
+                                .frame(width: dotSize, height: dotSize)
+                            if isTerminus {
+                                Circle()
+                                    .fill(.ultraThinMaterial)
+                                    .frame(width: 5, height: 5)
+                            }
+                        } else if item.isUnderConstruction {
+                            Circle()
+                                .strokeBorder(lineColor, style: StrokeStyle(lineWidth: 2, dash: [2.5, 2]))
+                                .opacity(normalOpacity)
+                                .frame(width: dotSize, height: dotSize)
                         } else {
                             Circle()
-                                .stroke(lineColor, lineWidth: 2)
+                                .stroke(lineColor, lineWidth: isTerminus ? 3 : 2.5)
                                 .opacity(normalOpacity)
-                                .frame(width: 10, height: 10)
+                                .frame(width: dotSize, height: dotSize)
                         }
                     }
                 }
             }
-            .frame(height: 16)
+            .frame(height: 20)
         }
-        .frame(width: 28)
+        .frame(width: 38)
     }
 }
 
@@ -109,6 +154,7 @@ struct MiniLinePlanView: View {
     @State private var lineData: LocalLineData?
     @State private var affectedStations: Set<String> = []
     @State private var isLoading = true
+    @State private var showFullPlan = false
     
     var body: some View {
         Group {
@@ -118,61 +164,142 @@ struct MiniLinePlanView: View {
                     ProgressView()
                     Spacer()
                 }
-                .frame(height: 100)
+                .frame(height: 140)
             } else if let data = lineData {
-                let timelineItems = buildTimeline(data: data)
-                if timelineItems.isEmpty {
-                    MiniFallbackPlanView(line: line, info: info)
-                } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Impact sur le plan de la ligne :")
-                            .font(.caption).bold()
-                            .foregroundColor(.secondary)
-                        
-                        ScrollView(.horizontal, showsIndicators: true) {
-                            LazyHStack(alignment: .bottom, spacing: 0) {
-                                ForEach(Array(timelineItems.enumerated()), id: \.element.id) { index, item in
-                                    let isFirst = index == 0
-                                    let isLast = index == timelineItems.count - 1
-                                    
-                                    let hasLineBefore = !isFirst
-                                    let hasLineAfter = !isLast
-                                    
-                                    let isLineBeforeAffected = hasLineBefore && item.isAffected && timelineItems[index - 1].isAffected
-                                    let isLineAfterAffected = hasLineAfter && item.isAffected && timelineItems[index + 1].isAffected
-                                    
-                                    HorizontalTimelineCell(
-                                        item: item,
-                                        isAffected: item.isAffected,
-                                        lineColor: resolveLineColor(line.lineId, type: line.type),
-                                        severityColor: info.severity.color,
-                                        severityIcon: info.severity.icon,
-                                        hasLineBefore: hasLineBefore,
-                                        hasLineAfter: hasLineAfter,
-                                        isLineBeforeAffected: isLineBeforeAffected,
-                                        isLineAfterAffected: isLineAfterAffected,
-                                        normalOpacity: 0.35
-                                    )
-                                }
-                            }
-                            .padding(.top, 10)
-                            .padding(.horizontal, 12)
-                            .padding(.bottom, 6)
-                        }
-                        .background(Color.primary.opacity(0.04))
-                        .cornerRadius(10)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
-                        )
-                    }
-                }
+                planContentView(data: data)
             } else {
                 MiniFallbackPlanView(line: line, info: info)
             }
         }
         .onAppear {
             loadData()
+        }
+    }
+    
+    @ViewBuilder
+    private func planContentView(data: LocalLineData) -> some View {
+        if data.allStations.isEmpty {
+            MiniFallbackPlanView(line: line, info: info)
+        } else {
+            let sections = data.schematicSections
+            let hasBranches = !sections.topBranches.isEmpty || !sections.branches.isEmpty
+            let resolvedLineColor = resolveLineColor(line.lineId, type: line.type)
+            
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Impact sur le plan de la ligne :")
+                        .font(.caption).bold()
+                        .foregroundColor(.secondary)
+                    
+                    Spacer()
+                    
+                    Button {
+                        showFullPlan = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.system(size: 10, weight: .bold))
+                            Text("Agrandir le plan")
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        }
+                        .foregroundColor(info.severity.color)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(info.severity.color.opacity(0.12), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+                
+                if hasBranches {
+                    ScrollView([.horizontal, .vertical], showsIndicators: true) {
+                        BranchedHorizontalTimelineView(
+                            sections: sections,
+                            affectedStations: affectedStations,
+                            lineColor: resolvedLineColor,
+                            severityColor: info.severity.color,
+                            severityIcon: info.severity.icon,
+                            normalOpacity: 0.4
+                        )
+                        .padding(.top, 24)
+                        .padding(.leading, 16)
+                        .padding(.trailing, 75)
+                        .padding(.bottom, 16)
+                    }
+                    .frame(minHeight: 220, maxHeight: 380)
+                    .background(Color.primary.opacity(0.04))
+                    .cornerRadius(14)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                    )
+                } else {
+                    let timelineItems = buildTimeline(data: data)
+                    ScrollView(.horizontal, showsIndicators: true) {
+                        HStack(alignment: .bottom, spacing: 0) {
+                            ForEach(Array(timelineItems.enumerated()), id: \.element.id) { index, item in
+                                let isFirst = index == 0
+                                let isLast = index == timelineItems.count - 1
+                                
+                                let hasLineBefore = !isFirst
+                                let hasLineAfter = !isLast
+                                
+                                let isLineBeforeAffected = hasLineBefore && item.isAffected && timelineItems[index - 1].isAffected
+                                let isLineAfterAffected = hasLineAfter && item.isAffected && timelineItems[index + 1].isAffected
+                                
+                                let isLineBeforeDashed = hasLineBefore && (item.isUnderConstruction || timelineItems[index - 1].isUnderConstruction)
+                                let isLineAfterDashed = hasLineAfter && (item.isUnderConstruction || timelineItems[index + 1].isUnderConstruction)
+                                
+                                HorizontalTimelineCell(
+                                    item: item,
+                                    isAffected: item.isAffected,
+                                    lineColor: resolvedLineColor,
+                                    severityColor: info.severity.color,
+                                    severityIcon: info.severity.icon,
+                                    hasLineBefore: hasLineBefore,
+                                    hasLineAfter: hasLineAfter,
+                                    isLineBeforeAffected: isLineBeforeAffected,
+                                    isLineAfterAffected: isLineAfterAffected,
+                                    isLineBeforeDashed: isLineBeforeDashed,
+                                    isLineAfterDashed: isLineAfterDashed,
+                                    normalOpacity: 0.4,
+                                    isTerminus: isFirst || isLast
+                                )
+                            }
+                        }
+                        .padding(.top, 24)
+                        .padding(.leading, 16)
+                        .padding(.trailing, 75)
+                        .padding(.bottom, 14)
+                    }
+                    .frame(minHeight: 165)
+                    .background(Color.primary.opacity(0.04))
+                    .cornerRadius(14)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                    )
+                }
+            }
+            .sheet(isPresented: $showFullPlan) {
+                NavigationStack {
+                    LineSchematicPlanView(
+                        line: line,
+                        affectedStations: affectedStations,
+                        severityColor: info.severity.color,
+                        severityIcon: info.severity.icon
+                    )
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Fermer") {
+                                showFullPlan = false
+                            }
+                        }
+                    }
+                }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .liquidGlassSheet()
+            }
         }
     }
     
@@ -186,7 +313,7 @@ struct MiniLinePlanView: View {
             
             if let stops = info.impactedStops {
                 for stopName in stops {
-                    if let matched = data.allStations.first(where: { matchesStation($0.nom, apiName: stopName) }) {
+                    for matched in data.allStations where matchesStation(matched.nom, apiName: stopName) {
                         affected.insert(matched.nom)
                     }
                 }
@@ -209,7 +336,6 @@ struct MiniLinePlanView: View {
     }
     
     private func buildTimeline(data: LocalLineData) -> [TimelineItem] {
-        // Always show ALL stations of the line, marking affected ones
         let allStations = data.allStations
         if allStations.isEmpty { return [] }
         
@@ -220,7 +346,7 @@ struct MiniLinePlanView: View {
             guard !seen.contains(station.nom) else { continue }
             seen.insert(station.nom)
             let isAffected = affectedStations.contains(station.nom)
-            items.append(TimelineItem(id: "station-\(station.nom)", name: station.nom, isAffected: isAffected, isGap: false))
+            items.append(TimelineItem(id: "station-\(station.nom)", name: station.nom, isAffected: isAffected, isGap: false, isUnderConstruction: station.isUnderConstruction))
         }
         
         return items
@@ -278,6 +404,262 @@ struct MiniLinePlanView: View {
             return (parts[0], parts[1])
         }
         return (nil, nil)
+    }
+}
+
+// MARK: - Branched Horizontal Timeline View (RER, Transilien, Metro 7/13, T4/T8)
+
+struct BranchedHorizontalTimelineView: View {
+    let sections: LocalLineData.SchematicSections
+    let affectedStations: Set<String>
+    let lineColor: Color
+    let severityColor: Color
+    let severityIcon: String
+    let normalOpacity: Double
+    
+    private let rowHeight: CGFloat = 140
+    private let rowSpacing: CGFloat = 14
+    private let railOffsetFromBottom: CGFloat = 10
+    private let connectorWidth: CGFloat = 56
+    
+    private var centralStations: [LocalStation] {
+        var result: [LocalStation] = []
+        result.append(contentsOf: sections.leadIn)
+        result.append(contentsOf: sections.trunk)
+        if sections.branches.isEmpty {
+            result.append(contentsOf: sections.leadOut)
+        }
+        return result
+    }
+    
+    private var maxBranchCount: Int {
+        max(1, max(sections.topBranches.count, sections.branches.count))
+    }
+    
+    private var totalHeight: CGFloat {
+        CGFloat(maxBranchCount) * rowHeight + CGFloat(max(0, maxBranchCount - 1)) * rowSpacing
+    }
+    
+    private func railY(for branchIndex: Int, totalBranches: Int) -> CGFloat {
+        let blockHeight = CGFloat(totalBranches) * rowHeight + CGFloat(max(0, totalBranches - 1)) * rowSpacing
+        let startY = (totalHeight - blockHeight) / 2.0
+        return startY + CGFloat(branchIndex) * (rowHeight + rowSpacing) + (rowHeight - railOffsetFromBottom)
+    }
+    
+    private var centerRailY: CGFloat {
+        railY(for: 0, totalBranches: 1)
+    }
+    
+    var body: some View {
+        let central = centralStations
+        let firstCentralAffected = central.first.map { affectedStations.contains($0.nom) } ?? false
+        let lastCentralAffected = central.last.map { affectedStations.contains($0.nom) } ?? false
+        
+        HStack(alignment: .center, spacing: 0) {
+            // === 1. Top/Left Branches (Merge into trunk) ===
+            if !sections.topBranches.isEmpty {
+                let maxStations = sections.topBranches.map { $0.stations.count }.max() ?? 0
+                
+                VStack(alignment: .trailing, spacing: rowSpacing) {
+                    ForEach(Array(sections.topBranches.enumerated()), id: \.offset) { bIndex, branch in
+                        let missingCount = max(0, maxStations - branch.stations.count)
+                        
+                        HStack(alignment: .bottom, spacing: 0) {
+                            // Branch direction badge
+                            Text(branch.name)
+                                .font(.system(size: 10, weight: .bold, design: .rounded))
+                                .foregroundColor(lineColor)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(lineColor.opacity(0.14), in: Capsule())
+                                .padding(.trailing, 8)
+                                .offset(y: -3)
+                            
+                            if missingCount > 0 {
+                                Spacer()
+                                    .frame(width: CGFloat(missingCount) * 38)
+                            }
+                            
+                            ForEach(Array(branch.stations.enumerated()), id: \.offset) { sIndex, station in
+                                let isFirst = sIndex == 0
+                                let isLast = sIndex == branch.stations.count - 1
+                                let isAffected = affectedStations.contains(station.nom)
+                                
+                                let prevAffected = sIndex > 0 ? affectedStations.contains(branch.stations[sIndex - 1].nom) : false
+                                let nextAffected = !isLast ? affectedStations.contains(branch.stations[sIndex + 1].nom) : firstCentralAffected
+                                
+                                let prevUnderConstruction = sIndex > 0 ? branch.stations[sIndex - 1].isUnderConstruction : false
+                                let nextUnderConstruction = !isLast ? branch.stations[sIndex + 1].isUnderConstruction : (central.first?.isUnderConstruction ?? false)
+                                
+                                HorizontalTimelineCell(
+                                    item: TimelineItem(id: "top-\(bIndex)-\(sIndex)-\(station.nom)", name: station.nom, isAffected: isAffected, isGap: false, isUnderConstruction: station.isUnderConstruction),
+                                    isAffected: isAffected,
+                                    lineColor: lineColor,
+                                    severityColor: severityColor,
+                                    severityIcon: severityIcon,
+                                    hasLineBefore: !isFirst,
+                                    hasLineAfter: true,
+                                    isLineBeforeAffected: !isFirst && isAffected && prevAffected,
+                                    isLineAfterAffected: isAffected && nextAffected,
+                                    isLineBeforeDashed: !isFirst && (station.isUnderConstruction || prevUnderConstruction),
+                                    isLineAfterDashed: station.isUnderConstruction || nextUnderConstruction,
+                                    normalOpacity: normalOpacity,
+                                    isTerminus: isFirst
+                                )
+                            }
+                        }
+                        .frame(height: rowHeight, alignment: .bottom)
+                    }
+                }
+                .frame(height: totalHeight, alignment: .center)
+                
+                // Merge Bézier Curves
+                Canvas { context, size in
+                    let targetY = centerRailY
+                    for i in 0..<sections.topBranches.count {
+                        let sourceY = railY(for: i, totalBranches: sections.topBranches.count)
+                        let branchLastAffected = sections.topBranches[i].stations.last.map { affectedStations.contains($0.nom) } ?? false
+                        let curveAffected = branchLastAffected && firstCentralAffected
+                        
+                        var path = Path()
+                        path.move(to: CGPoint(x: 0, y: sourceY))
+                        path.addCurve(
+                            to: CGPoint(x: size.width, y: targetY),
+                            control1: CGPoint(x: size.width * 0.5, y: sourceY),
+                            control2: CGPoint(x: size.width * 0.5, y: targetY)
+                        )
+                        
+                        let strokeColor = curveAffected ? severityColor : lineColor.opacity(normalOpacity)
+                        context.stroke(
+                            path,
+                            with: .color(strokeColor),
+                            style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round)
+                        )
+                    }
+                }
+                .frame(width: connectorWidth, height: totalHeight)
+            }
+            
+            // === 2. Central Trunk ===
+            if !central.isEmpty {
+                HStack(alignment: .bottom, spacing: 0) {
+                    ForEach(Array(central.enumerated()), id: \.offset) { sIndex, station in
+                        let isFirst = sIndex == 0
+                        let isLast = sIndex == central.count - 1
+                        let isAffected = affectedStations.contains(station.nom)
+                        
+                        let hasBefore = !isFirst || !sections.topBranches.isEmpty
+                        let hasAfter = !isLast || !sections.branches.isEmpty
+                        
+                        let anyTopLastAffected = sections.topBranches.contains { branch in
+                            branch.stations.last.map { affectedStations.contains($0.nom) } ?? false
+                        }
+                        let anyBottomFirstAffected = sections.branches.contains { branch in
+                            branch.stations.first.map { affectedStations.contains($0.nom) } ?? false
+                        }
+                        
+                        let prevAffected = !isFirst ? affectedStations.contains(central[sIndex - 1].nom) : anyTopLastAffected
+                        let nextAffected = !isLast ? affectedStations.contains(central[sIndex + 1].nom) : anyBottomFirstAffected
+                        
+                        let prevUnderConstruction = !isFirst ? central[sIndex - 1].isUnderConstruction : false
+                        let nextUnderConstruction = !isLast ? central[sIndex + 1].isUnderConstruction : false
+                        
+                        HorizontalTimelineCell(
+                            item: TimelineItem(id: "trunk-\(sIndex)-\(station.nom)", name: station.nom, isAffected: isAffected, isGap: false, isUnderConstruction: station.isUnderConstruction),
+                            isAffected: isAffected,
+                            lineColor: lineColor,
+                            severityColor: severityColor,
+                            severityIcon: severityIcon,
+                            hasLineBefore: hasBefore,
+                            hasLineAfter: hasAfter,
+                            isLineBeforeAffected: hasBefore && isAffected && prevAffected,
+                            isLineAfterAffected: hasAfter && isAffected && nextAffected,
+                            isLineBeforeDashed: hasBefore && (station.isUnderConstruction || prevUnderConstruction),
+                            isLineAfterDashed: hasAfter && (station.isUnderConstruction || nextUnderConstruction),
+                            normalOpacity: normalOpacity,
+                            isTerminus: (isFirst && sections.topBranches.isEmpty) || (isLast && sections.branches.isEmpty)
+                        )
+                    }
+                }
+                .frame(height: rowHeight, alignment: .bottom)
+                .frame(height: totalHeight, alignment: .center)
+            }
+            
+            // === 3. Bottom/Right Branches (Fork from trunk) ===
+            if !sections.branches.isEmpty {
+                // Fork Bézier Curves
+                Canvas { context, size in
+                    let sourceY = centerRailY
+                    for i in 0..<sections.branches.count {
+                        let targetY = railY(for: i, totalBranches: sections.branches.count)
+                        let branchFirstAffected = sections.branches[i].stations.first.map { affectedStations.contains($0.nom) } ?? false
+                        let curveAffected = lastCentralAffected && branchFirstAffected
+                        
+                        var path = Path()
+                        path.move(to: CGPoint(x: 0, y: sourceY))
+                        path.addCurve(
+                            to: CGPoint(x: size.width, y: targetY),
+                            control1: CGPoint(x: size.width * 0.5, y: sourceY),
+                            control2: CGPoint(x: size.width * 0.5, y: targetY)
+                        )
+                        
+                        let strokeColor = curveAffected ? severityColor : lineColor.opacity(normalOpacity)
+                        context.stroke(
+                            path,
+                            with: .color(strokeColor),
+                            style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round)
+                        )
+                    }
+                }
+                .frame(width: connectorWidth, height: totalHeight)
+                
+                VStack(alignment: .leading, spacing: rowSpacing) {
+                    ForEach(Array(sections.branches.enumerated()), id: \.offset) { bIndex, branch in
+                        HStack(alignment: .bottom, spacing: 0) {
+                            ForEach(Array(branch.stations.enumerated()), id: \.offset) { sIndex, station in
+                                let isFirst = sIndex == 0
+                                let isLast = sIndex == branch.stations.count - 1
+                                let isAffected = affectedStations.contains(station.nom)
+                                
+                                let prevAffected = !isFirst ? affectedStations.contains(branch.stations[sIndex - 1].nom) : lastCentralAffected
+                                let nextAffected = !isLast ? affectedStations.contains(branch.stations[sIndex + 1].nom) : false
+                                
+                                let prevUnderConstruction = !isFirst ? branch.stations[sIndex - 1].isUnderConstruction : (central.last?.isUnderConstruction ?? false)
+                                let nextUnderConstruction = !isLast ? branch.stations[sIndex + 1].isUnderConstruction : false
+                                
+                                HorizontalTimelineCell(
+                                    item: TimelineItem(id: "bot-\(bIndex)-\(sIndex)-\(station.nom)", name: station.nom, isAffected: isAffected, isGap: false, isUnderConstruction: station.isUnderConstruction),
+                                    isAffected: isAffected,
+                                    lineColor: lineColor,
+                                    severityColor: severityColor,
+                                    severityIcon: severityIcon,
+                                    hasLineBefore: true,
+                                    hasLineAfter: !isLast,
+                                    isLineBeforeAffected: isAffected && prevAffected,
+                                    isLineAfterAffected: !isLast && isAffected && nextAffected,
+                                    isLineBeforeDashed: station.isUnderConstruction || prevUnderConstruction,
+                                    isLineAfterDashed: !isLast && (station.isUnderConstruction || nextUnderConstruction),
+                                    normalOpacity: normalOpacity,
+                                    isTerminus: isLast
+                                )
+                            }
+                            
+                            // Branch direction badge at terminus
+                            Text(branch.name)
+                                .font(.system(size: 10, weight: .bold, design: .rounded))
+                                .foregroundColor(lineColor)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(lineColor.opacity(0.14), in: Capsule())
+                                .padding(.leading, 8)
+                                .offset(y: -3)
+                        }
+                        .frame(height: rowHeight, alignment: .bottom)
+                    }
+                }
+                .frame(height: totalHeight, alignment: .center)
+            }
+        }
     }
 }
 

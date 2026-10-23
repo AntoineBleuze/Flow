@@ -1,6 +1,69 @@
 import CoreLocation
 import Foundation
 
+// MARK: - Crowd Level & Estimated Affluence
+enum CrowdLevel: String, Codable, CaseIterable, Sendable {
+    case low = "low"
+    case moderate = "moderate"
+    case high = "high"
+    case veryHigh = "very_high"
+
+    var title: String {
+        switch self {
+        case .low: return "Faible"
+        case .moderate: return "Modérée"
+        case .high: return "Forte"
+        case .veryHigh: return "Très forte"
+        }
+    }
+
+    var shortDescription: String {
+        switch self {
+        case .low: return "Nombreuses places assises"
+        case .moderate: return "Places assises probables"
+        case .high: return "Debout probable"
+        case .veryHigh: return "Rame très dense • Affluence maximale"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .low: return "person.fill"
+        case .moderate: return "person.2.fill"
+        case .high: return "person.3.fill"
+        case .veryHigh: return "person.3.sequence.fill"
+        }
+    }
+
+    var segmentsCount: Int {
+        switch self {
+        case .low: return 1
+        case .moderate: return 2
+        case .high: return 3
+        case .veryHigh: return 4
+        }
+    }
+}
+
+struct EstimatedAffluence: Codable, Hashable, Sendable {
+    let level: CrowdLevel
+    let score: Double          // 0.0 ... 1.0
+    let detail: String         // e.g. "Heure de pointe vers La Défense"
+    let lineVolumeTier: String // e.g. "Ligne très fréquentée"
+
+    init(
+        level: CrowdLevel,
+        score: Double,
+        detail: String,
+        lineVolumeTier: String
+    ) {
+        self.level = level
+        self.score = score
+        self.detail = detail
+        self.lineVolumeTier = lineVolumeTier
+    }
+}
+
 // MARK: - Main Response
 struct ItineraryResponse: Codable {
     let journeys: [Journey]
@@ -14,6 +77,16 @@ struct Journey: Codable, Identifiable {
     let duration: Int?
     let nb_transfers: Int?
     var sections: [ItinerarySection]?
+
+    var overallAffluence: CrowdLevel? {
+        guard let sections = sections else { return nil }
+        let levels = sections.compactMap { $0.estimated_affluence?.level }
+        if levels.contains(.veryHigh) { return .veryHigh }
+        if levels.contains(.high) { return .high }
+        if levels.contains(.moderate) { return .moderate }
+        if levels.contains(.low) { return .low }
+        return nil
+    }
 
     enum CodingKeys: String, CodingKey {
         case departure_date_time
@@ -51,6 +124,10 @@ struct ItinerarySection: Codable, Identifiable {
     let display_informations: DisplayInformation?
     var geojson: GeoJSON?
     let stop_date_times: [ItineraryStopDateTime]?
+    var has_closed_stop: Bool?
+    var closed_stop_alert: String?
+    var has_skipped_stops: Bool?
+    var estimated_affluence: EstimatedAffluence?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -64,6 +141,10 @@ struct ItinerarySection: Codable, Identifiable {
         case display_informations
         case geojson
         case stop_date_times
+        case has_closed_stop
+        case closed_stop_alert
+        case has_skipped_stops
+        case estimated_affluence
     }
 
     init(
@@ -77,7 +158,11 @@ struct ItinerarySection: Codable, Identifiable {
         arrival_date_time: String? = nil,
         display_informations: DisplayInformation? = nil,
         geojson: GeoJSON? = nil,
-        stop_date_times: [ItineraryStopDateTime]? = nil
+        stop_date_times: [ItineraryStopDateTime]? = nil,
+        has_closed_stop: Bool? = nil,
+        closed_stop_alert: String? = nil,
+        has_skipped_stops: Bool? = nil,
+        estimated_affluence: EstimatedAffluence? = nil
     ) {
         self.id = id
         self.type = type
@@ -90,6 +175,10 @@ struct ItinerarySection: Codable, Identifiable {
         self.display_informations = display_informations
         self.geojson = geojson
         self.stop_date_times = stop_date_times
+        self.has_closed_stop = has_closed_stop
+        self.closed_stop_alert = closed_stop_alert
+        self.has_skipped_stops = has_skipped_stops
+        self.estimated_affluence = estimated_affluence
     }
 }
 
@@ -98,8 +187,48 @@ struct ItineraryStopDateTime: Codable, Identifiable {
     let stop_point: ItineraryPlace.StopPoint
     let arrival_date_time: String
     let departure_date_time: String
+    var is_skipped: Bool?
+    var is_closed: Bool?
+    var disruption_reason: String?
+    var estimated_affluence: EstimatedAffluence?
 
     var id: String { stop_point.id ?? UUID().uuidString }
+
+    var isSkipped: Bool {
+        return is_skipped == true || is_closed == true
+    }
+
+    var disruptionReason: String? {
+        return disruption_reason
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case stop_point
+        case arrival_date_time
+        case departure_date_time
+        case is_skipped
+        case is_closed
+        case disruption_reason
+        case estimated_affluence
+    }
+
+    init(
+        stop_point: ItineraryPlace.StopPoint,
+        arrival_date_time: String,
+        departure_date_time: String,
+        is_skipped: Bool? = nil,
+        is_closed: Bool? = nil,
+        disruption_reason: String? = nil,
+        estimated_affluence: EstimatedAffluence? = nil
+    ) {
+        self.stop_point = stop_point
+        self.arrival_date_time = arrival_date_time
+        self.departure_date_time = departure_date_time
+        self.is_skipped = is_skipped
+        self.is_closed = is_closed
+        self.disruption_reason = disruption_reason
+        self.estimated_affluence = estimated_affluence
+    }
 }
 
 // MARK: - Place
@@ -218,5 +347,43 @@ extension ItineraryPlace {
             return CLLocationCoordinate2D(latitude: lat, longitude: lon)
         }
         return stop_point?.coordinate
+    }
+}
+
+// MARK: - Route Incident & Dynamic Rerouting
+struct RouteIncident: Identifiable, Equatable, Sendable {
+    let id: String
+    let lineCode: String
+    let lineType: TransportType
+    let severity: LineStatus
+    let title: String
+    let message: String
+    let impactedSection: String?
+    let impactedStopNames: [String]
+    let detectedAt: Date
+    let impactedSectionId: String?
+
+    init(
+        id: String,
+        lineCode: String,
+        lineType: TransportType,
+        severity: LineStatus,
+        title: String,
+        message: String,
+        impactedSection: String? = nil,
+        impactedStopNames: [String] = [],
+        detectedAt: Date = Date(),
+        impactedSectionId: String? = nil
+    ) {
+        self.id = id
+        self.lineCode = lineCode
+        self.lineType = lineType
+        self.severity = severity
+        self.title = title
+        self.message = message
+        self.impactedSection = impactedSection
+        self.impactedStopNames = impactedStopNames
+        self.detectedAt = detectedAt
+        self.impactedSectionId = impactedSectionId
     }
 }

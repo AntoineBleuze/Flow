@@ -1,522 +1,753 @@
 import SwiftUI
-import Combine
 
 struct LineSchematicPlanView: View {
     let line: TransportLine
+    var affectedStations: Set<String> = []
+    var severityColor: Color = .red
+    var severityIcon: String = "exclamationmark.triangle.fill"
+    
     @State private var lineData: LocalLineData?
     @State private var isLoading = true
-    @State private var errorMessage: String? = nil
-    @Environment(\.colorScheme) var colorScheme
+    
+    private let branchWidth: CGFloat = 175
+    private let normalOpacity: Double = 1.0
+    
+    private var resolvedOpacity: Double {
+        affectedStations.isEmpty ? 1.0 : 0.45
+    }
     
     var body: some View {
-        ZStack {
-            ZStack {
-                let lineColor = resolveLineColor(line.lineId, type: line.type)
-                ShaderAnimationView(isLoading: false, customColors: [lineColor])
-                (colorScheme == .dark ? Color.black.opacity(0.05) : Color.white.opacity(0.05))
-                    .background(.ultraThinMaterial)
-            }
-            .ignoresSafeArea()
+        VStack(spacing: 0) {
+            headerView
             
             if isLoading {
-                VStack {
-                    ProgressView()
-                        .scaleEffect(1.5)
-                    Text("Chargement du plan...")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .padding(.top)
-                }
+                Spacer()
+                ProgressView("Chargement du plan...")
+                Spacer()
             } else if let data = lineData {
                 let sections = data.schematicSections
-                let lineColor = resolveLineColor(line.lineId, type: line.type)
                 
-                let maxBranches = max(sections.topBranches.count, sections.branches.count)
-                let hasBranches = maxBranches > 0
-                let branchWidth: CGFloat = 160
-                let contentWidth = hasBranches ? CGFloat(maxBranches) * branchWidth + 40 : 350
-                
-                Group {
-                    if hasBranches {
-                        ScrollView([.vertical, .horizontal], showsIndicators: true) {
-                            VStack(alignment: .leading, spacing: 0) {
-                                // === Top Branches (Merge) ===
-                                if !sections.topBranches.isEmpty {
-                                    SchematicMergeView(
-                                        branches: sections.topBranches,
-                                        lineColor: lineColor,
-                                        branchWidth: branchWidth,
-                                        contentWidth: contentWidth
-                                    )
+                if sections.leadIn.isEmpty && sections.trunk.isEmpty && sections.topBranches.isEmpty && sections.branches.isEmpty {
+                    emptyView
+                } else {
+                    let resolvedColor = resolveLineColor(line.lineId, type: line.type)
+                    let hasBranches = !sections.topBranches.isEmpty || !sections.branches.isEmpty
+                    let maxBranches = max(sections.topBranches.count, sections.branches.count)
+                    
+                    GeometryReader { geo in
+                        let branchesSpanWidth = CGFloat(maxBranches) * branchWidth
+                        // Center the central trunk track horizontally across the branches span (or viewport)
+                        let trunkAxisX: CGFloat = maxBranches > 1
+                            ? max((branchesSpanWidth - branchWidth) / 2.0 + 12.0, 25.0)
+                            : 25.0
+                        let contentWidth = max(branchesSpanWidth + 48, geo.size.width)
+                        
+                        ScrollViewReader { scrollProxy in
+                            ScrollView(hasBranches ? [.vertical, .horizontal] : .vertical, showsIndicators: true) {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    let hasLeadIn = !sections.leadIn.isEmpty
+                                    let hasTrunk = !sections.trunk.isEmpty
+                                    let hasTopBranches = !sections.topBranches.isEmpty
+                                    let hasBottomBranches = !sections.branches.isEmpty
+                                    let hasLeadOut = !sections.leadOut.isEmpty
+                                    
+                                    let centralFirstAffected = (sections.leadIn.first ?? sections.trunk.first).map { affectedStations.contains($0.nom) } ?? false
+                                    let centralLastAffected = (sections.trunk.last ?? sections.leadIn.last).map { affectedStations.contains($0.nom) } ?? false
+                                    
+                                    let anyTopLastAffected = sections.topBranches.contains { branch in
+                                        branch.stations.last.map { affectedStations.contains($0.nom) } ?? false
+                                    }
+                                    let anyBottomFirstAffected = sections.branches.contains { branch in
+                                        branch.stations.first.map { affectedStations.contains($0.nom) } ?? false
+                                    }
+                                    
+                                    // 1. Top Branches (Merging)
+                                    if hasTopBranches {
+                                        SchematicMergeView(
+                                            branches: sections.topBranches,
+                                            lineColor: resolvedColor,
+                                            branchWidth: branchWidth,
+                                            trunkCenterX: trunkAxisX,
+                                            affectedStations: affectedStations,
+                                            severityColor: severityColor,
+                                            severityIcon: severityIcon,
+                                            normalOpacity: resolvedOpacity,
+                                            trunkFirstAffected: centralFirstAffected
+                                        )
+                                    }
+                                    
+                                    // 2. Lead-In
+                                    if hasLeadIn {
+                                        SchematicTrackSegment(
+                                            stations: sections.leadIn,
+                                            lineColor: resolvedColor,
+                                            connectTop: hasTopBranches,
+                                            connectBottom: hasTrunk || hasBottomBranches || hasLeadOut,
+                                            trunkCenterX: trunkAxisX,
+                                            affectedStations: affectedStations,
+                                            severityColor: severityColor,
+                                            severityIcon: severityIcon,
+                                            normalOpacity: resolvedOpacity,
+                                            externalTopAffected: anyTopLastAffected,
+                                            externalBottomAffected: sections.trunk.first.map { affectedStations.contains($0.nom) } ?? anyBottomFirstAffected
+                                        )
+                                    }
+                                    
+                                    // 3. Main Trunk
+                                    if hasTrunk {
+                                        SchematicTrackSegment(
+                                            stations: sections.trunk,
+                                            lineColor: resolvedColor,
+                                            connectTop: hasTopBranches || hasLeadIn,
+                                            connectBottom: hasBottomBranches || hasLeadOut,
+                                            trunkCenterX: trunkAxisX,
+                                            affectedStations: affectedStations,
+                                            severityColor: severityColor,
+                                            severityIcon: severityIcon,
+                                            normalOpacity: resolvedOpacity,
+                                            externalTopAffected: hasLeadIn ? (sections.leadIn.last.map { affectedStations.contains($0.nom) } ?? false) : anyTopLastAffected,
+                                            externalBottomAffected: hasBottomBranches ? anyBottomFirstAffected : (sections.leadOut.first.map { affectedStations.contains($0.nom) } ?? false),
+                                            externalTopUnderConstruction: hasLeadIn ? (sections.leadIn.last?.isUnderConstruction ?? false) : false,
+                                            idPrefix: "central_trunk"
+                                        )
+                                        .id("central_trunk_section")
+                                    }
+                                    
+                                    // 4. Bottom Branches (Forking)
+                                    if hasBottomBranches {
+                                        SchematicForkView(
+                                            branches: sections.branches,
+                                            lineColor: resolvedColor,
+                                            branchWidth: branchWidth,
+                                            trunkCenterX: trunkAxisX,
+                                            affectedStations: affectedStations,
+                                            severityColor: severityColor,
+                                            severityIcon: severityIcon,
+                                            normalOpacity: resolvedOpacity,
+                                            trunkLastAffected: centralLastAffected
+                                        )
+                                    }
+                                    
+                                    // 5. Lead-Out
+                                    if hasLeadOut {
+                                        SchematicTrackSegment(
+                                            stations: sections.leadOut,
+                                            lineColor: resolvedColor,
+                                            connectTop: hasTrunk || hasBottomBranches || hasLeadIn || hasTopBranches,
+                                            connectBottom: false,
+                                            trunkCenterX: trunkAxisX,
+                                            affectedStations: affectedStations,
+                                            severityColor: severityColor,
+                                            severityIcon: severityIcon,
+                                            normalOpacity: resolvedOpacity,
+                                            externalTopAffected: centralLastAffected,
+                                            externalBottomAffected: false
+                                        )
+                                    }
                                 }
-                                
-                                // === Lead-in stations ===
-                                if !sections.leadIn.isEmpty {
-                                    SchematicTrackSegment(
-                                        stations: sections.leadIn,
-                                        lineColor: lineColor,
-                                        capTop: sections.topBranches.isEmpty,
-                                        capBottom: false
-                                    )
-                                }
-                                
-                                // === Trunk stations ===
-                                if !sections.trunk.isEmpty {
-                                    SchematicTrackSegment(
-                                        stations: sections.trunk,
-                                        lineColor: lineColor,
-                                        capTop: sections.leadIn.isEmpty && sections.topBranches.isEmpty,
-                                        capBottom: sections.branches.isEmpty && sections.leadOut.isEmpty
-                                    )
-                                }
-                                
-                                // === Fork & Branches ===
-                                if !sections.branches.isEmpty {
-                                    SchematicForkView(
-                                        branches: sections.branches,
-                                        lineColor: lineColor,
-                                        branchWidth: branchWidth,
-                                        contentWidth: contentWidth
-                                    )
-                                }
-                                
-                                // === Lead-out ===
-                                if !sections.leadOut.isEmpty {
-                                    SchematicTrackSegment(
-                                        stations: sections.leadOut,
-                                        lineColor: lineColor,
-                                        capTop: false,
-                                        capBottom: true
-                                    )
+                                .padding(.vertical, 32)
+                                .padding(.trailing, 48)
+                                .frame(minWidth: contentWidth, alignment: hasBranches ? .center : .leading)
+                            }
+                            .onAppear {
+                                if hasBranches && !sections.trunk.isEmpty {
+                                    let midIndex = sections.trunk.count / 2
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                        withAnimation(.easeOut(duration: 0.25)) {
+                                            scrollProxy.scrollTo("central_trunk_\(midIndex)", anchor: .center)
+                                        }
+                                    }
                                 }
                             }
-                            .frame(width: contentWidth, alignment: .leading)
-                            .padding(.top, 110)
-                            .padding(.bottom, 160)
-                        }
-                    } else {
-                        ScrollView(.vertical, showsIndicators: false) {
-                            VStack(spacing: 0) {
-                                // === Lead-in stations ===
-                                if !sections.leadIn.isEmpty {
-                                    SchematicTrackSegment(
-                                        stations: sections.leadIn,
-                                        lineColor: lineColor,
-                                        capTop: true,
-                                        capBottom: false
-                                    )
-                                }
-                                
-                                // === Trunk stations ===
-                                if !sections.trunk.isEmpty {
-                                    SchematicTrackSegment(
-                                        stations: sections.trunk,
-                                        lineColor: lineColor,
-                                        capTop: sections.leadIn.isEmpty,
-                                        capBottom: sections.leadOut.isEmpty
-                                    )
-                                }
-                                
-                                // === Lead-out ===
-                                if !sections.leadOut.isEmpty {
-                                    SchematicTrackSegment(
-                                        stations: sections.leadOut,
-                                        lineColor: lineColor,
-                                        capTop: false,
-                                        capBottom: true
-                                    )
-                                }
-                            }
-                            .padding(.top, 110)
-                            .padding(.bottom, 160)
                         }
                     }
                 }
             } else {
-                VStack(spacing: 16) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 50))
-                        .foregroundColor(.orange)
-                    Text(errorMessage ?? "Données de ligne introuvables.")
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-                }
+                emptyView
             }
         }
+        .liquidGlassBackground()
+        .navigationTitle("Plan de la ligne")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                HStack {
-                    LineIcon(line: line, size: 30)
-                    Text("Plan de ligne")
-                        .font(.headline)
-                }
-            }
-        }
         .onAppear {
             loadLocalData()
         }
     }
     
-    private func loadLocalData() {
-        isLoading = true
-        if let data = LocalDataService.shared.getLineData(type: line.type, lineId: line.lineId) {
-            self.lineData = data
-            self.isLoading = false
-        } else {
-            self.errorMessage = "Plan non disponible pour la ligne \(line.type.rawValue) \(line.lineId) dans la base locale."
-            self.isLoading = false
+    private var emptyView: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Image(systemName: "map.fill")
+                .font(.largeTitle)
+                .foregroundColor(.secondary)
+            Text("Plan indisponible pour cette ligne.")
+                .foregroundColor(.secondary)
+            Spacer()
         }
+    }
+    
+    private var headerView: some View {
+        HStack(spacing: 16) {
+            Image(line.assetName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 48, height: 48)
+                .shadow(color: .black.opacity(0.1), radius: 5)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(line.type.rawValue) \(line.lineId)")
+                    .font(.system(.title3, design: .rounded))
+                    .fontWeight(.bold)
+                
+                if !affectedStations.isEmpty {
+                    HStack(spacing: 5) {
+                        Image(systemName: severityIcon)
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(severityColor)
+                        Text("\(affectedStations.count) station(s) impactée(s)")
+                            .font(.system(.subheadline, design: .rounded))
+                            .fontWeight(.semibold)
+                            .foregroundColor(severityColor)
+                    }
+                } else {
+                    Text("Schéma de la ligne")
+                        .font(.system(.subheadline, design: .rounded))
+                        .foregroundColor(.secondary)
+                }
+            }
+            Spacer()
+        }
+        .padding()
+        .background(.ultraThinMaterial)
+    }
+    
+    private func loadLocalData() {
+        self.lineData = LocalDataService.shared.getLineData(type: line.type, lineId: line.lineId)
+        self.isLoading = false
     }
 }
 
-// MARK: - Track Segment (the thick colored rail with stations)
+// MARK: - Subviews for Schematic Rendering
 
-private let trackWidth: CGFloat = 8
-private let dotSize: CGFloat = 18
-private let terminusDotSize: CGFloat = 22
-private let stationSpacing: CGFloat = 44
+struct SchematicTrackSegmentBar: View {
+    let isVisible: Bool
+    let color: Color
+    let width: CGFloat
+    var isDashed: Bool = false
+    
+    var body: some View {
+        if !isVisible {
+            Color.clear.frame(width: width)
+        } else if isDashed {
+            Canvas { context, size in
+                var path = Path()
+                path.move(to: CGPoint(x: size.width / 2, y: 0))
+                path.addLine(to: CGPoint(x: size.width / 2, y: size.height))
+                context.stroke(
+                    path,
+                    with: .color(color),
+                    style: StrokeStyle(lineWidth: width * 0.85, lineCap: .round, dash: [5, 5])
+                )
+            }
+            .frame(width: width)
+        } else {
+            Rectangle()
+                .fill(color)
+                .frame(width: width)
+        }
+    }
+}
 
 struct SchematicTrackSegment: View {
     let stations: [LocalStation]
     let lineColor: Color
-    let capTop: Bool
-    let capBottom: Bool
+    let connectTop: Bool
+    let connectBottom: Bool
+    var trunkCenterX: CGFloat = 25
+    var affectedStations: Set<String> = []
+    var severityColor: Color = .red
+    var severityIcon: String = "exclamationmark.triangle.fill"
+    var normalOpacity: Double = 1.0
+    var externalTopAffected: Bool = false
+    var externalBottomAffected: Bool = false
+    var externalTopUnderConstruction: Bool = false
+    var externalBottomUnderConstruction: Bool = false
+    var idPrefix: String? = nil
     
     var body: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(stations.enumerated()), id: \.element.nom) { index, station in
-                let isFirst = capTop && index == 0
-                let isLast = capBottom && index == stations.count - 1
-                let isTerminus = isFirst || isLast
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(stations.enumerated()), id: \.offset) { index, station in
+                let isFirst = index == 0
+                let isLast = index == stations.count - 1
+                let isTerminus = (isFirst && !connectTop) || (isLast && !connectBottom)
+                let isAffected = affectedStations.contains(station.nom)
+                let isUnderConstruction = station.isUnderConstruction
                 
-                HStack(alignment: .center, spacing: 0) {
-                    // === Track column ===
+                let hasTop = !(isFirst && !connectTop)
+                let hasBottom = !(isLast && !connectBottom)
+                
+                let prevAffected = !isFirst ? affectedStations.contains(stations[index - 1].nom) : externalTopAffected
+                let nextAffected = !isLast ? affectedStations.contains(stations[index + 1].nom) : externalBottomAffected
+                
+                let prevUnderConstruction = !isFirst ? stations[index - 1].isUnderConstruction : externalTopUnderConstruction
+                let nextUnderConstruction = !isLast ? stations[index + 1].isUnderConstruction : externalBottomUnderConstruction
+                
+                let topSegmentAffected = hasTop && isAffected && prevAffected
+                let bottomSegmentAffected = hasBottom && isAffected && nextAffected
+                
+                let topDashed = isUnderConstruction || prevUnderConstruction
+                let bottomDashed = isUnderConstruction || nextUnderConstruction
+                
+                HStack(alignment: .center, spacing: 16) {
+                    // Track & Dot
                     ZStack {
-                        // Thick track line
                         VStack(spacing: 0) {
-                            if isFirst {
-                                // Rounded cap at top
-                                RoundedRectangle(cornerRadius: trackWidth / 2)
-                                    .fill(lineColor)
-                                    .frame(width: trackWidth, height: stationSpacing / 2)
-                            } else {
-                                Rectangle()
-                                    .fill(lineColor)
-                                    .frame(width: trackWidth, height: stationSpacing / 2)
+                            SchematicTrackSegmentBar(
+                                isVisible: hasTop,
+                                color: topSegmentAffected ? severityColor : lineColor.opacity(normalOpacity),
+                                width: 8,
+                                isDashed: topDashed
+                            )
+                            
+                            SchematicTrackSegmentBar(
+                                isVisible: hasBottom,
+                                color: bottomSegmentAffected ? severityColor : lineColor.opacity(normalOpacity),
+                                width: 8,
+                                isDashed: bottomDashed
+                            )
+                        }
+                        
+                        SchematicDot(
+                            isTerminus: isTerminus,
+                            hasTransfers: !station.correspondances.isEmpty,
+                            lineColor: lineColor,
+                            isAffected: isAffected,
+                            severityColor: severityColor,
+                            normalOpacity: normalOpacity,
+                            isUnderConstruction: isUnderConstruction
+                        )
+                    }
+                    .frame(width: 50)
+                    
+                    // Info
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 6) {
+                            Text(station.nom)
+                                .font(.system(size: isTerminus ? 17 : 15, weight: isTerminus || isAffected || !station.correspondances.isEmpty ? .bold : .medium, design: .rounded))
+                                .foregroundColor(isAffected ? severityColor : (isUnderConstruction ? .secondary : .primary))
+                                .fixedSize(horizontal: true, vertical: false)
+                            
+                            if isUnderConstruction {
+                                Text("En travaux")
+                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                    .foregroundColor(lineColor)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(lineColor.opacity(0.12), in: Capsule())
                             }
                             
-                            if isLast {
-                                // Rounded cap at bottom
-                                RoundedRectangle(cornerRadius: trackWidth / 2)
-                                    .fill(lineColor)
-                                    .frame(width: trackWidth, height: stationSpacing / 2)
-                            } else {
-                                Rectangle()
-                                    .fill(lineColor)
-                                    .frame(width: trackWidth, height: stationSpacing / 2)
+                            if isAffected {
+                                Image(systemName: severityIcon)
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundColor(severityColor)
                             }
                         }
                         
-                        // Station dot
-                        SchematicDot(lineColor: lineColor, isTerminus: isTerminus)
-                    }
-                    .frame(width: 50, height: stationSpacing)
-                    
-                    // === Station info ===
-                    HStack(spacing: 6) {
-                        Text(station.nom)
-                            .font(.system(size: 14, weight: isTerminus ? .bold : .medium))
-                            .foregroundColor(.primary)
-                            .lineLimit(1)
-                        
-                        // Transfer icons
-                        ForEach(station.correspondances.prefix(6), id: \.self) { corr in
-                            TransferIcon(label: corr)
+                        if !station.correspondances.isEmpty {
+                            HStack(spacing: 5) {
+                                ForEach(station.correspondances, id: \.self) { transfer in
+                                    TransferIcon(transferCode: transfer)
+                                }
+                            }
                         }
                     }
-                    .padding(.leading, 4)
+                    .padding(.vertical, 12)
                     
-                    Spacer()
+                    Spacer(minLength: 0)
                 }
+                .frame(minHeight: 56)
+                .id(idPrefix.map { "\($0)_\(index)" } ?? "station_\(station.nom)_\(index)")
             }
         }
-        .padding(.leading, 16)
+        .padding(.leading, 16 + max(0, trunkCenterX - 25))
     }
 }
-
-// MARK: - Station Dot (SNCF style)
 
 struct SchematicDot: View {
-    let lineColor: Color
     let isTerminus: Bool
+    let hasTransfers: Bool
+    let lineColor: Color
+    var isAffected: Bool = false
+    var severityColor: Color = .red
+    var normalOpacity: Double = 1.0
+    var isCompact: Bool = false
+    var isUnderConstruction: Bool = false
     
     var body: some View {
-        let size = isTerminus ? terminusDotSize : dotSize
+        let baseSize: CGFloat = isCompact ? (isTerminus ? 16 : 12) : (isTerminus ? 22 : (hasTransfers ? 16 : 12))
+        let innerSize: CGFloat = isCompact ? 6 : 8
         
         ZStack {
-            // White circle background
             Circle()
-                .fill(.white)
-                .frame(width: size, height: size)
+                .fill(.ultraThinMaterial)
+                .frame(width: baseSize + 2, height: baseSize + 2)
             
-            // Colored ring
-            Circle()
-                .stroke(lineColor, lineWidth: isTerminus ? 4 : 3)
-                .frame(width: size - 2, height: size - 2)
-            
-            // Inner white dot for terminus
-            if isTerminus {
+            if isAffected {
                 Circle()
-                    .fill(.white)
-                    .frame(width: size - 8, height: size - 8)
+                    .fill(severityColor)
+                    .frame(width: baseSize, height: baseSize)
+                if isTerminus {
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .frame(width: innerSize, height: innerSize)
+                }
+            } else if isUnderConstruction {
+                Circle()
+                    .strokeBorder(lineColor, style: StrokeStyle(lineWidth: isCompact ? 2 : 2.5, dash: [3, 2]))
+                    .background(Circle().fill(.ultraThinMaterial))
+                    .opacity(normalOpacity)
+                    .frame(width: baseSize, height: baseSize)
+            } else if isTerminus {
+                Circle()
+                    .strokeBorder(Color.primary, lineWidth: isCompact ? 3 : 4)
+                    .background(Circle().fill(lineColor))
+                    .opacity(normalOpacity)
+                    .frame(width: baseSize, height: baseSize)
+            } else if hasTransfers {
+                Circle()
+                    .strokeBorder(Color.primary, lineWidth: isCompact ? 2.5 : 3)
+                    .background(Circle().fill(.ultraThinMaterial))
+                    .opacity(normalOpacity)
+                    .frame(width: baseSize, height: baseSize)
+            } else {
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .frame(width: innerSize, height: innerSize)
+                    .overlay(
+                        Circle()
+                            .stroke(lineColor, lineWidth: 2)
+                            .opacity(normalOpacity)
+                    )
             }
         }
     }
 }
 
-// MARK: - Merge View (SNCF-style diagonal merge at the top)
+// MARK: - Top Merging Branches (e.g. RER A West, RER B North, RER C North)
 
 struct SchematicMergeView: View {
     let branches: [LocalLineData.SchematicBranch]
     let lineColor: Color
     let branchWidth: CGFloat
-    let contentWidth: CGFloat
+    var trunkCenterX: CGFloat = 25
+    var affectedStations: Set<String> = []
+    var severityColor: Color = .red
+    var severityIcon: String = "exclamationmark.triangle.fill"
+    var normalOpacity: Double = 1.0
+    var trunkFirstAffected: Bool = false
     
     var body: some View {
-        VStack(spacing: 0) {
-            // === Branch columns side by side ===
+        let branchesSpan = CGFloat(branches.count) * branchWidth
+        let branchGroupOffset = max(0, trunkCenterX - ((branchesSpan - branchWidth) / 2.0 + 12.0))
+        let canvasWidth = max(branchesSpan + branchGroupOffset, trunkCenterX) + 50
+        
+        VStack(alignment: .leading, spacing: 0) {
+            // Parallel Branches aligned at bottom (just above the merge curves)
             HStack(alignment: .bottom, spacing: 0) {
-                ForEach(Array(branches.enumerated()), id: \.element.name) { index, branch in
+                ForEach(Array(branches.enumerated()), id: \.offset) { bIndex, branch in
                     VStack(alignment: .leading, spacing: 0) {
-                        // Branch stations
-                        ForEach(Array(branch.stations.enumerated()), id: \.element.nom) { sIndex, station in
+                        // Branch Direction Badge
+                        Text(branch.name)
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundColor(lineColor)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(lineColor.opacity(0.14), in: Capsule())
+                            .padding(.bottom, 8)
+                        
+                        ForEach(Array(branch.stations.enumerated()), id: \.offset) { sIndex, station in
                             let isFirst = sIndex == 0
+                            let isLast = sIndex == branch.stations.count - 1
+                            let isAffected = affectedStations.contains(station.nom)
+                            let isUnderConstruction = station.isUnderConstruction
                             
-                            HStack(alignment: .top, spacing: 6) {
-                                // Track & Dot
-                                ZStack(alignment: .top) {
-                                    // Track line (continuous)
+                            let prevAffected = !isFirst ? affectedStations.contains(branch.stations[sIndex - 1].nom) : false
+                            let nextAffected = !isLast ? affectedStations.contains(branch.stations[sIndex + 1].nom) : trunkFirstAffected
+                            
+                            let prevUnderConstruction = !isFirst ? branch.stations[sIndex - 1].isUnderConstruction : false
+                            let nextUnderConstruction = !isLast ? branch.stations[sIndex + 1].isUnderConstruction : false
+                            
+                            HStack(alignment: .center, spacing: 8) {
+                                ZStack {
                                     VStack(spacing: 0) {
-                                        if isFirst {
-                                            Color.clear.frame(height: 12)
-                                        } else {
-                                            Rectangle()
-                                                .fill(lineColor)
-                                                .frame(height: 12)
-                                        }
-                                        Rectangle()
-                                            .fill(lineColor)
-                                            .frame(height: 52)
+                                        SchematicTrackSegmentBar(
+                                            isVisible: !isFirst,
+                                            color: (isAffected && prevAffected) ? severityColor : lineColor.opacity(normalOpacity),
+                                            width: 6,
+                                            isDashed: isUnderConstruction || prevUnderConstruction
+                                        )
+                                        SchematicTrackSegmentBar(
+                                            isVisible: true,
+                                            color: (isAffected && nextAffected) ? severityColor : lineColor.opacity(normalOpacity),
+                                            width: 6,
+                                            isDashed: isUnderConstruction || nextUnderConstruction
+                                        )
                                     }
-                                    .frame(width: trackWidth)
-                                    
-                                    SchematicDot(lineColor: lineColor, isTerminus: isFirst)
-                                        .frame(height: 24)
+                                    SchematicDot(
+                                        isTerminus: isFirst,
+                                        hasTransfers: !station.correspondances.isEmpty,
+                                        lineColor: lineColor,
+                                        isAffected: isAffected,
+                                        severityColor: severityColor,
+                                        normalOpacity: normalOpacity,
+                                        isCompact: true,
+                                        isUnderConstruction: isUnderConstruction
+                                    )
                                 }
-                                .frame(width: 24, height: 64)
+                                .frame(width: 24)
                                 
-                                // Angled Text & Transfers
-                                ZStack(alignment: .topLeading) {
-                                    Color.clear.frame(width: 2, height: 24)
-                                    
-                                    HStack(spacing: 6) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    HStack(spacing: 4) {
                                         Text(station.nom)
-                                            .font(.system(size: 12, weight: isFirst ? .bold : .medium))
-                                            .foregroundColor(.primary)
-                                            .fixedSize()
+                                            .font(.system(size: isFirst ? 12.5 : 11.5, weight: isFirst || isAffected ? .bold : .medium, design: .rounded))
+                                            .foregroundColor(isAffected ? severityColor : (isUnderConstruction ? .secondary : .primary))
+                                            .lineLimit(2)
+                                            .fixedSize(horizontal: false, vertical: true)
                                         
-                                        ForEach(station.correspondances.prefix(4), id: \.self) { corr in
-                                            TransferIcon(label: corr)
+                                        if isAffected {
+                                            Image(systemName: severityIcon)
+                                                .font(.system(size: 10, weight: .bold))
+                                                .foregroundColor(severityColor)
                                         }
                                     }
-                                    .rotationEffect(.degrees(-35), anchor: .leading)
-                                    .offset(x: 0, y: 6)
+                                    
+                                    if !station.correspondances.isEmpty {
+                                        HStack(spacing: 3) {
+                                            ForEach(station.correspondances.prefix(4), id: \.self) { transfer in
+                                                TransferIcon(transferCode: transfer)
+                                                    .scaleEffect(0.8)
+                                                    .frame(width: 14, height: 14)
+                                            }
+                                        }
+                                    }
                                 }
+                                .frame(width: branchWidth - 36, alignment: .leading)
+                                .padding(.vertical, 6)
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(minHeight: 46)
                         }
                     }
                     .frame(width: branchWidth, alignment: .leading)
                 }
             }
-            .frame(width: contentWidth, alignment: .leading)
-            .padding(.leading, 16)
+            .padding(.leading, 16 + branchGroupOffset)
             
-            // === Merge connector (beautiful Bézier curves) ===
-            GeometryReader { geo in
-                Canvas { context, size in
-                    let centerX: CGFloat = 25
+            // Merge Curve Canvas
+            Canvas { context, size in
+                let targetX: CGFloat = trunkCenterX
+                for i in 0..<branches.count {
+                    let sourceX = branchGroupOffset + CGFloat(i) * branchWidth + 12 // Center of the 24pt wide branch track
+                    let branchLastAffected = branches[i].stations.last.map { affectedStations.contains($0.nom) } ?? false
+                    let curveAffected = branchLastAffected && trunkFirstAffected
                     
-                    for i in 0..<branches.count {
-                        let sourceX = CGFloat(i) * branchWidth + 12
-                        
-                        var path = Path()
-                        path.move(to: CGPoint(x: sourceX, y: 0))
-                        path.addCurve(
-                            to: CGPoint(x: centerX, y: size.height),
-                            control1: CGPoint(x: sourceX, y: size.height * 0.5),
-                            control2: CGPoint(x: centerX, y: size.height * 0.5)
-                        )
-                        
-                        context.stroke(path, with: .color(lineColor), style: StrokeStyle(lineWidth: trackWidth, lineCap: .round, lineJoin: .round))
-                    }
+                    var path = Path()
+                    path.move(to: CGPoint(x: sourceX, y: 0))
+                    path.addCurve(
+                        to: CGPoint(x: targetX, y: size.height),
+                        control1: CGPoint(x: sourceX, y: size.height * 0.55),
+                        control2: CGPoint(x: targetX, y: size.height * 0.45)
+                    )
+                    
+                    let strokeColor = curveAffected ? severityColor : lineColor.opacity(normalOpacity)
+                    context.stroke(
+                        path,
+                        with: .color(strokeColor),
+                        style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round)
+                    )
                 }
             }
-            .frame(width: contentWidth, height: 60, alignment: .leading)
+            .frame(width: canvasWidth, height: 48)
             .padding(.leading, 16)
         }
     }
 }
 
-// MARK: - Fork View (SNCF-style diagonal split)
+// MARK: - Bottom Forking Branches (e.g. Metro 7, Metro 13, RER, Transilien)
 
 struct SchematicForkView: View {
     let branches: [LocalLineData.SchematicBranch]
     let lineColor: Color
     let branchWidth: CGFloat
-    let contentWidth: CGFloat
+    var trunkCenterX: CGFloat = 25
+    var affectedStations: Set<String> = []
+    var severityColor: Color = .red
+    var severityIcon: String = "exclamationmark.triangle.fill"
+    var normalOpacity: Double = 1.0
+    var trunkLastAffected: Bool = false
     
     var body: some View {
-        VStack(spacing: 0) {
-            // === Fork connector (beautiful Bézier curves) ===
-            GeometryReader { geo in
-                Canvas { context, size in
-                    let centerX: CGFloat = 25
+        let branchesSpan = CGFloat(branches.count) * branchWidth
+        let branchGroupOffset = max(0, trunkCenterX - ((branchesSpan - branchWidth) / 2.0 + 12.0))
+        let canvasWidth = max(branchesSpan + branchGroupOffset, trunkCenterX) + 50
+        
+        VStack(alignment: .leading, spacing: 0) {
+            // Fork Curve Canvas
+            Canvas { context, size in
+                let sourceX: CGFloat = trunkCenterX
+                for i in 0..<branches.count {
+                    let targetX = branchGroupOffset + CGFloat(i) * branchWidth + 12 // Center of the 24pt wide branch track
+                    let branchFirstAffected = branches[i].stations.first.map { affectedStations.contains($0.nom) } ?? false
+                    let curveAffected = trunkLastAffected && branchFirstAffected
                     
-                    for i in 0..<branches.count {
-                        let targetX = CGFloat(i) * branchWidth + 12
-                        
-                        var path = Path()
-                        path.move(to: CGPoint(x: centerX, y: 0))
-                        path.addCurve(
-                            to: CGPoint(x: targetX, y: size.height),
-                            control1: CGPoint(x: centerX, y: size.height * 0.5),
-                            control2: CGPoint(x: targetX, y: size.height * 0.5)
-                        )
-                        
-                        context.stroke(path, with: .color(lineColor), style: StrokeStyle(lineWidth: trackWidth, lineCap: .round, lineJoin: .round))
-                    }
+                    var path = Path()
+                    path.move(to: CGPoint(x: sourceX, y: 0))
+                    path.addCurve(
+                        to: CGPoint(x: targetX, y: size.height),
+                        control1: CGPoint(x: sourceX, y: size.height * 0.45),
+                        control2: CGPoint(x: targetX, y: size.height * 0.55)
+                    )
+                    
+                    let strokeColor = curveAffected ? severityColor : lineColor.opacity(normalOpacity)
+                    context.stroke(
+                        path,
+                        with: .color(strokeColor),
+                        style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round)
+                    )
                 }
             }
-            .frame(width: contentWidth, height: 60, alignment: .leading)
+            .frame(width: canvasWidth, height: 48)
             .padding(.leading, 16)
             
-            // === Branch columns side by side ===
+            // Parallel Branches aligned at top (just below the fork curves)
             HStack(alignment: .top, spacing: 0) {
-                ForEach(Array(branches.enumerated()), id: \.element.name) { index, branch in
+                ForEach(Array(branches.enumerated()), id: \.offset) { bIndex, branch in
                     VStack(alignment: .leading, spacing: 0) {
-                        // Branch stations
-                        ForEach(Array(branch.stations.enumerated()), id: \.element.nom) { sIndex, station in
+                        ForEach(Array(branch.stations.enumerated()), id: \.offset) { sIndex, station in
+                            let isFirst = sIndex == 0
                             let isLast = sIndex == branch.stations.count - 1
+                            let isAffected = affectedStations.contains(station.nom)
+                            let isUnderConstruction = station.isUnderConstruction
                             
-                            HStack(alignment: .top, spacing: 6) {
-                                // Track & Dot
-                                ZStack(alignment: .top) {
-                                    // Track line (continuous)
+                            let prevAffected = !isFirst ? affectedStations.contains(branch.stations[sIndex - 1].nom) : trunkLastAffected
+                            let nextAffected = !isLast ? affectedStations.contains(branch.stations[sIndex + 1].nom) : false
+                            
+                            let prevUnderConstruction = !isFirst ? branch.stations[sIndex - 1].isUnderConstruction : false
+                            let nextUnderConstruction = !isLast ? branch.stations[sIndex + 1].isUnderConstruction : false
+                            
+                            HStack(alignment: .center, spacing: 8) {
+                                ZStack {
                                     VStack(spacing: 0) {
-                                        Rectangle()
-                                            .fill(lineColor)
-                                            .frame(height: 12)
-                                        if isLast {
-                                            Color.clear.frame(height: 52)
-                                        } else {
-                                            Rectangle()
-                                                .fill(lineColor)
-                                                .frame(height: 52)
-                                        }
+                                        SchematicTrackSegmentBar(
+                                            isVisible: true,
+                                            color: (isAffected && prevAffected) ? severityColor : lineColor.opacity(normalOpacity),
+                                            width: 6,
+                                            isDashed: isUnderConstruction || prevUnderConstruction
+                                        )
+                                        SchematicTrackSegmentBar(
+                                            isVisible: !isLast,
+                                            color: (isAffected && nextAffected) ? severityColor : lineColor.opacity(normalOpacity),
+                                            width: 6,
+                                            isDashed: isUnderConstruction || nextUnderConstruction
+                                        )
                                     }
-                                    .frame(width: trackWidth)
-                                    
-                                    SchematicDot(lineColor: lineColor, isTerminus: isLast)
-                                        .frame(height: 24)
+                                    SchematicDot(
+                                        isTerminus: isLast,
+                                        hasTransfers: !station.correspondances.isEmpty,
+                                        lineColor: lineColor,
+                                        isAffected: isAffected,
+                                        severityColor: severityColor,
+                                        normalOpacity: normalOpacity,
+                                        isCompact: true,
+                                        isUnderConstruction: isUnderConstruction
+                                    )
                                 }
-                                .frame(width: 24, height: 64)
+                                .frame(width: 24)
                                 
-                                // Angled Text & Transfers
-                                ZStack(alignment: .topLeading) {
-                                    Color.clear.frame(width: 2, height: 24)
-                                    
-                                    HStack(spacing: 6) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    HStack(spacing: 4) {
                                         Text(station.nom)
-                                            .font(.system(size: 12, weight: isLast ? .bold : .medium))
-                                            .foregroundColor(.primary)
-                                            .fixedSize()
+                                            .font(.system(size: isLast ? 12.5 : 11.5, weight: isLast || isAffected ? .bold : .medium, design: .rounded))
+                                            .foregroundColor(isAffected ? severityColor : (isUnderConstruction ? .secondary : .primary))
+                                            .lineLimit(2)
+                                            .fixedSize(horizontal: false, vertical: true)
                                         
-                                        ForEach(station.correspondances.prefix(4), id: \.self) { corr in
-                                            TransferIcon(label: corr)
+                                        if isAffected {
+                                            Image(systemName: severityIcon)
+                                                .font(.system(size: 10, weight: .bold))
+                                                .foregroundColor(severityColor)
                                         }
                                     }
-                                    .rotationEffect(.degrees(-35), anchor: .leading)
-                                    .offset(x: 0, y: 6)
+                                    
+                                    if !station.correspondances.isEmpty {
+                                        HStack(spacing: 3) {
+                                            ForEach(station.correspondances.prefix(4), id: \.self) { transfer in
+                                                TransferIcon(transferCode: transfer)
+                                                    .scaleEffect(0.8)
+                                                    .frame(width: 14, height: 14)
+                                            }
+                                        }
+                                    }
                                 }
+                                .frame(width: branchWidth - 36, alignment: .leading)
+                                .padding(.vertical, 6)
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(minHeight: 46)
                         }
+                        
+                        // Branch Direction Badge at terminus
+                        Text(branch.name)
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundColor(lineColor)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(lineColor.opacity(0.14), in: Capsule())
+                            .padding(.top, 8)
                     }
                     .frame(width: branchWidth, alignment: .leading)
                 }
             }
-            .frame(width: contentWidth, alignment: .leading)
-            .padding(.leading, 16)
-            .padding(.bottom, 40) // Add some extra space for the last rotated text
+            .padding(.leading, 16 + branchGroupOffset)
         }
     }
 }
 
-// MARK: - Transfer Icon
-
 struct TransferIcon: View {
-    let label: String
+    let transferCode: String
     
     var body: some View {
-        if let line = parseLabel(label) {
-            LineIcon(line: line, size: 18)
-        } else if let type = parseType(label) {
-            TransportTypeIcon(type: type)
+        let (mode, label) = parseTransfer(transferCode)
+        let assetName = TransportType.getAssetName(mode: mode, label: label)
+        
+        if !assetName.isEmpty, UIImage(named: assetName) != nil {
+            Image(assetName)
+                .resizable()
+                .scaledToFit()
                 .frame(width: 18, height: 18)
         } else {
             Text(label)
-                .font(.system(size: 7, weight: .heavy))
-                .padding(.horizontal, 3)
-                .padding(.vertical, 1)
-                .background(Color.secondary.opacity(0.2))
-                .cornerRadius(3)
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .background(Color.gray.opacity(0.2))
+                .cornerRadius(4)
         }
     }
     
-    private func parseLabel(_ label: String) -> TransportLine? {
-        let clean = label.uppercased().trimmingCharacters(in: .whitespaces)
-        
-        if clean.starts(with: "M") && clean.count <= 4 {
-            let id = clean.replacingOccurrences(of: "M", with: "")
-            if !id.isEmpty { return TransportLine(type: .metro, lineId: id, status: .normal) }
+    private func parseTransfer(_ code: String) -> (String, String) {
+        let upper = code.uppercased()
+        if upper.hasPrefix("M") && upper.count > 1 && (upper.dropFirst().first?.isNumber == true) {
+            return ("metro", String(code.dropFirst()))
+        } else if upper.hasPrefix("RER ") {
+            return ("rer", String(code.dropFirst(4)))
+        } else if upper.hasPrefix("T") && upper.count > 1 && (upper.dropFirst().first?.isNumber == true) {
+            return ("tram", code)
+        } else if ["H", "J", "K", "L", "N", "P", "R", "U", "V"].contains(upper) {
+            return ("transilien", upper)
+        } else if upper.contains("ORLYVAL") || upper.contains("CDGVAL") {
+            return ("train", code)
+        } else if upper.hasPrefix("C") && upper.count == 2 && upper.last?.isNumber == true {
+            return ("cable", String(code.dropFirst()))
         }
-        if clean.starts(with: "RER") {
-            let id = clean.replacingOccurrences(of: "RER", with: "").trimmingCharacters(in: .whitespaces)
-            return TransportLine(type: .rer, lineId: id, status: .normal)
-        }
-        if clean.starts(with: "T") && !clean.contains("RAIN") {
-            let id = clean.replacingOccurrences(of: "T", with: "").trimmingCharacters(in: .whitespaces)
-            if !id.isEmpty { return TransportLine(type: .tram, lineId: id, status: .normal) }
-        }
-        if clean.count == 1 && "HJKLNPRU".contains(clean) {
-            return TransportLine(type: .transilien, lineId: clean, status: .normal)
-        }
-        
-        return nil
-    }
-    
-    private func parseType(_ label: String) -> TransportType? {
-        let l = label.lowercased()
-        if l.contains("train") { return .train }
-        if l.contains("bus") { return .bus }
-        return nil
-    }
-}
-
-#Preview {
-    NavigationStack {
-        LineSchematicPlanView(line: TransportLine(type: .metro, lineId: "13", status: .normal))
+        return ("unknown", code)
     }
 }

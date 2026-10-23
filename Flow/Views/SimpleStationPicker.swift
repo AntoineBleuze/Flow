@@ -15,32 +15,15 @@ struct SimpleStationPicker: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        NavigationView {
-            VStack {
+        NavigationStack {
+            VStack(spacing: 8) {
                 // Search Bar
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundColor(.secondary)
-                    TextField("Rechercher une station...", text: $searchText)
-                        .textFieldStyle(PlainTextFieldStyle())
-                        .onChange(of: searchText) { _, newValue in
-                            performSearch(query: newValue)
-                        }
-                    if !searchText.isEmpty {
-                        Button(action: { searchText = "" }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.secondary)
-                        }
+                LiquidGlassSearchBar(text: $searchText, placeholder: "Rechercher une station...")
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    .onChange(of: searchText) { _, newValue in
+                        performSearch(query: newValue)
                     }
-                }
-                .padding(12)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(LiquidGlassTheme.specularBorder(for: colorScheme), lineWidth: 1.0)
-                )
-                .padding(.horizontal)
-                .padding(.vertical, 8)
 
                 // Results
                 List {
@@ -126,16 +109,23 @@ struct SimpleStationPicker: View {
                         .listRowBackground(Color.clear)
                     }
                 }
-                .listStyle(PlainListStyle())
+                .listStyle(.plain)
                 .scrollContentBackground(.hidden)
             }
-            .navigationBarTitle("Sélectionner une station", displayMode: .inline)
-            .navigationBarItems(
-                trailing: Button("Annuler") {
-                    dismiss()
-                })
+            .liquidGlassBackground()
+            .navigationTitle("Sélectionner une station")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Annuler") {
+                        dismiss()
+                    }
+                    .font(.system(.body, design: .rounded))
+                    .fontWeight(.medium)
+                }
+            }
         }
-        .liquidGlassSheetBackground()
+        .liquidGlassSheet()
     }
 
     private func formattedDistance(for station: MapStation) -> String? {

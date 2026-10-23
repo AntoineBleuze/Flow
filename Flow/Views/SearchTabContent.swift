@@ -34,14 +34,6 @@ struct SearchTabContent: View {
         return nearby.filter { !recentIds.contains($0.id) }
     }
 
-    private var cardBackground: Material {
-        .ultraThinMaterial
-    }
-
-    private var borderColor: Color {
-        colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.08)
-    }
-
     var body: some View {
         NavigationStack {
             stationSearchView
@@ -125,7 +117,7 @@ struct SearchTabContent: View {
             }
             .padding(.horizontal, 4)
 
-            VStack(spacing: 0) {
+            LiquidGlassGroupedContainer {
                 ForEach(historyManager.recentStations) { station in
                     HStack(spacing: 0) {
                         Button(action: {
@@ -156,12 +148,6 @@ struct SearchTabContent: View {
                     }
                 }
             }
-            .background(cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(borderColor, lineWidth: 1)
-            )
         }
     }
 
@@ -178,7 +164,7 @@ struct SearchTabContent: View {
             }
             .padding(.horizontal, 4)
 
-            VStack(spacing: 0) {
+            LiquidGlassGroupedContainer {
                 ForEach(nearbyStations) { station in
                     Button(action: {
                         selectStation(station)
@@ -194,12 +180,6 @@ struct SearchTabContent: View {
                     }
                 }
             }
-            .background(cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(borderColor, lineWidth: 1)
-            )
         }
     }
 
@@ -214,7 +194,7 @@ struct SearchTabContent: View {
             }
             .padding(.horizontal, 4)
 
-            VStack(spacing: 0) {
+            LiquidGlassGroupedContainer {
                 let favStations = Array(favoritesService.favoriteStationIds).compactMap { id in
                     mapData.allStations.first(where: { $0.id == id })
                         ?? mapData.getAllStationsSync().first(where: { $0.id == id })
@@ -234,78 +214,32 @@ struct SearchTabContent: View {
                     }
                 }
             }
-            .background(cardBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(borderColor, lineWidth: 1)
-            )
         }
     }
 
     // MARK: - Empty History View
     var emptyHistoryView: some View {
-        VStack(spacing: 14) {
-            Spacer(minLength: 60)
-
-            ZStack {
-                Circle()
-                    .fill(Color.blue.opacity(0.12))
-                    .frame(width: 72, height: 72)
-
-                Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 32, weight: .medium))
-                    .foregroundColor(.blue)
-            }
-
-            Text("Historique vide")
-                .font(.headline)
-                .foregroundColor(.primary)
-
-            Text("Vos stations et adresses récemment consultées apparaîtront ici.")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-
-            Spacer(minLength: 80)
-        }
-        .frame(maxWidth: .infinity)
+        LiquidGlassEmptyState(
+            icon: "clock.arrow.circlepath",
+            title: "Historique vide",
+            subtitle: "Vos stations et adresses récemment consultées apparaîtront ici."
+        )
+        .padding(.top, 40)
     }
 
     // MARK: - No Results View
     var noResultsView: some View {
-        VStack(spacing: 14) {
-            Spacer(minLength: 60)
-
-            ZStack {
-                Circle()
-                    .fill(Color.secondary.opacity(0.12))
-                    .frame(width: 72, height: 72)
-
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 32, weight: .medium))
-                    .foregroundColor(.secondary)
-            }
-
-            Text("Aucun résultat")
-                .font(.headline)
-                .foregroundColor(.primary)
-
-            Text("Aucune station ou adresse ne correspond à « \(searchText) ».")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-
-            Spacer(minLength: 80)
-        }
-        .frame(maxWidth: .infinity)
+        LiquidGlassEmptyState(
+            icon: "magnifyingglass",
+            title: "Aucun résultat",
+            subtitle: "Aucune station ou adresse ne correspond à « \(searchText) »."
+        )
+        .padding(.top, 40)
     }
 
     // MARK: - Search Results Section
     var searchResultsSection: some View {
-        VStack(spacing: 0) {
+        LiquidGlassGroupedContainer {
             ForEach(searchResults) { station in
                 Button(action: {
                     selectStation(station)
@@ -321,12 +255,6 @@ struct SearchTabContent: View {
                 }
             }
         }
-        .background(cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(borderColor, lineWidth: 1)
-        )
     }
     
 

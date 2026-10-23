@@ -8,13 +8,19 @@ struct NearbyStationsView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.colorScheme) var colorScheme
     @EnvironmentObject var coordinator: NavigationCoordinator
+    var embeddedInSheet: Bool = false
 
     var body: some View {
-        NavigationStack {
+        if embeddedInSheet {
             nearbyStationsContent
                 .liquidGlassBackground()
-                .navigationTitle("À Proximité")
-                .navigationBarTitleDisplayMode(.large)
+        } else {
+            NavigationStack {
+                nearbyStationsContent
+                    .liquidGlassBackground()
+                    .navigationTitle("À Proximité")
+                    .navigationBarTitleDisplayMode(.large)
+            }
         }
     }
 
@@ -149,6 +155,7 @@ struct NearbyStationsView: View {
 
 struct RadiusSelector: View {
     @ObservedObject var viewModel: NearbyStationsViewModel
+    @Environment(\.colorScheme) private var colorScheme: ColorScheme
 
     var body: some View {
         Menu {
@@ -183,7 +190,7 @@ struct RadiusSelector: View {
             .background(.ultraThinMaterial, in: Capsule())
             .overlay(
                 Capsule()
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    .strokeBorder(LiquidGlassTheme.specularBorder(for: self.colorScheme), lineWidth: 1)
             )
         }
     }
