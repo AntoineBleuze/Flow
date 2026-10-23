@@ -195,13 +195,7 @@ struct ContentView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.30 : 0.08), radius: 8, x: 0, y: 4)
+        .glassEffect(.regular.interactive(), in: Capsule())
     }
 
     private var duoBottomBar: some View {
@@ -226,28 +220,13 @@ struct ContentView: View {
                     .foregroundColor(isSelected ? .blue : .secondary)
                     .padding(.horizontal, isSelected ? 12 : 8)
                     .padding(.vertical, 8)
-                    .background {
-                        if isSelected {
-                            Capsule()
-                                .fill(.ultraThinMaterial)
-                                .overlay(
-                                    Capsule()
-                                        .stroke(Color.primary.opacity(0.10), lineWidth: 1)
-                                )
-                        }
-                    }
                 }
-                .buttonStyle(.liquidGlassInteractive)
+                .buttonStyle(.plain)
+                .glassEffect(isSelected ? .regular.interactive() : .identity, in: Capsule())
             }
         }
         .padding(6)
-        .background(.ultraThinMaterial)
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.30 : 0.08), radius: 8, x: 0, y: 4)
+        .glassEffect(.regular.interactive(), in: Capsule())
     }
 
     // MARK: - Single-Screen Standard Layout

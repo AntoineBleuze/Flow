@@ -195,16 +195,7 @@ struct EmbeddedSearchSheetContent: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background {
-            Capsule()
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    Capsule()
-                        .strokeBorder(LiquidGlassTheme.specularBorder(for: colorScheme), lineWidth: 1.0)
-                )
-        }
-        .clipShape(Capsule())
-        .shadow(color: colorScheme == .dark ? Color.black.opacity(0.3) : Color.black.opacity(0.08), radius: 8, x: 0, y: 3)
+        .glassEffect(.regular, in: Capsule())
     }
 
     // MARK: - Sections

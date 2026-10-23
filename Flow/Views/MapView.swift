@@ -174,7 +174,8 @@ struct AppMapView: View {
                 FlowAssistantView()
                     .environmentObject(coordinator)
                     .presentationDetents([.fraction(0.35), .medium, .large])
-                    .liquidGlassSheetBackground()
+                    .presentationBackground(.ultraThinMaterial)
+                    .presentationCornerRadius(FlowTheme.sheetCornerRadius)
                     .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.35)))
             }
         }
@@ -270,26 +271,7 @@ struct AppMapView: View {
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
-        .background {
-            Capsule()
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    Capsule()
-                        .fill(LiquidGlassTheme.cardBackgroundTint(for: colorScheme))
-                )
-                .overlay(
-                    Capsule()
-                        .strokeBorder(LiquidGlassTheme.specularBorder(for: colorScheme), lineWidth: 1.0)
-                )
-        }
-        .clipShape(Capsule())
         .glassEffect(.regular.interactive(), in: Capsule())
-        .shadow(
-            color: colorScheme == .dark ? Color.black.opacity(0.35) : Color.black.opacity(0.12),
-            radius: 10,
-            x: 0,
-            y: 4
-        )
     }
 
     // MARK: - 2. Bottom Liquid Glass AI Search & Dictation Pill Bar
@@ -413,26 +395,7 @@ struct AppMapView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background {
-            Capsule()
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    Capsule()
-                        .fill(LiquidGlassTheme.cardBackgroundTint(for: colorScheme))
-                )
-                .overlay(
-                    Capsule()
-                        .strokeBorder(LiquidGlassTheme.specularBorder(for: colorScheme), lineWidth: 1.0)
-                )
-        }
-        .clipShape(Capsule())
         .glassEffect(.regular.interactive(), in: Capsule())
-        .shadow(
-            color: colorScheme == .dark ? Color.black.opacity(0.35) : Color.black.opacity(0.1),
-            radius: 12,
-            x: 0,
-            y: 4
-        )
     }
 
     private func submitAIPrompt() {

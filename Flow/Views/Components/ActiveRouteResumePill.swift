@@ -87,21 +87,7 @@ struct ActiveRouteResumePill: View {
         .padding(.leading, 12)
         .padding(.trailing, 10)
         .padding(.vertical, 8)
-        .background(.ultraThinMaterial)
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .strokeBorder(
-                    LiquidGlassTheme.specularBorder(for: colorScheme),
-                    lineWidth: 1.0
-                )
-        )
-        .shadow(
-            color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.12),
-            radius: 12,
-            x: 0,
-            y: 5
-        )
+        .glassEffect(.regular.interactive(), in: Capsule())
     }
 
     // MARK: - Transport Mode Icon
@@ -222,11 +208,6 @@ struct StationActiveRouteBanner: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: LiquidGlassTheme.standardCornerRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: LiquidGlassTheme.standardCornerRadius, style: .continuous)
-                .strokeBorder(LiquidGlassTheme.specularBorder(for: colorScheme), lineWidth: 1.0)
-        )
+        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: FlowTheme.standardCornerRadius, style: .continuous))
     }
 }
