@@ -17,6 +17,18 @@ private let duoTabs: [DuoTabItem] = [
     DuoTabItem(id: "Search", icon: "magnifyingglass", label: "Recherche")
 ]
 
+// MARK: - Safe Area TabBar Inset Environment
+public struct TabBarBottomInsetKey: EnvironmentKey {
+    public static let defaultValue: CGFloat = 0
+}
+
+public extension EnvironmentValues {
+    var tabBarBottomInset: CGFloat {
+        get { self[TabBarBottomInsetKey.self] }
+        set { self[TabBarBottomInsetKey.self] = newValue }
+    }
+}
+
 struct ContentView: View {
     @StateObject private var coordinator = NavigationCoordinator.shared
     @ObservedObject private var navigationManager = NavigationManager.shared
@@ -37,6 +49,11 @@ struct ContentView: View {
                 horizontalSizeClass: horizontalSizeClass,
                 screenSize: geometry.size
             )
+            let bottomSafeArea = geometry.safeAreaInsets.bottom
+            let isPhone = UIDevice.current.userInterfaceIdiom == .phone
+            // Hauteur standard de la TabBar sur iPhone (49pt) reposant sur la safe area native
+            let tabBarHeight: CGFloat = isPhone ? 49 : 0
+            let totalTabBarInset = tabBarHeight + bottomSafeArea
 
             ZStack {
                 if posture == .unfoldedDualScreen {
@@ -45,6 +62,7 @@ struct ContentView: View {
                 } else {
                     classicSingleScreenLayout
                         .environment(\.duoPosture, .foldedSingleScreen)
+                        .environment(\.tabBarBottomInset, totalTabBarInset)
                 }
 
                 if showLoading {

@@ -25,6 +25,18 @@ struct AppMapView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.duoPosture) private var duoPosture
+    @Environment(\.tabBarBottomInset) private var tabBarBottomInset
+
+    private var dynamicBottomControlsPadding: CGFloat {
+        if duoPosture == .unfoldedDualScreen {
+            return 24
+        }
+        if tabBarBottomInset > 0 {
+            // Dégagement net de +14pt au-dessus de la TabBar native
+            return tabBarBottomInset + 14
+        }
+        return 16
+    }
 
     @EnvironmentObject var coordinator: NavigationCoordinator
     @State private var visibleRegion: MKCoordinateRegion?
@@ -95,19 +107,13 @@ struct AppMapView: View {
                                     }
                                     bottomAIPillBar
                                         .frame(maxWidth: horizontalSizeClass == .regular ? 480 : .infinity)
-
-                                    // Espace réservé pour le bouton de recherche système (TabView) afin d'aligner parfaitement la barre IA
-                                    Color.clear
-                                        .frame(width: 50, height: 50)
-                                        .allowsHitTesting(false)
                                 }
                                 .padding(.horizontal, 16)
                                 .transition(.move(edge: .bottom).combined(with: .opacity))
                             }
                         }
                     }
-                    .padding(.bottom, duoPosture == .unfoldedDualScreen ? 24 : 16)
-                    .ignoresSafeArea(.container, edges: .bottom)
+                    .padding(.bottom, dynamicBottomControlsPadding)
                     .zIndex(15)
                 }
                 
@@ -136,7 +142,7 @@ struct AppMapView: View {
                         ImmersiveNavigationView(journey: journey, isFloating: true)
                             .frame(maxWidth: horizontalSizeClass == .regular ? 480 : .infinity)
                             .padding(.horizontal, 14)
-                            .padding(.bottom, 12)
+                            .padding(.bottom, dynamicBottomControlsPadding)
                     }
                     .zIndex(25)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
