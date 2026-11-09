@@ -15,7 +15,7 @@ struct ImmersiveNavigationView: View {
     @State private var isExpanded: Bool = false
     
     // Convenience init avec valeur par défaut pour les previews ou appels sans binding
-    init(journey: Journey, selectedDetent: Binding<PresentationDetent> = .constant(.fraction(0.18)), isFloating: Bool = false) {
+    init(journey: Journey, selectedDetent: Binding<PresentationDetent> = .constant(.medium), isFloating: Bool = false) {
         self.journey = journey
         self._selectedDetent = selectedDetent
         self.isFloating = isFloating
@@ -64,7 +64,7 @@ struct ImmersiveNavigationView: View {
         if isFloating {
             return !isExpanded
         }
-        return selectedDetent == .fraction(0.18)
+        return selectedDetent == NavigationCoordinator.collapsedSheetDetent
     }
     
     private var contentContainer: some View {
@@ -161,7 +161,7 @@ struct ImmersiveNavigationView: View {
                             if isFloating {
                                 isExpanded.toggle()
                             } else {
-                                selectedDetent = (selectedDetent == .large) ? .fraction(0.18) : .large
+                                selectedDetent = (selectedDetent == .large) ? .medium : .large
                             }
                         }
                     }

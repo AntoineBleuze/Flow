@@ -179,38 +179,21 @@ public struct TransparentHostingView: View {
 // MARK: - Flow Adaptive Background Modifier
 
 public struct FlowAdaptiveBackgroundModifier: ViewModifier {
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.duoPosture) private var duoPosture
-    
     public func body(content: Content) -> some View {
         content
+            .scrollContentBackground(.hidden)
             .background {
-                if duoPosture == .unfoldedDualScreen {
-                    TransparentHostingView()
-                        .ignoresSafeArea()
-                } else {
-                    ZStack {
-                        if colorScheme == .dark {
-                            Color.black.ignoresSafeArea()
-                        } else {
-                            Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
-                        }
-                        
-                        Rectangle()
-                            .fill(.ultraThinMaterial)
-                            .opacity(colorScheme == .dark ? 0.35 : 0.85)
-                            .ignoresSafeArea()
-                    }
-                }
+                TransparentHostingView()
+                    .ignoresSafeArea()
             }
-            .toolbarBackground(duoPosture == .unfoldedDualScreen ? .hidden : .visible, for: .navigationBar)
+            .toolbarBackground(.hidden, for: .navigationBar)
     }
 }
 
 // MARK: - View Extensions
 
 public extension View {
-    /// Fond adaptatif pour les vues principales avec prise en charge du mode double écran
+    /// Fond adaptatif transparent permettant au matériau Liquid Glass natif de la sheet iOS 26 de s'exprimer
     func flowAdaptiveBackground() -> some View {
         modifier(FlowAdaptiveBackgroundModifier())
     }

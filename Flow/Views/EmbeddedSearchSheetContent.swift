@@ -50,15 +50,15 @@ struct EmbeddedSearchSheetContent: View {
     }
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             if showsSearchBar {
                 standaloneSearchBar
                     .padding(.horizontal, 16)
-                    .padding(.top, 8)
+                    .padding(.top, 14)
             }
 
             ScrollView {
-                LazyVStack(spacing: 16) {
+                LazyVStack(spacing: 18) {
                     if searchText.isEmpty {
                         if historyManager.recentStations.isEmpty && favoritesService.favoriteStationIds.isEmpty && nearbyStations.isEmpty {
                             emptyHistoryView
@@ -84,8 +84,8 @@ struct EmbeddedSearchSheetContent: View {
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, 4)
-                .padding(.bottom, 24)
+                .padding(.top, 6)
+                .padding(.bottom, 96)
             }
             .scrollContentBackground(.hidden)
         }
@@ -195,7 +195,19 @@ struct EmbeddedSearchSheetContent: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .glassEffect(.regular, in: Capsule())
+        .glassEffect(.regular.interactive(), in: Capsule())
+    }
+
+    // MARK: - Conteneur de section interne (conforme HIG : pas de verre-sur-verre dans le content layer)
+    @ViewBuilder
+    private func sheetSectionGroup<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(spacing: 0) {
+            content()
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.05))
+        )
     }
 
     // MARK: - Sections
@@ -215,14 +227,14 @@ struct EmbeddedSearchSheetContent: View {
                     }
                 }) {
                     Text("Effacer")
-                        .font(.footnote.weight(.medium))
+                        .font(.footnote.weight(.semibold))
                         .foregroundColor(.blue)
                 }
-                .buttonStyle(.liquidGlassInteractive)
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, 4)
 
-            LiquidGlassGroupedContainer {
+            sheetSectionGroup {
                 ForEach(historyManager.recentStations) { station in
                     HStack(spacing: 0) {
                         Button(action: {
@@ -230,7 +242,7 @@ struct EmbeddedSearchSheetContent: View {
                         }) {
                             StationRow(station: station)
                         }
-                        .buttonStyle(.liquidGlassInteractive)
+                        .buttonStyle(.plain)
 
                         Button(action: {
                             withAnimation(.easeInOut(duration: 0.2)) {
@@ -243,7 +255,7 @@ struct EmbeddedSearchSheetContent: View {
                                 .padding(8)
                                 .contentShape(Rectangle())
                         }
-                        .buttonStyle(.liquidGlassInteractive)
+                        .buttonStyle(.plain)
                     }
                     .padding(.horizontal, 16)
 
@@ -268,14 +280,14 @@ struct EmbeddedSearchSheetContent: View {
             }
             .padding(.horizontal, 4)
 
-            LiquidGlassGroupedContainer {
+            sheetSectionGroup {
                 ForEach(nearbyStations) { station in
                     Button(action: {
                         selectStation(station)
                     }) {
                         StationRow(station: station)
                     }
-                    .buttonStyle(.liquidGlassInteractive)
+                    .buttonStyle(.plain)
                     .padding(.horizontal, 16)
 
                     if station.id != nearbyStations.last?.id {
@@ -297,7 +309,7 @@ struct EmbeddedSearchSheetContent: View {
             }
             .padding(.horizontal, 4)
 
-            LiquidGlassGroupedContainer {
+            sheetSectionGroup {
                 let favStations = Array(favoritesService.favoriteStationIds).compactMap { id in
                     mapData.allStations.first(where: { $0.id == id })
                         ?? mapData.getAllStationsSync().first(where: { $0.id == id })
@@ -308,7 +320,7 @@ struct EmbeddedSearchSheetContent: View {
                     }) {
                         StationRow(station: station)
                     }
-                    .buttonStyle(.liquidGlassInteractive)
+                    .buttonStyle(.plain)
                     .padding(.horizontal, 16)
 
                     if station.id != favStations.last?.id {
@@ -339,14 +351,14 @@ struct EmbeddedSearchSheetContent: View {
     }
 
     private var searchResultsSection: some View {
-        LiquidGlassGroupedContainer {
+        sheetSectionGroup {
             ForEach(searchResults) { station in
                 Button(action: {
                     selectStation(station)
                 }) {
                     StationRow(station: station)
                 }
-                .buttonStyle(.liquidGlassInteractive)
+                .buttonStyle(.plain)
                 .padding(.horizontal, 16)
 
                 if station.id != searchResults.last?.id {

@@ -3,19 +3,6 @@ import SwiftUI
 import MapKit
 import SwiftData
 
-private struct DuoTabItem: Identifiable {
-    let id: String
-    let icon: String
-    let label: String
-}
-
-private let duoTabs: [DuoTabItem] = [
-    DuoTabItem(id: "Explore", icon: "map", label: "Explore"),
-    DuoTabItem(id: "Nearby", icon: "location.circle.fill", label: "Proximité"),
-    DuoTabItem(id: "Favorites", icon: "star.fill", label: "Favoris"),
-    DuoTabItem(id: "Trafic", icon: "tram.fill", label: "Trafic")
-]
-
 struct ContentView: View {
     @StateObject private var coordinator = NavigationCoordinator.shared
     @ObservedObject private var navigationManager = NavigationManager.shared
@@ -26,8 +13,6 @@ struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var searchText = ""
     @State private var showLoading: Bool
-    @State private var exploreSheetDetent: PresentationDetent = .fraction(0.12)
-    @State private var isExploreSheetPresented: Bool = true
 
     init(showLoading: Bool = true) {
         _showLoading = State(initialValue: showLoading)
@@ -56,6 +41,18 @@ struct ContentView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onAppear {
+                updateFloatingTabBarOverlay(for: posture)
+            }
+            .onChange(of: posture) { _, newPosture in
+                updateFloatingTabBarOverlay(for: newPosture)
+            }
+            .onChange(of: showLoading) { _, _ in
+                updateFloatingTabBarOverlay(for: posture)
+            }
+            .onChange(of: coordinator.showAIAssistant) { _, _ in
+                updateFloatingTabBarOverlay(for: posture)
+            }
         }
         .ignoresSafeArea()
         .environmentObject(coordinator)
@@ -68,6 +65,23 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Fenêtre PassThrough Overlay (Séparation totale de la Tab Bar et de la Sheet)
+    private func updateFloatingTabBarOverlay(for posture: DuoDevicePosture) {
+        #if canImport(UIKit)
+        let shouldHide = showLoading || posture == .unfoldedDualScreen || coordinator.showAIAssistant
+        if shouldHide {
+            FloatingTabBarWindowManager.shared.setHidden(true)
+        } else {
+            FloatingTabBarWindowManager.shared.showOverlay {
+                FloatingTabBarOverlayHostView(
+                    coordinator: coordinator,
+                    routeManager: routeManager
+                )
+            }
+        }
+        #endif
     }
 
     // MARK: - iPhone Duo Dual-Screen Layout
@@ -123,7 +137,6 @@ struct ContentView: View {
         case "Trafic":
             NavigationStack {
                 TrafficViewContent()
-                    .navigationTitle("Trafic")
             }
             .toolbarBackground(.hidden, for: .navigationBar)
         default:
@@ -135,7 +148,12 @@ struct ContentView: View {
     private var duoBottomDock: some View {
         VStack(spacing: 8) {
             duoSearchBar
-            duoBottomBar
+            LiquidGlassFloatingTabBar(
+                selectedTab: $coordinator.selectedTab,
+                onSelectTab: { _ in
+                    coordinator.selectedStation = nil
+                }
+            )
         }
         .padding(.leading, 24)
         .padding(.trailing, 16)
@@ -195,165 +213,227 @@ struct ContentView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .glassEffect(.regular.interactive(), in: Capsule())
+        .glassEffect(.regular.interactive(), in: .capsule)
     }
 
-    private var duoBottomBar: some View {
-        HStack(spacing: 6) {
-            ForEach(duoTabs) { tab in
-                let isSelected = coordinator.selectedTab == tab.id && coordinator.selectedStation == nil
-                Button(action: {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        coordinator.selectedStation = nil
-                        coordinator.selectedTab = tab.id
-                    }
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 14, weight: .semibold))
-                        if isSelected {
-                            Text(tab.label)
-                                .font(.system(.caption, design: .rounded))
-                                .fontWeight(.bold)
-                        }
-                    }
-                    .foregroundColor(isSelected ? .blue : .secondary)
-                    .padding(.horizontal, isSelected ? 12 : 8)
-                    .padding(.vertical, 8)
-                }
-                .buttonStyle(.plain)
-                .glassEffect(isSelected ? .regular.interactive() : .identity, in: Capsule())
-            }
-        }
-        .padding(6)
-        .glassEffect(.regular.interactive(), in: Capsule())
-    }
-
-    // MARK: - Single-Screen Standard Layout
+    // MARK: - Architecture Spatiale Localiser (Find My) iOS 26
+    // Couche 1 : Carte interactive plein écran (AppMapView)
+    // Couche 2 : Feuille modale persistante native iOS 26 (sans .presentationBackground)
+    // Couche 3 : Barre d'onglets flottante UITabBar native dans PassThroughOverlayWindow (100 % indépendante de la sheet)
     private var classicSingleScreenLayout: some View {
-        ZStack(alignment: .bottom) {
-            TabView(selection: $coordinator.selectedTab) {
-                Tab("Explore", systemImage: "map", value: "Explore") {
-                    singleScreenExploreView
-                }
-
-                Tab("À Proximité", systemImage: "location.circle.fill", value: "Nearby") {
-                    NearbyStationsView()
-                }
-
-                Tab("Favoris", systemImage: "star.fill", value: "Favorites") {
-                    FavoritesView()
-                }
-
-                Tab("Trafic", systemImage: "tram.fill", value: "Trafic") {
-                    NavigationStack {
-                        TrafficViewContent()
-                            .navigationTitle("Trafic")
-                    }
-                }
-            }
-            .toolbarVisibility(.hidden, for: .tabBar)
-            .accentColor(.blue)
-#if os(iOS)
-            .tabBarMinimizeBehavior(.onScrollDown)
-#endif
-            .onChange(of: navigationManager.shouldSwitchToMap) { _, shouldSwitch in
-                if shouldSwitch {
-                    coordinator.selectedTab = "Explore"
-                    navigationManager.shouldSwitchToMap = false
-                }
-            }
-
-            // Floating Bottom Dock: Active Route Resume Pill + Floating Liquid Glass TabBar
-            VStack(spacing: 8) {
-                if routeManager.isRouteActive && (!routeManager.isShowingRouteSheet || coordinator.selectedTab != "Explore") {
-                    ActiveRouteResumePill(routeManager: routeManager)
-                        .padding(.horizontal, 16)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-
-                LiquidGlassFloatingTabBar(
-                    selectedTab: $coordinator.selectedTab,
-                    onSelectTab: { tab in
-                        if tab == "Explore" {
-                            coordinator.selectedStation = nil
-                        }
-                    }
-                )
-            }
-            .padding(.bottom, 8)
-            .ignoresSafeArea(.keyboard)
-        }
-    }
-
-    private var singleScreenExploreView: some View {
-        ZStack {
+        ZStack(alignment: .topTrailing) {
             AppMapView(showControls: true)
                 .ignoresSafeArea()
         }
-        .sheet(isPresented: $isExploreSheetPresented) {
-            unifiedExploreSheet
-                .presentationDetents([.fraction(0.12), .medium, .large], selection: $exploreSheetDetent)
-                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
-                .presentationCornerRadius(38)
-                .liquidGlassSheetBackground()
+        // Feuille modale persistante native iOS 26
+        // IMPORTANT : Aucun .presentationBackground() n'est appliqué afin de conserver
+        // le matériau Liquid Glass concentrique automatique d'iOS 26 aux paliers .height(68) et .medium.
+        .sheet(
+            isPresented: Binding(
+                get: { !showLoading },
+                set: { _ in }
+            )
+        ) {
+            flowSheetContainerView
+                .presentationDetents(
+                    [NavigationCoordinator.collapsedSheetDetent, .medium, .large],
+                    selection: $coordinator.exploreSheetDetent
+                )
+                .presentationBackgroundInteraction(
+                    .enabled(upThrough: .medium)
+                )
+                .presentationContentInteraction(.scrolls)
+                .presentationDragIndicator(.visible)
                 .interactiveDismissDisabled(true)
+                .environmentObject(coordinator)
         }
-        .onChange(of: coordinator.selectedStation?.id) { oldId, newId in
+        .onChange(of: navigationManager.shouldSwitchToMap) { _, shouldSwitch in
+            if shouldSwitch {
+                withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+                    coordinator.selectedTab = "Explore"
+                    coordinator.exploreSheetDetent = .medium
+                }
+                navigationManager.shouldSwitchToMap = false
+            }
+        }
+        .onChange(of: coordinator.selectedStation?.id) { _, newId in
             if newId != nil {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                    exploreSheetDetent = .medium
+                withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+                    coordinator.selectedTab = "Explore"
+                    coordinator.exploreSheetDetent = .medium
                 }
             }
         }
         .onChange(of: routeManager.isShowingRouteSheet) { _, isShowing in
             if isShowing {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                    exploreSheetDetent = .medium
+                withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+                    coordinator.selectedTab = "Explore"
+                    coordinator.exploreSheetDetent = .medium
                 }
             }
         }
     }
 
+    // MARK: - Conteneur de la Feuille Modale (Style Localiser iOS 26)
+    // Lorsque la feuille est rabattue au palier minimal (.height(82)), le contenu interne
+    // s'estompe complètement (opacity = 0) et le contour externe (outline) de la Tab Bar disparaît
+    // pour se fondre dans le verre de la sheet exactement comme dans Localiser.
     @ViewBuilder
-    private var unifiedExploreSheet: some View {
-        VStack(spacing: 0) {
-            LiquidGlassSheetGrabber()
-                .padding(.top, 8)
-                .padding(.bottom, 4)
+    private var flowSheetContainerView: some View {
+        GeometryReader { sheetGeo in
+            let isCollapsedDetent = (coordinator.exploreSheetDetent == NavigationCoordinator.collapsedSheetDetent)
+            let liveHeightProgress = min(1.0, max(0.0, (sheetGeo.size.height - 102.0) / 48.0))
+            let contentOpacity = (isCollapsedDetent && sheetGeo.size.height < 118) ? 0.0 : liveHeightProgress
+            let shouldMergePlatter = isCollapsedDetent || (sheetGeo.size.height > 0 && sheetGeo.size.height < 112)
 
-            Group {
-                if routeManager.isRouteActive && routeManager.isShowingRouteSheet,
-                   let journey = routeManager.activeJourney ?? navigationManager.currentJourney {
-                    ImmersiveNavigationView(journey: journey, isFloating: false)
-                } else if let station = coordinator.selectedStation {
-                    StationDetailSheet(
-                        station: station,
-                        onDismiss: {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                coordinator.selectedStation = nil
-                            }
-                        },
-                        selectedDetent: $exploreSheetDetent
-                    )
-                } else if let previewJourney = coordinator.previewJourney {
-                    DuoJourneyPreviewPanel(journey: previewJourney)
-                } else {
-                    EmbeddedSearchSheetContent(
-                        searchText: $searchText,
-                        selectedDetent: $exploreSheetDetent,
-                        showsSearchBar: true,
-                        onSelectStation: { station in
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                coordinator.selectedStation = station
-                                exploreSheetDetent = .medium
-                            }
-                        }
-                    )
+            ZStack {
+                switch coordinator.selectedTab {
+                case "Explore":
+                    exploreSheetTabContent
+                case "Nearby":
+                    NearbyStationsView(embeddedInSheet: true)
+                case "Favorites":
+                    FavoritesView()
+                case "Trafic":
+                    NavigationStack {
+                        TrafficViewContent()
+                    }
+                    .liquidGlassBackground()
+                default:
+                    exploreSheetTabContent
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(width: sheetGeo.size.width, height: sheetGeo.size.height, alignment: .top)
+            .opacity(contentOpacity)
+            .allowsHitTesting(contentOpacity > 0.05)
+            .onChange(of: shouldMergePlatter) { _, newValue in
+                if coordinator.isSheetMergedWithTabBar != newValue {
+                    coordinator.isSheetMergedWithTabBar = newValue
+                }
+            }
+            .onAppear {
+                if coordinator.isSheetMergedWithTabBar != shouldMergePlatter {
+                    coordinator.isSheetMergedWithTabBar = shouldMergePlatter
+                }
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .scrollContentBackground(.hidden)
+        .onChange(of: coordinator.exploreSheetDetent) { _, newDetent in
+            let collapsed = (newDetent == NavigationCoordinator.collapsedSheetDetent)
+            if coordinator.isSheetMergedWithTabBar != collapsed {
+                coordinator.isSheetMergedWithTabBar = collapsed
+            }
+            if collapsed {
+                #if canImport(UIKit)
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                #endif
+            }
+        }
+        .sheet(isPresented: $coordinator.showAIAssistant) {
+            if #available(iOS 27.0, *) {
+                FlowAssistantView()
+                    .environmentObject(coordinator)
+                    .presentationDetents([.fraction(0.35), .medium, .large])
+                    .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.35)))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var exploreSheetTabContent: some View {
+        if routeManager.isRouteActive && routeManager.isShowingRouteSheet,
+           let journey = routeManager.activeJourney ?? navigationManager.currentJourney {
+            ImmersiveNavigationView(
+                journey: journey,
+                selectedDetent: $coordinator.exploreSheetDetent,
+                isFloating: false
+            )
+        } else if let station = coordinator.selectedStation {
+            StationDetailSheet(
+                station: station,
+                onDismiss: {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        coordinator.selectedStation = nil
+                    }
+                },
+                selectedDetent: $coordinator.exploreSheetDetent
+            )
+        } else if let previewJourney = coordinator.previewJourney {
+            DuoJourneyPreviewPanel(journey: previewJourney)
+        } else {
+            EmbeddedSearchSheetContent(
+                searchText: $searchText,
+                selectedDetent: $coordinator.exploreSheetDetent,
+                showsSearchBar: true,
+                onSelectStation: { station in
+                    withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+                        coordinator.selectedStation = station
+                        coordinator.exploreSheetDetent = .medium
+                    }
+                }
+            )
+        }
+    }
+}
+
+// MARK: - Vue Hôte de la Tab Bar Flottante dans PassThroughOverlayWindow
+/// Hébergée dans la fenêtre secondaire au-dessus de la `.sheet` afin de rester 100 % immobile
+/// et concentrique avec les bords de la feuille et de l'écran lorsque l'utilisateur réduit ou agrandit la feuille.
+private struct FloatingTabBarOverlayHostView: View {
+    @ObservedObject var coordinator: NavigationCoordinator
+    @ObservedObject var routeManager: RouteNavigationManager
+
+    var body: some View {
+        let isMerged = coordinator.isSheetMergedWithTabBar || (coordinator.exploreSheetDetent == NavigationCoordinator.collapsedSheetDetent)
+
+        VStack(spacing: 8) {
+            Spacer()
+
+            if routeManager.isRouteActive && (!routeManager.isShowingRouteSheet || coordinator.selectedTab != "Explore") {
+                ActiveRouteResumePill(routeManager: routeManager)
+                    .padding(.horizontal, 16)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            LiquidGlassFloatingTabBar(
+                selectedTab: $coordinator.selectedTab,
+                isMergedIntoSheet: isMerged,
+                onSelectTab: { tab in
+                    if tab == "Explore" && coordinator.exploreSheetDetent != NavigationCoordinator.collapsedSheetDetent {
+                        coordinator.selectedStation = nil
+                    }
+                    // Si la feuille est réduite au minimum (.height(82)),
+                    // toucher un onglet la remonte automatiquement à .medium (comme dans Localiser)
+                    if coordinator.exploreSheetDetent == NavigationCoordinator.collapsedSheetDetent {
+                        withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+                            coordinator.exploreSheetDetent = .medium
+                        }
+                    }
+                },
+                onVerticalSwipe: { isUpward in
+                    withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+                        if isUpward {
+                            if coordinator.exploreSheetDetent == NavigationCoordinator.collapsedSheetDetent {
+                                coordinator.exploreSheetDetent = .medium
+                            } else if coordinator.exploreSheetDetent == .medium {
+                                coordinator.exploreSheetDetent = .large
+                            }
+                        } else {
+                            if coordinator.exploreSheetDetent == .large {
+                                coordinator.exploreSheetDetent = .medium
+                            } else if coordinator.exploreSheetDetent == .medium {
+                                coordinator.exploreSheetDetent = NavigationCoordinator.collapsedSheetDetent
+                            }
+                        }
+                    }
+                }
+            )
+            .padding(.horizontal, 12)
+            .padding(.bottom, 18)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .ignoresSafeArea(edges: .bottom)
     }
 }
 
@@ -393,129 +473,94 @@ struct TrafficViewContent: View {
     ]
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                // Header avec heure de dernière mise à jour
-                HStack {
-                    if let lastUpdate = service.lastUpdateTime {
-                        Text("Dernière mise à jour: \(lastUpdate.formatted(date: .omitted, time: .shortened))")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    } else {
-                        Text("Chargement...")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
-                }
-                .padding(.horizontal)
-
-                // Barre de recherche de ligne
-                HStack(spacing: 10) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundColor(.secondary)
-                        .font(.system(size: 16, weight: .semibold))
-
-                    TextField("Rechercher une ligne (ex: 80, 1, A, T3a)...", text: $searchText)
-                        .font(.system(.subheadline, design: .rounded))
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-
-                    if !searchText.isEmpty {
+        VStack(spacing: 0) {
+            LiquidGlassSheetHeader(
+                title: "Trafic",
+                subtitle: service.lastUpdateTime.map { "Mis à jour à \($0.formatted(date: .omitted, time: .shortened))" } ?? "Chargement de l'état du réseau..."
+            ) {
+                Menu {
+                    ForEach(StatusFilter.allCases) { filter in
                         Button(action: {
-                            searchText = ""
+                            selectedFilter = filter
                         }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.secondary)
-                                .font(.system(size: 16))
-                        }
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(.ultraThinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                )
-                .padding(.horizontal)
-
-                // Filtres par statut
-                HStack {
-                    Menu {
-                        ForEach(StatusFilter.allCases) { filter in
-                            Button(action: {
-                                selectedFilter = filter
-                            }) {
-                                HStack {
-                                    Text(filter.rawValue)
-                                    if selectedFilter == filter {
-                                        Image(systemName: "checkmark")
-                                    }
+                            HStack {
+                                Text(filter.rawValue)
+                                if selectedFilter == filter {
+                                    Image(systemName: "checkmark")
                                 }
                             }
                         }
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "line.3.horizontal.decrease.circle.fill")
-                                .foregroundColor(.blue)
-                                .frame(width: 20, height: 20)
-                            Text(selectedFilter.rawValue)
-                                .font(.system(.subheadline, design: .rounded))
-                                .fontWeight(.bold)
-                                .foregroundColor(.primary)
-                            Image(systemName: "chevron.down")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Capsule())
-                        .overlay(
-                            Capsule()
-                                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                        )
                     }
-                    .buttonStyle(.liquidGlassInteractive)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                            .foregroundColor(.blue)
+                            .font(.system(size: 14, weight: .semibold))
+                        Text(selectedFilter.rawValue)
+                            .font(.system(.subheadline, design: .rounded))
+                            .fontWeight(.bold)
+                            .foregroundColor(.primary)
+                        Image(systemName: "chevron.down")
+                            .font(.caption2.weight(.bold))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .glassEffect(.regular.interactive(), in: .capsule)
+                }
+            }
 
-                    Spacer()
-                }
-                .padding(.horizontal)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    // Barre de recherche de ligne en Liquid Glass natif
+                    HStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.secondary)
+                            .font(.system(size: 15, weight: .semibold))
 
-                // Contenu : soit les résultats de recherche, soit la vue structurée par mode
-                if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    searchResultsView
-                } else {
-                    defaultSectionsView
+                        TextField("Rechercher une ligne (ex: 80, 1, A, T3a)...", text: $searchText)
+                            .font(.system(.subheadline, design: .rounded))
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+
+                        if !searchText.isEmpty {
+                            Button(action: {
+                                searchText = ""
+                            }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.secondary)
+                                    .font(.system(size: 15))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .glassEffect(.regular.interactive(), in: .capsule)
+                    .padding(.horizontal, 16)
+
+                    // Contenu : soit les résultats de recherche, soit la vue structurée par mode
+                    if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        searchResultsView
+                    } else {
+                        defaultSectionsView
+                    }
+                }
+                .padding(.top, 6)
+                .padding(.bottom, 96)
+            }
+            .scrollContentBackground(.hidden)
+            .refreshable {
+                await withCheckedContinuation { continuation in
+                    service.refresh()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        continuation.resume()
+                    }
                 }
             }
-            .padding(.vertical)
         }
-        .scrollContentBackground(.hidden)
-        .refreshable {
-            await withCheckedContinuation { continuation in
-                service.refresh()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                    continuation.resume()
-                }
-            }
-        }
-        .background {
-            if duoPosture == .unfoldedDualScreen {
-                TransparentHostingView()
-                    .ignoresSafeArea()
-            } else {
-                ZStack {
-                    ShaderAnimationView(isLoading: true)
-                    Rectangle()
-                        .fill(.ultraThinMaterial)
-                        .opacity(colorScheme == .dark ? 0.70 : 0.85)
-                }
-                .ignoresSafeArea()
-            }
-        }
+        .toolbar(.hidden, for: .navigationBar)
+        .liquidGlassBackground()
     }
 
     // MARK: - Vue par défaut (Modes structurants & bus perturbés)
@@ -535,18 +580,16 @@ struct TrafficViewContent: View {
                         .foregroundColor(.secondary)
                         .padding(.leading, 20)
 
-                    GlassEffectContainer(spacing: isIPad ? 20 : 16) {
-                        LazyVGrid(
-                            columns: [
-                                GridItem(.adaptive(minimum: isIPad ? 100 : 80, maximum: isIPad ? 130 : 100), spacing: isIPad ? 20 : 16)
-                            ], spacing: isIPad ? 20 : 16
-                        ) {
-                            ForEach(filteredLines) { line in
-                                TrafficLineCell(line: line, isIPad: isIPad)
-                            }
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.adaptive(minimum: isIPad ? 96 : 74, maximum: isIPad ? 120 : 92), spacing: isIPad ? 16 : 12)
+                        ], spacing: isIPad ? 16 : 12
+                    ) {
+                        ForEach(filteredLines) { line in
+                            TrafficLineCell(line: line, isIPad: isIPad)
                         }
                     }
-                    .padding(.horizontal)
+                    .padding(.horizontal, 16)
                 }
             }
         }
@@ -574,18 +617,16 @@ struct TrafficViewContent: View {
                     }
                     .padding(.leading, 20)
 
-                    GlassEffectContainer(spacing: isIPad ? 20 : 16) {
-                        LazyVGrid(
-                            columns: [
-                                GridItem(.adaptive(minimum: isIPad ? 100 : 80, maximum: isIPad ? 130 : 100), spacing: isIPad ? 20 : 16)
-                            ], spacing: isIPad ? 20 : 16
-                        ) {
-                            ForEach(filteredBus) { line in
-                                TrafficLineCell(line: line, isIPad: isIPad)
-                            }
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.adaptive(minimum: isIPad ? 96 : 74, maximum: isIPad ? 120 : 92), spacing: isIPad ? 16 : 12)
+                        ], spacing: isIPad ? 16 : 12
+                    ) {
+                        ForEach(filteredBus) { line in
+                            TrafficLineCell(line: line, isIPad: isIPad)
                         }
                     }
-                    .padding(.horizontal)
+                    .padding(.horizontal, 16)
                 }
             }
         }
@@ -644,144 +685,99 @@ struct TrafficViewContent: View {
                                 .foregroundColor(.secondary)
                         }
                         .padding(14)
-                        .background(.ultraThinMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .overlay(
+                        .background(
                             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                                .fill(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.05))
                         )
                     }
-                    .buttonStyle(.liquidGlassInteractive)
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
                 }
-                .padding(.horizontal)
             } else {
-                GlassEffectContainer(spacing: isIPad ? 20 : 16) {
-                    LazyVGrid(
-                        columns: [
-                            GridItem(.adaptive(minimum: isIPad ? 100 : 80, maximum: isIPad ? 130 : 100), spacing: isIPad ? 20 : 16)
-                        ], spacing: isIPad ? 20 : 16
-                    ) {
-                        ForEach(results) { line in
-                            TrafficLineCell(line: line, isIPad: isIPad)
-                        }
+                LazyVGrid(
+                    columns: [
+                        GridItem(.adaptive(minimum: isIPad ? 96 : 74, maximum: isIPad ? 120 : 92), spacing: isIPad ? 16 : 12)
+                    ], spacing: isIPad ? 16 : 12
+                ) {
+                    ForEach(results) { line in
+                        TrafficLineCell(line: line, isIPad: isIPad)
                     }
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, 16)
             }
         }
     }
 
     private func searchLines(query: String) -> [TransportLine] {
-        let cleanQuery = query.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-            .replacingOccurrences(of: " ", with: "")
-        
-        return service.lines.filter { line in
-            // Filtre de statut
-            if selectedFilter != .all, line.status != selectedFilter.matchingStatus {
-                return false
-            }
-
-            let id = line.lineId.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-                .replacingOccurrences(of: " ", with: "")
-            let typeName = line.type.rawValue.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-                .replacingOccurrences(of: " ", with: "")
-
-            // Match direct par ID (ex: "80", "1", "A", "T3a", "FUN")
-            if id == cleanQuery {
-                return true
-            }
-            if id.contains(cleanQuery) {
-                return true
-            }
-            // Match avec type (ex: "bus80", "metro1", "rerA")
-            let fullCombined = "\(typeName)\(id)"
-            if fullCombined.contains(cleanQuery) {
-                return true
-            }
-
-            return false
+        let q = query.lowercased()
+        let matching = service.lines.filter { line in
+            let idMatch = line.lineId.lowercased().contains(q)
+            let typeMatch = line.type.rawValue.lowercased().contains(q)
+            let fullMatch = "\(line.type.rawValue.lowercased()) \(line.lineId.lowercased())".contains(q)
+            return idMatch || typeMatch || fullMatch
         }
+
+        if let targetStatus = selectedFilter.matchingStatus {
+            return matching.filter { $0.status == targetStatus }
+        }
+        return matching
     }
 
     private func lines(for type: TransportType) -> [TransportLine] {
-        let filtered = service.lines.filter { line in
-            if selectedFilter == .all {
-                return line.type == type
-            } else {
-                return line.type == type && line.status == selectedFilter.matchingStatus
-            }
-        }
-        
-        return filtered.sorted { lhs, rhs in
-            let lhsId = lhs.lineId
-            let rhsId = rhs.lineId
-            
-            let lhsStartsWithNumber = lhsId.first?.isNumber ?? false
-            let rhsStartsWithNumber = rhsId.first?.isNumber ?? false
-            
-            if lhsStartsWithNumber && rhsStartsWithNumber {
-                let lhsNumPrefix = lhsId.prefix { $0.isNumber }
-                let rhsNumPrefix = rhsId.prefix { $0.isNumber }
-                if let lInt = Int(lhsNumPrefix), let rInt = Int(rhsNumPrefix) {
-                    if lInt != rInt {
-                        return lInt < rInt
-                    }
-                }
-                return lhsId.localizedStandardCompare(rhsId) == .orderedAscending
-            } else if lhsStartsWithNumber {
-                return true
-            } else if rhsStartsWithNumber {
-                return false
-            } else {
-                return lhsId.localizedStandardCompare(rhsId) == .orderedAscending
-            }
+        let allLinesForType = service.lines.filter { $0.type == type }
+        if let targetStatus = selectedFilter.matchingStatus {
+            return allLinesForType.filter { $0.status == targetStatus }
+        } else {
+            return allLinesForType
         }
     }
 }
 
-private struct TrafficLineCell: View {
+struct TrafficLineCell: View {
     let line: TransportLine
-    let isIPad: Bool
+    var isIPad: Bool = false
+
+    @ObservedObject var favoritesService = FavoritesService.shared
+    @Environment(\.colorScheme) private var colorScheme
+
+    var isFav: Bool {
+        favoritesService.isFavoriteLine(lineId: line.lineId, type: line.type)
+    }
 
     var body: some View {
         NavigationLink(destination: TrafficDetailView(line: line)) {
-            LineIcon(line: line, size: isIPad ? 70 : 55)
-                .frame(width: isIPad ? 100 : 80, height: isIPad ? 100 : 80)
-                .overlay(alignment: .bottomTrailing) {
-                    statusBadge
-                }
-        }
-        .buttonStyle(.liquidGlassInteractive)
-        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
+            ZStack(alignment: .topLeading) {
+                LineIcon(line: line, size: isIPad ? 68 : 56)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, isIPad ? 14 : 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.05))
+                    )
 
-    @ViewBuilder
-    private var statusBadge: some View {
-        if line.status != .normal {
-            Image(systemName: line.status.icon)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 16, height: 16)
-                .padding(5)
-                .foregroundColor(.white)
-                .background(line.status.color)
-                .clipShape(Circle())
-                .overlay(
-                    Circle()
-                        .stroke(.regularMaterial, lineWidth: 2)
+                if isFav {
+                    Image(systemName: "star.fill")
+                        .foregroundColor(.yellow)
+                        .font(.system(size: isIPad ? 15 : 13))
+                        .shadow(color: .black.opacity(0.25), radius: 2, x: 0, y: 1)
+                        .padding(6)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button {
+                favoritesService.toggleFavoriteLine(lineId: line.lineId, type: line.type)
+            } label: {
+                Label(
+                    isFav ? "Retirer des favoris" : "Ajouter aux favoris",
+                    systemImage: isFav ? "star.slash" : "star"
                 )
-                .offset(x: 8, y: 8)
+            }
         }
     }
 }
 
 #Preview {
     ContentView(showLoading: false)
-}
-
-#Preview("Traffic Line Picker") {
-    NavigationStack {
-        TrafficViewContent()
-            .navigationTitle("Trafic")
-    }
 }

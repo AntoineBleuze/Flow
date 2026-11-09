@@ -1510,7 +1510,7 @@ private struct LineGroupRowSheet: View {
     private func locateBusStops() {
         if let selectedDetent = selectedDetent {
             withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                selectedDetent.wrappedValue = .fraction(0.22)
+                selectedDetent.wrappedValue = NavigationCoordinator.collapsedSheetDetent
             }
         }
         

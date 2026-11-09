@@ -4,8 +4,13 @@ import MapKit
 
 class NavigationCoordinator: ObservableObject {
     static let shared = NavigationCoordinator()
-    
+
+    /// Palier minimal de la feuille modale couplée à la Tab Bar flottante (Style Localiser iOS 26)
+    static let collapsedSheetDetent: PresentationDetent = .height(82)
+
     @Published var selectedTab: String = "Explore"
+    @Published var exploreSheetDetent: PresentationDetent = .medium
+    @Published var isSheetMergedWithTabBar: Bool = false
     @Published var userTrackingMode: MKUserTrackingMode = .none
     @Published var selectedStation: MapStation?
     @Published var recenterTrigger: Bool = false
