@@ -21,6 +21,8 @@ struct EmbeddedSearchSheetContent: View {
     @ObservedObject var favoritesService = FavoritesService.shared
     @ObservedObject var mapData = MapDataService.shared
     @ObservedObject var locationManager = LocationManager.shared
+    @ObservedObject var routeManager = RouteNavigationManager.shared
+    @ObservedObject var navigationManager = NavigationManager.shared
     @StateObject private var voiceManager = VoiceDictationManager.shared
 
     @Environment(\.modelContext) private var context
@@ -60,14 +62,17 @@ struct EmbeddedSearchSheetContent: View {
             ScrollView {
                 LazyVStack(spacing: 18) {
                     if searchText.isEmpty {
-                        if historyManager.recentStations.isEmpty && favoritesService.favoriteStationIds.isEmpty && nearbyStations.isEmpty {
+                        let activeJourney = routeManager.isRouteActive ? (routeManager.activeJourney ?? navigationManager.currentJourney) : nil
+                        if historyManager.recentStations.isEmpty && favoritesService.favoriteStationIds.isEmpty && nearbyStations.isEmpty && activeJourney == nil {
                             emptyHistoryView
                         } else {
                             if !historyManager.recentStations.isEmpty {
                                 recentSearchesSection
                             }
 
-                            if !nearbyStations.isEmpty {
+                            if let journey = activeJourney {
+                                activeRouteSection(journey: journey)
+                            } else if !nearbyStations.isEmpty {
                                 nearbyStationsSection
                             }
 
@@ -161,21 +166,6 @@ struct EmbeddedSearchSheetContent: View {
             }
             .buttonStyle(.plain)
 
-            Button(action: {
-                coordinator.showAIAssistant = true
-            }) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.purple, .blue],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-            }
-            .buttonStyle(.plain)
-
             if isFieldFocused || !searchText.isEmpty {
                 Button(action: {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
@@ -263,6 +253,176 @@ struct EmbeddedSearchSheetContent: View {
                         Divider()
                             .padding(.leading, 16)
                     }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func activeRouteSection(journey: Journey) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Itinéraire en cours", systemImage: "point.topleft.down.to.point.bottomright.curvepath.fill")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundColor(.secondary)
+                    .textCase(.uppercase)
+
+                Spacer()
+
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                        routeManager.stopRoute()
+                    }
+                }) {
+                    Text("Arrêter")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundColor(.red)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 4)
+
+            sheetSectionGroup {
+                Button(action: {
+                    routeManager.showRouteDetails()
+                }) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 12) {
+                            activeRouteTransportIcon
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(routeManager.pillHeadline)
+                                    .font(.system(.subheadline, design: .rounded))
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.primary)
+                                    .lineLimit(1)
+
+                                HStack(spacing: 5) {
+                                    Circle()
+                                        .fill(Color.green)
+                                        .frame(width: 6, height: 6)
+
+                                    Text(routeManager.pillSubheadline)
+                                        .font(.system(.caption, design: .rounded))
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+
+                            Spacer(minLength: 4)
+
+                            HStack(spacing: 4) {
+                                Text("Détails")
+                                    .font(.system(.caption, design: .rounded))
+                                    .fontWeight(.bold)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 10, weight: .bold))
+                            }
+                            .foregroundColor(.blue)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.blue.opacity(0.12), in: Capsule())
+                        }
+
+                        if !routeManager.currentInstruction.isEmpty {
+                            Text(routeManager.currentInstruction)
+                                .font(.system(.caption, design: .rounded))
+                                .foregroundColor(.secondary)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                        }
+
+                        ProgressView(value: min(max(routeManager.progress, 0), 1))
+                            .tint(.blue)
+
+                        if let sections = journey.sections, !sections.isEmpty {
+                            Divider()
+
+                            HStack(spacing: 8) {
+                                activeRouteTimeline(sections: sections)
+
+                                Spacer(minLength: 4)
+
+                                if !routeManager.destinationName.isEmpty {
+                                    Text(routeManager.destinationName)
+                                        .font(.system(.caption, design: .rounded))
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+                        }
+                    }
+                    .padding(16)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var activeRouteTransportIcon: some View {
+        if routeManager.isWalking {
+            ZStack {
+                Circle()
+                    .fill(Color.secondary.opacity(0.16))
+                    .frame(width: 36, height: 36)
+
+                Image(systemName: "figure.walk")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(.primary)
+            }
+        } else if let line = routeManager.currentLineDisplay {
+            LineIcon(
+                type: line.transportType,
+                lineId: line.code ?? line.label ?? "",
+                size: 34,
+                customColor: Color(hex: line.color ?? "0078D7")
+            )
+        } else {
+            ZStack {
+                Circle()
+                    .fill(Color.blue.opacity(0.16))
+                    .frame(width: 36, height: 36)
+
+                Image(systemName: "tram.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.blue)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func activeRouteTimeline(sections: [ItinerarySection]) -> some View {
+        let visibleSections = sections.filter { $0.type != "waiting" }
+        HStack(spacing: 4) {
+            ForEach(Array(visibleSections.enumerated()), id: \.offset) { index, section in
+                if section.type == "public_transport", let display = section.display_informations {
+                    LineIcon(
+                        type: display.transportType,
+                        lineId: display.code ?? display.label ?? "?",
+                        size: 20,
+                        customColor: Color(hex: display.color ?? "0078D7")
+                    )
+                } else if (section.mode == "walking" || section.type == "street_network"),
+                          (section.duration ?? 0) > 120 {
+                    Image(systemName: "figure.walk")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary)
+                } else if section.type == "transfer" {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.secondary.opacity(0.7))
+                }
+
+                if index < visibleSections.count - 1,
+                   section.type == "public_transport",
+                   visibleSections[index + 1].type == "public_transport" {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.secondary.opacity(0.7))
                 }
             }
         }

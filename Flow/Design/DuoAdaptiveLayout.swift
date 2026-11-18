@@ -5,6 +5,7 @@ import SwiftUI
 /// Posture et état d'affichage pour l'iPhone Duo (appareil pliable / double écran)
 public enum DuoDevicePosture: Equatable {
     case foldedSingleScreen
+    case foldedDuoOuterScreen
     case unfoldedDualScreen
     
     public var isDualScreen: Bool {
@@ -12,7 +13,11 @@ public enum DuoDevicePosture: Equatable {
     }
     
     public var isFolded: Bool {
-        self == .foldedSingleScreen
+        self != .unfoldedDualScreen
+    }
+    
+    public var isDuoOuterScreen: Bool {
+        self == .foldedDuoOuterScreen
     }
 }
 
@@ -52,7 +57,7 @@ public enum DuoLayoutHelper {
     }
     
     /// Détermine la posture selon la taille de l'écran et la classe de taille horizontale.
-    /// Gère fidèlement l'iPhone Duo (plié: 466x678, déplié: 951x669).
+    /// Gère fidèlement l'iPhone classique, l'iPhone Duo fermé (466x678) et l'iPhone Duo déplié (951x669).
     public static func posture(
         horizontalSizeClass: UserInterfaceSizeClass?,
         screenSize: CGSize
@@ -68,6 +73,8 @@ public enum DuoLayoutHelper {
             return .unfoldedDualScreen
         } else if horizontalSizeClass == .regular && screenSize.width >= 650 && screenSize.height >= 550 {
             return .unfoldedDualScreen
+        } else if minDimension >= 450 && maxDimension <= 720 && screenSize.width < 650 {
+            return .foldedDuoOuterScreen
         } else {
             return .foldedSingleScreen
         }
@@ -77,12 +84,11 @@ public enum DuoLayoutHelper {
 // MARK: - DuoSplitView (Conteneur Double Écran Adaptatif)
 
 /// Conteneur 2 volets intelligent conçu pour l'iPhone Duo, iPad et grands écrans.
-/// - En mode Déplié / Duo : Affiche le panneau de contrôle à gauche et la carte / vue immersive à droite,
-///   séparés par une transition en dégradé Liquid Glass fluide et progressive vers la carte.
-/// - En mode Plié / Compact : Affiche le contenu principal avec support fluide des sheets.
+/// - En mode Déplié / Duo : Affiche le panneau flottant en Liquid Glass natif à gauche au-dessus de la carte,
+///   laissant la carte plein écran totalement interactive sur le volet droit et autour du panneau.
+/// - En mode Plié / Compact : Affiche le contenu principal avec la posture détectée.
 public struct DuoSplitView<LeadingContent: View, TrailingContent: View>: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @Environment(\.colorScheme) private var colorScheme
     
     private let leadingContent: LeadingContent
     private let trailingContent: TrailingContent
@@ -107,7 +113,7 @@ public struct DuoSplitView<LeadingContent: View, TrailingContent: View>: View {
                     .environment(\.duoPosture, .unfoldedDualScreen)
             } else {
                 leadingContent
-                    .environment(\.duoPosture, .foldedSingleScreen)
+                    .environment(\.duoPosture, posture)
             }
         }
         .ignoresSafeArea()
@@ -119,18 +125,14 @@ public struct DuoSplitView<LeadingContent: View, TrailingContent: View>: View {
         
         ZStack(alignment: .leading) {
             // 1. CARTE EN ARRIÈRE-PLAN PLEINE LARGEUR
-            // S'étend sur l'ensemble des deux écrans pour faire transparaître ses couleurs sous l'ultraThinMaterial
+            // S'étend sur l'ensemble des deux écrans pour l'échantillonnage optique Liquid Glass natif
             trailingContent
                 .frame(width: size.width, height: size.height)
                 .clipped()
 
-            // 2. FOND EN DÉGRADÉ LIQUID GLASS (TRANSITION PROGRESSIVE VERS LA CARTE)
-            // Remplace la coupure linéaire abrupte par un dégradé doux et continu de flou et de lumière
-            glassGradientBackground(paneWidth: paneWidth, size: size)
-
-            // 3. CONTENU INTERACTIF DES DEUX ÉCRANS
+            // 2. CONTENU INTERACTIF DES DEUX ÉCRANS
             HStack(spacing: 0) {
-                // Volet 1 (Écran Gauche de l'iPhone Duo)
+                // Volet 1 (Écran Gauche de l'iPhone Duo) : porte ses propres surfaces `.glassEffect` natives
                 leadingContent
                     .frame(width: paneWidth, height: size.height)
                 
@@ -146,53 +148,5 @@ public struct DuoSplitView<LeadingContent: View, TrailingContent: View>: View {
             }
         }
         .ignoresSafeArea()
-    }
-
-    /// Fond en verre dégradé offrant une transition progressive et fluide entre le volet gauche et la carte
-    @ViewBuilder
-    private func glassGradientBackground(paneWidth: CGFloat, size: CGSize) -> some View {
-        let fadeStart = max(0, paneWidth - 30.0)
-        let fadeEnd = min(size.width, paneWidth + DuoLayoutHelper.hingeWidth + 50.0)
-        let backgroundWidth = fadeEnd
-        let startLocation = backgroundWidth > 0 ? (fadeStart / backgroundWidth) : 0
-        
-        ZStack(alignment: .leading) {
-            // Couche principale en matériau translucide ultra-fin
-            Rectangle()
-                .fill(.ultraThinMaterial)
-            
-            // Teinte adaptative Liquid Glass
-            Rectangle()
-                .fill(LiquidGlassTheme.cardBackgroundTint(for: colorScheme))
-            
-            // Halo spéculaire subtil et progressif accompagnant la transition
-            LinearGradient(
-                stops: [
-                    .init(color: .clear, location: 0.0),
-                    .init(color: .clear, location: max(0, startLocation - 0.05)),
-                    .init(
-                        color: Color.white.opacity(colorScheme == .dark ? 0.06 : 0.22),
-                        location: (startLocation + 1.0) / 2.0
-                    ),
-                    .init(color: .clear, location: 1.0)
-                ],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
-        }
-        .opacity(LiquidGlassTheme.duoLeftPaneOpacity)
-        .frame(width: backgroundWidth, height: size.height)
-        .mask {
-            LinearGradient(
-                stops: [
-                    .init(color: .black, location: 0.0),
-                    .init(color: .black, location: startLocation),
-                    .init(color: .clear, location: 1.0)
-                ],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
-        }
-        .allowsHitTesting(false)
     }
 }

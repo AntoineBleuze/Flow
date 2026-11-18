@@ -99,8 +99,9 @@ struct ImmersiveNavigationView: View {
                             }
                             .padding(.horizontal, 16)
                             .padding(.top, 12)
-                            .padding(.bottom, isFloating ? 16 : 40)
+                            .padding(.bottom, isFloating ? 16 : 96)
                         }
+                        .scrollContentBackground(.hidden)
                         .frame(maxHeight: isFloating ? 320 : nil)
                         .onAppear {
                             if let cur = currentSection {
@@ -122,20 +123,17 @@ struct ImmersiveNavigationView: View {
                 }
             }
         }
-        .background(.ultraThinMaterial)
     }
 
     var body: some View {
         if isFloating {
+            let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
             contentContainer
-                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(Color.primary.opacity(colorScheme == .dark ? 0.14 : 0.08), lineWidth: 1)
-                )
-                .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.12), radius: 14, y: 4)
+                .clipShape(shape)
+                .glassEffect(.regular, in: shape)
         } else {
             contentContainer
+                .liquidGlassBackground()
         }
     }
     

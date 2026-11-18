@@ -154,10 +154,10 @@ struct TransportLine: Identifiable {
     var openingDate: String? {
         guard isUnderConstruction else { return nil }
         switch lineId {
-        case "15": return "2025 - 2031"
-        case "16": return "2026 - 2028"
-        case "17": return "2026 - 2030"
-        case "18": return "2026 - 2030"
+        case "15": return "2027 - 2031"
+        case "16": return "2028 - 2030"
+        case "17": return "2028 - 2030"
+        case "18": return "Fin 2026 - 2030"
         default: return nil
         }
     }

@@ -88,6 +88,14 @@ struct Journey: Codable, Identifiable {
         return nil
     }
 
+    var usesGrandParisExpress: Bool {
+        guard let sections = sections else { return false }
+        return sections.contains { section in
+            section.type == "public_transport" &&
+            ["15", "16", "17", "18"].contains(section.display_informations?.code ?? "")
+        }
+    }
+
     enum CodingKeys: String, CodingKey {
         case departure_date_time
         case arrival_date_time

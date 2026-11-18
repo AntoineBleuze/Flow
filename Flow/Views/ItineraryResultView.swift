@@ -31,6 +31,7 @@ struct ItineraryResultView: View {
     @State private var avoidedLines: Set<String> = []
     @State private var avoidedModes: Set<String> = []
     @State private var isAccessible = false
+    @AppStorage("simulateGPE") private var simulateGPE = false
     @State private var showAvoidOptions = false
     @State private var showStationToAvoidPicker = false
     @State private var selectedStationToAvoid: MapStation? = nil
@@ -114,6 +115,7 @@ struct ItineraryResultView: View {
             avoidedLines: avoidedLines,
             avoidedModes: avoidedModes,
             isAccessible: isAccessible,
+            simulateGPE: simulateGPE,
             onSearch: { searchItinerary() }
         ))
         .modifier(ItinerarySheetsModifier(
@@ -152,6 +154,8 @@ struct ItineraryResultView: View {
             if showTimePicker {
                 timePickerView
             }
+
+            gpeSimulationToggle
 
             // Advanced options toggle button
             Button(action: {
@@ -456,6 +460,48 @@ struct ItineraryResultView: View {
         .buttonStyle(.plain)
     }
 
+    private var gpeSimulationToggle: some View {
+        Toggle(isOn: $simulateGPE) {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(simulateGPE ? .purple : .secondary)
+
+                Text("Simuler Grand Paris Express")
+                    .font(.system(.subheadline, design: .rounded))
+                    .fontWeight(.semibold)
+
+                HStack(spacing: 3) {
+                    ForEach(["15", "16", "17", "18"], id: \.self) { line in
+                        Text(line)
+                            .font(.system(size: 9, weight: .bold, design: .rounded))
+                            .foregroundColor(line == "17" ? .black : .white)
+                            .frame(width: 16, height: 16)
+                            .background(Circle().fill(resolveLineColor(line, type: .metro)))
+                    }
+                }
+            }
+        }
+        .toggleStyle(SwitchToggleStyle(tint: .purple))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(simulateGPE ? Color.purple.opacity(0.10) : LiquidGlassTheme.cardBackgroundTint(for: colorScheme))
+                )
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(
+                    simulateGPE ? AnyShapeStyle(Color.purple.opacity(0.45)) : AnyShapeStyle(LiquidGlassTheme.specularBorder(for: colorScheme)),
+                    lineWidth: 1
+                )
+        )
+    }
+
     private var avoidOptionsView: some View {
         VStack(alignment: .leading, spacing: 12) {
             Divider()
@@ -739,12 +785,22 @@ struct ItineraryResultView: View {
             .reduce(0) { $0 + ($1.duration ?? 0) }
     }
 
+    private func isGPEOnlyStation(_ station: MapStation) -> Bool {
+        guard !station.lines.isEmpty else { return false }
+        return station.lines.allSatisfy { TransitGraphRouter.gpeLineNames.contains($0.name) }
+    }
+
     private func searchItinerary() {
         guard let start = startStation, let end = endStation else {
             return
         }
 
-        print("🚀 Recherche itinéraire de \(start.name) à \(end.name)")
+        // Activer automatiquement la simulation si une gare GPE exclusive est sélectionnée
+        if !simulateGPE && (isGPEOnlyStation(start) || isGPEOnlyStation(end)) {
+            simulateGPE = true
+        }
+
+        print("🚀 Recherche itinéraire de \(start.name) à \(end.name) (GPE: \(simulateGPE))")
         print("📍 De: \(start.coordinate.latitude),\(start.coordinate.longitude)")
         print("📍 À: \(end.coordinate.latitude),\(end.coordinate.longitude)")
         print("🕐 Date: \(departureDate) - Type: \(isArrivalTime ? "Arrivée" : "Départ")")
@@ -772,7 +828,11 @@ struct ItineraryResultView: View {
             date: departureDate,
             isArrival: isArrivalTime,
             forbiddenUris: forbiddenUris,
-            isAccessible: isAccessible
+            isAccessible: isAccessible,
+            simulateGPE: simulateGPE,
+            avoidedStations: avoidedStations,
+            avoidedLines: avoidedLines,
+            avoidedModes: avoidedModes
         )
     }
 }
@@ -791,10 +851,65 @@ class ItineraryViewModel: ObservableObject {
         date: Date,
         isArrival: Bool,
         forbiddenUris: [String] = [],
-        isAccessible: Bool = false
+        isAccessible: Bool = false,
+        simulateGPE: Bool = false,
+        avoidedStations: [MapStation] = [],
+        avoidedLines: Set<String> = [],
+        avoidedModes: Set<String> = []
     ) {
         self.isLoading = true
         self.errorMessage = nil
+
+        if simulateGPE {
+            let allStations = MapDataService.shared.allStations
+            Task.detached(priority: .userInitiated) {
+                let gpeJourneys = TransitGraphRouter.shared.findSimulatedGPERoutes(
+                    from: start,
+                    to: end,
+                    allStations: allStations,
+                    departureDate: date,
+                    isArrival: isArrival,
+                    avoidedStations: avoidedStations,
+                    avoidedLines: avoidedLines,
+                    avoidedModes: avoidedModes
+                )
+
+                await MainActor.run {
+                    if !gpeJourneys.isEmpty {
+                        self.journeys = gpeJourneys
+                        self.isLoading = false
+                    }
+                }
+
+                // Compléter avec les itinéraires IDFM temps réel si disponibles (pour comparer)
+                do {
+                    let liveJourneys = try await IDFMItineraryService.shared.searchItineraryAsync(
+                        from: start,
+                        to: end,
+                        date: date,
+                        isArrival: isArrival,
+                        forbiddenUris: forbiddenUris,
+                        isAccessible: isAccessible
+                    )
+                    await MainActor.run {
+                        let combined = gpeJourneys + liveJourneys
+                        self.journeys = combined
+                        self.isLoading = false
+                        if combined.isEmpty {
+                            self.errorMessage = "Aucun itinéraire trouvé."
+                        }
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.isLoading = false
+                        if gpeJourneys.isEmpty {
+                            self.errorMessage = error.localizedDescription
+                        }
+                    }
+                }
+            }
+            return
+        }
 
         IDFMItineraryService.shared.searchItinerary(
             from: start,
@@ -898,6 +1013,20 @@ struct JourneyRow: View {
                     }
 
                     Spacer()
+
+                    if journey.usesGrandParisExpress {
+                        HStack(spacing: 4) {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 10, weight: .bold))
+                            Text("Simulé GPE")
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                        }
+                        .foregroundColor(.purple)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.purple.opacity(0.14), in: Capsule())
+                        .overlay(Capsule().strokeBorder(Color.purple.opacity(0.35), lineWidth: 0.75))
+                    }
 
                     if let affluence = journey.overallAffluence {
                         AffluenceBadgeView(level: affluence)
@@ -1724,6 +1853,7 @@ private struct ItineraryChangesModifier: ViewModifier {
     let avoidedLines: Set<String>
     let avoidedModes: Set<String>
     let isAccessible: Bool
+    let simulateGPE: Bool
     let onSearch: () -> Void
 
     func body(content: Content) -> some View {
@@ -1736,5 +1866,6 @@ private struct ItineraryChangesModifier: ViewModifier {
             .onChange(of: avoidedLines) { _, _ in onSearch() }
             .onChange(of: avoidedModes) { _, _ in onSearch() }
             .onChange(of: isAccessible) { _, _ in onSearch() }
+            .onChange(of: simulateGPE) { _, _ in onSearch() }
     }
 }

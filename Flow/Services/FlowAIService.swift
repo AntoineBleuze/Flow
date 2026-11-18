@@ -7,7 +7,7 @@ import SwiftUI
 
 public struct FlowAIAvailability {
     public static var isAvailable: Bool {
-        if #available(iOS 27.0, *) {
+        if #available(iOS 26.0, *) {
             return true
         } else {
             return false
@@ -15,12 +15,16 @@ public struct FlowAIAvailability {
     }
 }
 
-@available(iOS 27.0, *)
+@available(iOS 26.0, *)
 @MainActor
 public final class FlowAIService: ObservableObject {
     public static let shared = FlowAIService()
 
     @Published public var isGenerating: Bool = false
+    @Published public var isStreamingText: Bool = false
+    @Published public var activeToolStatus: String? = nil
+    @Published var latestGeneratedJourneys: [Journey] = []
+    @Published public var latestDestinationName: String? = nil
     @Published public var lastResponse: String = ""
     @Published public var lastError: String?
 
@@ -41,17 +45,19 @@ public final class FlowAIService: ObservableObject {
         ]
 
         let instructions = """
-        Tu es le copilote d'intelligence artificielle de l'application Flow, expert officiel du réseau Île-de-France Mobilités (Métro, RER, Tramway, Transilien).
-        Tu réponds en français de façon concise, précise, naturelle et directe.
+        Tu es Flow IA, le copilote d'intelligence artificielle officiel de l'application Flow pour le réseau Île-de-France Mobilités (Métro, RER, Tramway, Transilien).
+        Tu réponds en français de façon concise, structurée, naturelle et directement actionnable.
 
         Règles d'action :
-        - Pour toute demande d'itinéraire ou de trajet (ex: "comment aller à...", "quel itinéraire me recommandes-tu pour aller à..."), utilise impérativement l'outil `searchItinerary`. Cet outil prend en compte la position géographique actuelle de l'utilisateur si aucun point de départ n'est précisé et affiche automatiquement un aperçu du tracé sur la carte Explorer en masquant les autres lignes.
-        - Pour afficher ou centrer la carte sur une station spécifique (ex: "montre-moi Châtelet", "où est la station Bastille"), utilise `focusStationOnMap`.
-        - Pour connaître les stations à proximité immédiate ou la position GPS de l'utilisateur, utilise `getUserLocation`.
-        - Pour une sortie spécifique ou connaître les issues d'une station, utilise `recommendStationExit`.
-        - Pour vérifier l'état des ascenseurs (PMR / poussettes / bagages), utilise `checkElevatorStatus`.
-        - Pour l'état du trafic, utilise `getTrafficStatus`.
-        - IMPORTANT : Ne répète JAMAIS les mêmes phrases, listes ou paragraphes en boucle. Donne une réponse structurée, fluide et agréable à lire.
+        - Pour toute demande d'itinéraire, de trajet ou de direction ("comment aller à...", "emmène-moi à...", "quel trajet pour..."), appelle impérativement `searchItinerary`. L'outil utilise automatiquement la position GPS actuelle si aucun départ n'est donné, récupère les horaires réels IDFM et affiche la carte interactive du trajet directement dans la conversation et sur la carte Explorer.
+        - Dès que l'utilisateur mentionne une heure d'arrivée ("arriver à 14:50", "être là-bas à 9h") ou de départ ("partir à 14:50"), passe impérativement `time` au format HH:mm (ex: "14:50") et `isArrivalTime: true` (pour une heure d'arrivée) ou `false` (pour une heure de départ) à `searchItinerary`.
+        - Si l'utilisateur corrige ou précise l'heure dans un message suivant ("Je ne veux pas partir à 5h, je veux arriver à 14:50"), rappelle OBLIGATOIREMENT `searchItinerary` avec la destination de la conversation, la nouvelle heure `time` et `isArrivalTime`. N'invente JAMAIS d'horaires sans appeler `searchItinerary`.
+        - Pour afficher ou centrer la carte sur une station ("montre-moi Châtelet", "où est Bastille"), utilise `focusStationOnMap`.
+        - Pour connaître les stations proches ou la position GPS actuelle, utilise `getUserLocation`.
+        - Pour trouver la meilleure sortie d'une station, utilise `recommendStationExit`.
+        - Pour vérifier les ascenseurs (PMR / poussettes / bagages), utilise `checkElevatorStatus`.
+        - Pour l'état du trafic en direct sur une ligne, utilise `getTrafficStatus`.
+        - IMPORTANT : Lorsqu'un itinéraire est retourné par `searchItinerary`, la carte interactive détaillée s'affiche automatiquement sous ta réponse. Rédige donc un résumé fluide de 2 à 3 phrases maximum (heure de départ, heure d'arrivée, lignes clés et sortie éventuelle) SANS longue liste à puces et SANS utiliser d'astérisques Markdown (**). Ne répète jamais la même phrase en boucle.
         """
 
         self.session = LanguageModelSession(
@@ -66,51 +72,85 @@ public final class FlowAIService: ObservableObject {
         initSession()
         lastResponse = ""
         lastError = nil
+        activeToolStatus = nil
+        latestGeneratedJourneys = []
+        latestDestinationName = nil
+        isStreamingText = false
     }
 
-    /// Enrichit le prompt de l'utilisateur avec son contexte de géolocalisation actuel
+    /// Enrichit le prompt de l'utilisateur avec son contexte temps réel (heure locale, GPS, perturbations, trajet actif)
     private func buildEnrichedPrompt(userPrompt: String) -> String {
-        guard let location = LocationManager.shared.userLocation else {
+        var contextBlocks: [String] = []
+        let currentTimeStr = DateFormat.shortTime.string(from: Date())
+        contextBlocks.append("[Heure actuelle : \(currentTimeStr)]")
+
+        if let location = LocationManager.shared.userLocation {
+            let allStations = MapDataService.shared.allStations
+            let uLoc = CLLocation(latitude: location.latitude, longitude: location.longitude)
+            let nearest = allStations.map { station -> (station: MapStation, dist: Double) in
+                let sLoc = CLLocation(latitude: station.latitude, longitude: station.longitude)
+                return (station, uLoc.distance(from: sLoc))
+            }.sorted { $0.dist < $1.dist }.prefix(3)
+
+            var gpsBlock = "[Position GPS actuelle : (\(String(format: "%.4f", location.latitude)), \(String(format: "%.4f", location.longitude)))]"
+            if !nearest.isEmpty {
+                let stationsSummary = nearest.map { item in
+                    let m = Int(item.dist)
+                    let walkMin = max(1, Int(ceil(Double(m) / 80.0)))
+                    let lines = item.station.lines.map { $0.name }.joined(separator: ", ")
+                    return "\(item.station.name) (à \(m)m, ~\(walkMin) min à pied, lignes: \(lines.isEmpty ? "Métro/RER" : lines))"
+                }.joined(separator: "; ")
+                gpsBlock += "\n[Stations les plus proches : \(stationsSummary)]"
+            }
+            contextBlocks.append(gpsBlock)
+        }
+
+        let disruptedLines = TrafficService.shared.lines.filter {
+            $0.status == .interrupted || $0.status == .disrupted
+        }
+        if !disruptedLines.isEmpty {
+            let summary = disruptedLines.prefix(6).map {
+                "Ligne \($0.lineId) (\($0.status.description))"
+            }.joined(separator: ", ")
+            contextBlocks.append("[Perturbations majeures en cours : \(summary)]")
+        }
+
+        let routeManager = RouteNavigationManager.shared
+        if routeManager.isRouteActive, routeManager.activeJourney != nil {
+            contextBlocks.append("[Navigation active en cours vers \(routeManager.destinationName), ~\(routeManager.remainingMinutes) min restantes, prochaine étape : \(routeManager.pillHeadline)]")
+        }
+
+        guard !contextBlocks.isEmpty else {
             return userPrompt
         }
-        
-        let allStations = MapDataService.shared.allStations
-        let uLoc = CLLocation(latitude: location.latitude, longitude: location.longitude)
-        let nearest = allStations.map { station -> (station: MapStation, dist: Double) in
-            let sLoc = CLLocation(latitude: station.latitude, longitude: station.longitude)
-            return (station, uLoc.distance(from: sLoc))
-        }.sorted { $0.dist < $1.dist }.prefix(3)
-        
-        var context = "[Position GPS actuelle de l'utilisateur : (\(String(format: "%.4f", location.latitude)), \(String(format: "%.4f", location.longitude)))]\n"
-        if !nearest.isEmpty {
-            let stationsSummary = nearest.map { item in
-                let m = Int(item.dist)
-                let walkMin = max(1, Int(ceil(Double(m) / 80.0)))
-                let lines = item.station.lines.map { $0.name }.joined(separator: ", ")
-                return "\(item.station.name) (à \(m)m, ~\(walkMin) min à pied, lignes: \(lines.isEmpty ? "Métro/RER" : lines))"
-            }.joined(separator: ", ")
-            context += "[Stations les plus proches à pied : \(stationsSummary)]\n"
-        }
-        context += "[Consigne : Réponds en tenant compte de cette position de départ.]\n\n"
-        return "\(context)\(userPrompt)"
+
+        let header = contextBlocks.joined(separator: "\n")
+        return "\(header)\n[Consigne : Prends en compte ce contexte temps réel.]\n\n\(userPrompt)"
     }
 
     /// Poser une question générale à l'assistant
     public func askAssistant(prompt: String) async throws -> String {
-        guard let session = session else {
+        if session == nil {
             initSession()
-            guard let session = session else {
-                throw NSError(domain: "FlowAI", code: -1, userInfo: [NSLocalizedDescriptionKey: "Session non initialisée"])
-            }
-            return try await executePrompt(prompt, on: session)
+        }
+        guard let session = session else {
+            throw NSError(domain: "FlowAI", code: -1, userInfo: [NSLocalizedDescriptionKey: "Session non initialisée"])
         }
         return try await executePrompt(prompt, on: session)
     }
 
     private func executePrompt(_ prompt: String, on session: LanguageModelSession) async throws -> String {
         isGenerating = true
+        isStreamingText = false
         lastError = nil
-        defer { isGenerating = false }
+        latestGeneratedJourneys = []
+        latestDestinationName = nil
+        activeToolStatus = "Analyse de votre demande..."
+        defer {
+            isGenerating = false
+            isStreamingText = false
+            activeToolStatus = nil
+        }
 
         do {
             let enrichedPrompt = buildEnrichedPrompt(userPrompt: prompt)
@@ -129,12 +169,22 @@ public final class FlowAIService: ObservableObject {
         AsyncThrowingStream { continuation in
             Task { @MainActor in
                 self.isGenerating = true
+                self.isStreamingText = false
                 self.lastError = nil
-                defer { self.isGenerating = false }
+                self.latestGeneratedJourneys = []
+                self.latestDestinationName = nil
+                self.activeToolStatus = "Analyse de votre demande..."
+                defer {
+                    self.isGenerating = false
+                    self.isStreamingText = false
+                    self.activeToolStatus = nil
+                }
 
-                guard let session = self.session else {
+                if self.session == nil {
                     self.initSession()
-                    continuation.finish()
+                }
+                guard let session = self.session else {
+                    continuation.finish(throwing: NSError(domain: "FlowAI", code: -1, userInfo: [NSLocalizedDescriptionKey: "Session non initialisée"]))
                     return
                 }
 
@@ -142,8 +192,15 @@ public final class FlowAIService: ObservableObject {
                     let enrichedPrompt = self.buildEnrichedPrompt(userPrompt: prompt)
                     let stream = session.streamResponse(to: enrichedPrompt)
                     for try await snapshot in stream {
+                        if !snapshot.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            if !self.isStreamingText {
+                                self.isStreamingText = true
+                            }
+                            self.activeToolStatus = nil
+                        }
                         continuation.yield(snapshot.content)
                     }
+                    self.lastResponse = ""
                     continuation.finish()
                 } catch {
                     self.lastError = error.localizedDescription

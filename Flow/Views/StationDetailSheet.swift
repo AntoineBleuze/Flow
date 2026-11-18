@@ -110,7 +110,34 @@ struct StationDetailSheet: View {
                 }
             }
             .onChange(of: station.id) { _, _ in
+                selectedMode = "Tout"
                 setupStation()
+            }
+            .onChange(of: station.prioritizedLine) { _, newPrio in
+                selectedMode = "Tout"
+                if let currentMerged = mergedStation {
+                    var updatedLines = currentMerged.lines
+                    if let prio = newPrio {
+                        updatedLines.sort { a, b in
+                            if a.id == prio.id { return true }
+                            if b.id == prio.id { return false }
+                            return false
+                        }
+                    }
+                    mergedStation = MapStation(
+                        id: currentMerged.id,
+                        name: currentMerged.name,
+                        coordinate: station.coordinate,
+                        platforms: currentMerged.platforms,
+                        isHub: currentMerged.isHub,
+                        mainType: currentMerged.mainType,
+                        lines: updatedLines,
+                        city: currentMerged.city,
+                        prioritizedLine: newPrio
+                    )
+                } else {
+                    mergedStation = station
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: .flowServerStationUpdate)) { notification in
                 if let newDepartures = notification.userInfo?["departures"] as? [Departure] {
@@ -291,14 +318,9 @@ struct StationDetailSheet: View {
                         .foregroundColor(.blue)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Capsule())
-                        .overlay(
-                            Capsule()
-                                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                        )
+                        .glassEffect(.regular.interactive(), in: .capsule)
                     }
-                    .buttonStyle(.liquidGlassInteractive)
+                    .buttonStyle(.plain)
                 } else {
                     HStack(spacing: 4) {
                         Image(systemName: "mappin.circle.fill")
@@ -452,10 +474,31 @@ struct StationDetailSheet: View {
                             return group.mode?.lowercased().contains(selectedMode.lowercased()) ?? false
                                 || (group.mode == nil && selectedMode == "Autre")
                         }
-                        let gpeLines = currentStation.lines.filter { ["15", "16", "17", "18"].contains($0.name) }
+                        let gpeLines = currentStation.lines
+                            .filter { ["15", "16", "17", "18"].contains($0.name) }
+                            .sorted { a, b in
+                                let pA = isPrioritizedStationLine(a)
+                                let pB = isPrioritizedStationLine(b)
+                                if pA != pB { return pA }
+                                return compareLineLabels(a.name, b.name)
+                            }
+                        let prioritizeGPEFirst = currentStation.prioritizedLine.map {
+                            ["15", "16", "17", "18"].contains($0.name)
+                        } ?? false
+
+                        if prioritizeGPEFirst && !gpeLines.isEmpty {
+                            gpeLinesSection(gpeLines: gpeLines)
+                        }
                         
                         if filteredGroups.isEmpty && gpeLines.isEmpty {
-                            let activeLines = currentStation.lines.filter { !["15", "16", "17", "18"].contains($0.name) }
+                            let activeLines = currentStation.lines
+                                .filter { !["15", "16", "17", "18"].contains($0.name) }
+                                .sorted { a, b in
+                                    let pA = isPrioritizedStationLine(a)
+                                    let pB = isPrioritizedStationLine(b)
+                                    if pA != pB { return pA }
+                                    return a.type.priority > b.type.priority
+                                }
                             let hour = Calendar.current.component(.hour, from: Date())
                             let isNight = hour >= 1 && hour < 5
                             
@@ -511,7 +554,7 @@ struct StationDetailSheet: View {
                                 .padding(.top, 20)
                             }
                         } else {
-                            let categories = ["Métro", "RER", "Tramway", "Train", "Bus", "Autre"]
+                            let categories = prioritizedCategories()
                             ForEach(categories, id: \.self) { category in
                                 let categoryGroups = filteredGroups.filter { displayModeName(for: $0.mode) == category }
                                 if !categoryGroups.isEmpty {
@@ -548,87 +591,8 @@ struct StationDetailSheet: View {
                         }
                         
                         // Grand Paris Express lines (Estimated delivery dates)
-                        if !gpeLines.isEmpty {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("GRAND PARIS EXPRESS (EN CONSTRUCTION)")
-                                    .font(.system(.caption, design: .rounded))
-                                    .fontWeight(.bold)
-                                    .foregroundColor(.secondary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 20)
-                                    .padding(.top, 14)
-                                
-                                ForEach(gpeLines) { gpeLine in
-                                    LiquidGlassCard(cornerRadius: 18, padding: 14) {
-                                        VStack(alignment: .leading, spacing: 10) {
-                                            HStack(spacing: 10) {
-                                                if UIImage(named: gpeLine.assetName) != nil {
-                                                    Image(gpeLine.assetName)
-                                                        .resizable()
-                                                        .scaledToFit()
-                                                        .frame(width: 36, height: 36)
-                                                } else {
-                                                    Circle()
-                                                        .fill(resolveLineColor(gpeLine.name, type: .metro))
-                                                        .frame(width: 30, height: 30)
-                                                        .overlay(
-                                                            Text(gpeLine.name)
-                                                                .font(.subheadline)
-                                                                .bold()
-                                                                .foregroundColor(.white)
-                                                        )
-                                                }
-                                                
-                                                VStack(alignment: .leading, spacing: 2) {
-                                                    Text("Métro Ligne \(gpeLine.name)")
-                                                        .font(.subheadline)
-                                                        .fontWeight(.semibold)
-                                                        .foregroundColor(.primary)
-                                                    Text("Société des Grands Projets")
-                                                        .font(.caption)
-                                                        .foregroundColor(.secondary)
-                                                }
-                                                Spacer()
-                                            }
-                                            
-                                            // Delivery Date Box
-                                            HStack {
-                                                VStack(alignment: .leading, spacing: 4) {
-                                                    Text("Date de livraison estimée")
-                                                        .font(.caption)
-                                                        .foregroundColor(.secondary)
-                                                    
-                                                    Text(getGPEDeliveryDate(lineName: gpeLine.name, stationName: currentStation.name))
-                                                        .font(.subheadline)
-                                                        .bold()
-                                                        .foregroundColor(.blue)
-                                                }
-                                                Spacer()
-                                                Image(systemName: "calendar")
-                                                    .font(.title3)
-                                                    .foregroundColor(.blue)
-                                            }
-                                            .padding(.horizontal, 14)
-                                            .padding(.vertical, 12)
-                                            .background {
-                                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                                    .fill(.ultraThinMaterial)
-                                                    .overlay(
-                                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                                            .fill(LiquidGlassTheme.cardBackgroundTint(for: colorScheme))
-                                                    )
-                                            }
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                                    .strokeBorder(LiquidGlassTheme.specularBorder(for: colorScheme), lineWidth: 1)
-                                            )
-                                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                                        }
-                                    }
-                                    .padding(.horizontal)
-                                    .padding(.vertical, 4)
-                                }
-                            }
+                        if !prioritizeGPEFirst && !gpeLines.isEmpty {
+                            gpeLinesSection(gpeLines: gpeLines)
                         }
                     }
                     .padding(.top, 16)
@@ -843,7 +807,13 @@ struct StationDetailSheet: View {
                     }
                 }
                 
+                let stationPrioritizedLine = self.station.prioritizedLine
                 existingLines.sort { a, b in
+                    if let prio = stationPrioritizedLine {
+                        let aIsPrio = a.id == prio.id
+                        let bIsPrio = b.id == prio.id
+                        if aIsPrio != bIsPrio { return aIsPrio }
+                    }
                     let priorityA = a.type.priority
                     let priorityB = b.type.priority
                     if priorityA != priorityB {
@@ -860,7 +830,8 @@ struct StationDetailSheet: View {
                     isHub: true,
                     mainType: stationMainType,
                     lines: existingLines,
-                    city: stationCity
+                    city: stationCity,
+                    prioritizedLine: stationPrioritizedLine
                 )
                 
                 await MainActor.run {
@@ -1037,6 +1008,9 @@ struct StationDetailSheet: View {
         }
 
         return groups.values.sorted { a, b in
+            let prioA = isPrioritizedGroup(a)
+            let prioB = isPrioritizedGroup(b)
+            if prioA != prioB { return prioA }
             let priorityA = modePriority(a.mode)
             let priorityB = modePriority(b.mode)
             if priorityA != priorityB { return priorityA < priorityB }
@@ -1045,6 +1019,111 @@ struct StationDetailSheet: View {
             var newGroup = group
             newGroup.directions.sort { $0.direction < $1.direction }
             return newGroup
+        }
+    }
+
+    private func isPrioritizedGroup(_ group: LineGroup) -> Bool {
+        guard let prio = currentStation.prioritizedLine else { return false }
+        let groupType = getTransportType(from: group.mode)
+        return normalizeLineName(group.label) == normalizeLineName(prio.name) && groupType == prio.type
+    }
+
+    private func isPrioritizedStationLine(_ line: StationLine) -> Bool {
+        guard let prio = currentStation.prioritizedLine else { return false }
+        return normalizeLineName(line.name) == normalizeLineName(prio.name) && line.type == prio.type
+    }
+
+    private func prioritizedCategories() -> [String] {
+        var categories = ["Métro", "RER", "Tramway", "Train", "Bus", "Autre"]
+        guard let prio = currentStation.prioritizedLine else { return categories }
+        let prioCategory: String
+        switch prio.type {
+        case .metro: prioCategory = "Métro"
+        case .rer: prioCategory = "RER"
+        case .tram: prioCategory = "Tramway"
+        case .transilien, .train: prioCategory = "Train"
+        case .bus: prioCategory = "Bus"
+        case .cable: prioCategory = "Autre"
+        }
+        if let idx = categories.firstIndex(of: prioCategory) {
+            categories.remove(at: idx)
+            categories.insert(prioCategory, at: 0)
+        }
+        return categories
+    }
+
+    @ViewBuilder
+    private func gpeLinesSection(gpeLines: [StationLine]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("GRAND PARIS EXPRESS (EN CONSTRUCTION)")
+                .font(.system(.caption, design: .rounded))
+                .fontWeight(.bold)
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.top, 14)
+
+            ForEach(gpeLines) { gpeLine in
+                LiquidGlassCard(cornerRadius: 18, padding: 14) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 10) {
+                            if UIImage(named: gpeLine.assetName) != nil {
+                                Image(gpeLine.assetName)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 36, height: 36)
+                            } else {
+                                Circle()
+                                    .fill(resolveLineColor(gpeLine.name, type: .metro))
+                                    .frame(width: 30, height: 30)
+                                    .overlay(
+                                        Text(gpeLine.name)
+                                            .font(.subheadline)
+                                            .bold()
+                                            .foregroundColor(.white)
+                                    )
+                            }
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Métro Ligne \(gpeLine.name)")
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.primary)
+                                Text("Société des Grands Projets")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                        }
+
+                        // Delivery Date Box
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Date de livraison estimée")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+
+                                Text(getGPEDeliveryDate(lineName: gpeLine.name, stationName: currentStation.name))
+                                    .font(.subheadline)
+                                    .bold()
+                                    .foregroundColor(.blue)
+                            }
+                            Spacer()
+                            Image(systemName: "calendar")
+                                .font(.title3)
+                                .foregroundColor(.blue)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.05))
+                        )
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 4)
+            }
         }
     }
 
@@ -1350,23 +1429,23 @@ struct StationDetailSheet: View {
         switch lineName {
         case "15":
             if Self.sudStations.contains(where: { stationName.contains($0) }) {
-                return "Avril 2027 (Ligne 15 Sud)"
+                return "Automne 2027 (Ligne 15 Sud)"
             } else {
                 return "Horizon 2031 (Ligne 15 Est/Ouest)"
             }
         case "16":
             if Self.lateStations.contains(where: { stationName.contains($0) }) {
-                return "Horizon 2028"
+                return "Horizon 2029 - 2030"
             } else {
-                return "Horizon 2027"
+                return "Horizon 2028"
             }
         case "17":
             if stationName.contains("Mesnil") {
                 return "Horizon 2030"
             } else if stationName.contains("Expositions") || stationName.contains("Roissy") || stationName.contains("Charles de Gaulle") {
-                return "Horizon 2028"
+                return "Horizon 2029 - 2030"
             } else {
-                return "Horizon 2027"
+                return "Horizon 2028"
             }
         case "18":
             if stationName.contains("Versailles") || stationName.contains("Saint-Quentin") || stationName.contains("Guyancourt") || stationName.contains("Satory") {
@@ -1374,7 +1453,7 @@ struct StationDetailSheet: View {
             } else if stationName.contains("Orly") || stationName.contains("Antonypole") {
                 return "Horizon 2027"
             } else {
-                return "Octobre 2026"
+                return "Fin 2026 / Début 2027"
             }
         default:
             return "Mise en service prochaine"
@@ -1591,19 +1670,10 @@ private struct LineGroupRowSheet: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background {
+        .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(LiquidGlassTheme.cardBackgroundTint(for: colorScheme))
-                )
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(LiquidGlassTheme.specularBorder(for: colorScheme), lineWidth: 1)
+                .fill(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.05))
         )
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var directionsView: some View {
@@ -1623,19 +1693,10 @@ private struct LineGroupRowSheet: View {
                 }
             }
         }
-        .background {
+        .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(LiquidGlassTheme.cardBackgroundTint(for: colorScheme))
-                )
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(LiquidGlassTheme.specularBorder(for: colorScheme), lineWidth: 1)
+                .fill(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.05))
         )
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private func directionRow(direction: StationDetailSheet.DirectionGroup, index: Int) -> some View {

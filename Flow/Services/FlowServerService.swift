@@ -496,7 +496,12 @@ class FlowServerService: ObservableObject {
         print("📡 [Server] Traffic REST: \(url.absoluteString)")
 
         return session.dataTaskPublisher(for: url)
-            .map { $0.data }
+            .tryMap { data, response -> Data in
+                if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                    throw URLError(.badServerResponse)
+                }
+                return data
+            }
             .decode(type: ServerResponse.self, decoder: JSONDecoder())
             .map { (response: ServerResponse) -> [Disruption] in
                 return response.disruptions ?? []

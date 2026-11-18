@@ -138,23 +138,20 @@ struct MapViewControllerBridge: UIViewRepresentable {
         context.coordinator.parent = self
 
         #if canImport(UIKit)
-        if duoPosture == .unfoldedDualScreen {
-            let leftMargin: CGFloat = 484.0
-            if mapView.layoutMargins.left != leftMargin {
-                mapView.layoutMargins = UIEdgeInsets(top: 0, left: leftMargin, bottom: 0, right: 0)
+        let targetMargins: UIEdgeInsets = {
+            switch duoPosture {
+            case .unfoldedDualScreen:
+                return UIEdgeInsets(top: 0, left: 468, bottom: 0, right: 0)
+            case .foldedDuoOuterScreen:
+                return UIEdgeInsets(top: 0, left: 0, bottom: 260, right: 86)
+            case .foldedSingleScreen:
+                return .zero
             }
-        } else {
-            if mapView.layoutMargins.left != 0 {
-                mapView.layoutMargins = .zero
-            }
+        }()
+        if mapView.layoutMargins != targetMargins {
+            mapView.layoutMargins = targetMargins
         }
         #endif
-
-        // Handle Polyline Style Change (force recreation of renderers by removing and re-adding overlays)
-        if context.coordinator.lastPolylineStyle != data.polylineStyle {
-            context.coordinator.lastPolylineStyle = data.polylineStyle
-            mapView.removeOverlays(mapView.overlays)
-        }
 
         // Handle Recenter Trigger (forced recenter)
         if context.coordinator.lastRecenterTrigger != recenterTrigger {
@@ -198,11 +195,13 @@ struct MapViewControllerBridge: UIViewRepresentable {
 
         // Check if we have an active journey
         if let journey = journey {
-            // For now, let's remove existing overlays to avoid clutter if we are navigating
-            mapView.removeOverlays(mapView.overlays)
-            mapView.removeAnnotations(mapView.annotations.filter { !($0 is MKUserLocation || $0 is SimulatedUserAnnotation) })
+            if context.coordinator.lastDrawnJourneyId != journey.id.uuidString {
+                context.coordinator.lastDrawnJourneyId = journey.id.uuidString
+                mapView.removeOverlays(mapView.overlays)
+                mapView.removeAnnotations(mapView.annotations.filter { !($0 is MKUserLocation || $0 is SimulatedUserAnnotation) })
 
-            drawJourney(journey, on: mapView)
+                drawJourney(journey, on: mapView)
+            }
 
             // Zoom/pan to focused section or entire journey (only if not simulating to avoid fight with centering)
             if !locationManager.isSimulating {
@@ -221,7 +220,8 @@ struct MapViewControllerBridge: UIViewRepresentable {
                 }
             }
         } else {
-            let hadJourney = context.coordinator.lastZoomedJourneyId != nil
+            let hadJourney = context.coordinator.lastZoomedJourneyId != nil || context.coordinator.lastDrawnJourneyId != nil
+            context.coordinator.lastDrawnJourneyId = nil
             context.coordinator.lastZoomedJourneyId = nil
             context.coordinator.lastZoomedSectionId = nil
             // Standard behavior: Show all lines
@@ -301,11 +301,17 @@ struct MapViewControllerBridge: UIViewRepresentable {
             }
         }
         
-        // Refresh annotations when active categories change or stations are loaded
-        let stationsChanged = context.coordinator.lastStationCount != data.allStations.count
+        // Refresh annotations when active categories change or stations are loaded/snapped
+        let stationsChanged = context.coordinator.lastStationsRevision != data.stationsRevision
         let categoriesChanged = context.coordinator.lastActiveCategories != data.activeCategories
         if categoriesChanged || stationsChanged {
-            context.coordinator.lastStationCount = data.allStations.count
+            if stationsChanged {
+                let existingStationAnnos = mapView.annotations.filter { $0 is StationAnnotation }
+                if !existingStationAnnos.isEmpty {
+                    mapView.removeAnnotations(existingStationAnnos)
+                }
+            }
+            context.coordinator.lastStationsRevision = data.stationsRevision
             context.coordinator.lastActiveCategories = data.activeCategories
             context.coordinator.updateAnnotations(in: mapView.region, for: mapView)
         }
@@ -319,6 +325,8 @@ struct MapViewControllerBridge: UIViewRepresentable {
         guard let sections = journey.sections else { return }
 
         var allCoordinates: [CLLocationCoordinate2D] = []
+        var transitCasings: [ColoredPolyline] = []
+        var transitFills: [ColoredPolyline] = []
 
         for section in sections where section.type == "public_transport" {
             guard let display = section.display_informations else { continue }
@@ -338,12 +346,13 @@ struct MapViewControllerBridge: UIViewRepresentable {
                 }
             }
 
-            // Fallback sur TransitTraceService si le trace recu est rectiligne (<= 2 points) ou manquant
-            if routeCoordinates.count <= 2,
+            // Fallback sur TransitTraceService si le trace recu est rectiligne ou trop grossier
+            let intermediates = section.stop_date_times?.compactMap { $0.stop_point.coordinate } ?? []
+            var usedTransitTrace = false
+            if routeCoordinates.count <= max(2, intermediates.count + 2),
                let fromCoord = section.from?.coordinate,
                let toCoord = section.to?.coordinate {
                 let lineCode = display.code ?? display.label ?? ""
-                let intermediates = section.stop_date_times?.compactMap { $0.stop_point.coordinate } ?? []
                 if let precise = TransitTraceService.shared.getPreciseCoordinates(
                     forLine: lineCode,
                     commercialMode: display.commercial_mode,
@@ -353,32 +362,52 @@ struct MapViewControllerBridge: UIViewRepresentable {
                     intermediates: intermediates
                 ), precise.count > routeCoordinates.count {
                     routeCoordinates = precise
+                    usedTransitTrace = true
                 }
             }
 
             if !routeCoordinates.isEmpty {
-                let polyline = ColoredPolyline(
-                    coordinates: routeCoordinates, count: routeCoordinates.count)
-                polyline.color = color
-                polyline.lineName = display.label ?? ""
-                
+                let finalCoordinates = usedTransitTrace
+                    ? routeCoordinates
+                    : MapDataService.smoothCoordinates(routeCoordinates, passes: 1, maxCornerOffsetMeters: 18.0)
                 let cleanLineName = (display.code ?? display.label ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 let status = TrafficService.shared.lines.first(where: {
                     $0.lineId.lowercased() == cleanLineName.lowercased()
                 })?.status ?? .normal
+                let isDashedLine = ["15", "16", "17", "18"].contains(cleanLineName)
+
+                if !isDashedLine {
+                    let casingPolyline = ColoredPolyline(
+                        coordinates: finalCoordinates, count: finalCoordinates.count)
+                    casingPolyline.color = color
+                    casingPolyline.lineName = cleanLineName
+                    casingPolyline.isDashed = false
+                    casingPolyline.isCasing = true
+                    casingPolyline.status = status
+                    transitCasings.append(casingPolyline)
+                }
+
+                let polyline = ColoredPolyline(
+                    coordinates: finalCoordinates, count: finalCoordinates.count)
+                polyline.color = color
+                polyline.lineName = cleanLineName
+                polyline.isDashed = isDashedLine
+                polyline.isCasing = false
                 polyline.status = status
-                
-                mapView.addOverlay(polyline)
-                allCoordinates.append(contentsOf: routeCoordinates)
+                transitFills.append(polyline)
+
+                allCoordinates.append(contentsOf: finalCoordinates)
             }
 
             // Add start/end markers for sections
+            let currentZoomLevel = StationMapZoomLevel.from(latitudeDelta: mapView.region.span.latitudeDelta)
             if let fromPlace = section.from, let fromCoord = fromPlace.coordinate, isValidCoordinate(fromCoord) {
                 let annotation = StationAnnotation(
                     station: MapStation(
                         id: fromPlace.id ?? UUID().uuidString, name: fromPlace.name ?? "",
                         coordinate: fromCoord, platforms: [], isHub: false, mainType: .metro,
-                        lines: []))
+                        lines: []),
+                    zoomLevel: currentZoomLevel)
                 mapView.addAnnotation(annotation)
                 
                 // Add Entry Exits
@@ -408,7 +437,8 @@ struct MapViewControllerBridge: UIViewRepresentable {
                     station: MapStation(
                         id: toPlace.id ?? UUID().uuidString, name: toPlace.name ?? "",
                         coordinate: toCoord, platforms: [], isHub: false, mainType: .metro,
-                        lines: []))
+                        lines: []),
+                    zoomLevel: currentZoomLevel)
                 mapView.addAnnotation(annotation)
                 
                 // Add Exit Exits
@@ -434,6 +464,13 @@ struct MapViewControllerBridge: UIViewRepresentable {
             }
         }
 
+        if !transitCasings.isEmpty {
+            mapView.addOverlays(transitCasings, level: .aboveRoads)
+        }
+        if !transitFills.isEmpty {
+            mapView.addOverlays(transitFills, level: .aboveRoads)
+        }
+
         // Walking sections
         for section in sections where section.type == "street_network" || section.mode == "walking"
         {
@@ -452,12 +489,13 @@ struct MapViewControllerBridge: UIViewRepresentable {
             }
 
             if !routeCoordinates.isEmpty {
+                let smoothedWalk = MapDataService.smoothCoordinates(routeCoordinates, passes: 1, maxCornerOffsetMeters: 6.0)
                 let polyline = ColoredPolyline(
-                    coordinates: routeCoordinates, count: routeCoordinates.count)
+                    coordinates: smoothedWalk, count: smoothedWalk.count)
                 polyline.color = .lightGray
                 polyline.isDashed = true
-                mapView.addOverlay(polyline)
-                allCoordinates.append(contentsOf: routeCoordinates)
+                mapView.addOverlay(polyline, level: .aboveRoads)
+                allCoordinates.append(contentsOf: smoothedWalk)
             }
         }
 
@@ -537,80 +575,60 @@ struct MapViewControllerBridge: UIViewRepresentable {
             let currentOverlays = mapView.overlays.compactMap { $0 as? ColoredPolyline }
             if Set(currentOverlays) != Set(activeOverlays) {
                 mapView.removeOverlays(mapView.overlays)
-                mapView.addOverlays(activeOverlays)
+                mapView.addOverlays(activeOverlays, level: .aboveRoads)
             }
             return
         }
 
         let filteredLines = data.lines.filter { line in
             isLineEnabledOrFavorite(line.name, type: line.type)
-        }
+        }.sorted { $0.type.priority < $1.type.priority }
 
-        let expectedOverlayCount = filteredLines.reduce(0) { $0 + $1.polylines.count }
+        var expectedOverlayCount = 0
+        for line in filteredLines {
+            let isDashedLine = line.isDashed || ["15", "16", "17", "18"].contains(line.name)
+            expectedOverlayCount += line.polylines.count * (isDashedLine ? 1 : 2)
+        }
         let currentOverlaysCount = mapView.overlays.compactMap { $0 as? ColoredPolyline }.count
         
         if currentOverlaysCount != expectedOverlayCount {
             mapView.removeOverlays(mapView.overlays)
 
-            var allPolylines: [(line: LineTrace, polyline: MKPolyline, index: Int)] = []
+            var casingOverlays: [ColoredPolyline] = []
+            var fillOverlays: [ColoredPolyline] = []
             for line in filteredLines {
-                for (index, polyline) in line.polylines.enumerated() {
-                    allPolylines.append((line: line, polyline: polyline, index: index))
-                }
-            }
-
-            // Sort by priority so higher priority lines (Metro, RER, Tram) are rendered on top of lower priority (Bus, etc.)
-            allPolylines.sort { $0.line.type.priority < $1.line.type.priority }
-
-            for (lineIndex, item) in allPolylines.enumerated() {
-                let overlappingPolylines = allPolylines.enumerated().filter {
-                    otherIndex, otherItem in
-                    guard otherIndex != lineIndex else { return false }
-                    return polylinesOverlap(item.polyline, otherItem.polyline)
-                }
-
-                let totalOverlapping = overlappingPolylines.count + 1
-                var offsetIndex = 0
-
-                let allInGroup = ([item] + overlappingPolylines.map { $0.element }).sorted {
-                    $0.line.name < $1.line.name
-                }
-                if let myPosition = allInGroup.firstIndex(where: {
-                    $0.line.name == item.line.name && $0.index == item.index
-                }) {
-                    offsetIndex = myPosition
-                }
-
-                let offsetDistance: CLLocationDistance
-                if totalOverlapping > 1 {
-                    let baseOffset: CLLocationDistance = 15.0
-                    let centerOffset = Double(totalOverlapping - 1) / 2.0
-                    offsetDistance = (Double(offsetIndex) - centerOffset) * baseOffset
-                } else {
-                    offsetDistance = 0
-                }
-
-                let finalPolyline: MKPolyline
-                if offsetDistance != 0 {
-                    finalPolyline = offsetPolyline(item.polyline, by: offsetDistance)
-                } else {
-                    finalPolyline = item.polyline
-                }
-
-                let coloredPolyline = ColoredPolyline(
-                    points: finalPolyline.points(), count: finalPolyline.pointCount)
-                coloredPolyline.color = UIColor(item.line.color)
-                coloredPolyline.lineName = item.line.name
-                coloredPolyline.type = item.line.type
-                coloredPolyline.isDashed = item.line.isDashed
-                
+                let isDashedLine = line.isDashed || ["15", "16", "17", "18"].contains(line.name)
+                let lineColor = UIColor(line.color)
                 let status = TrafficService.shared.lines.first(where: {
-                    $0.lineId == item.line.name && $0.type == item.line.type
+                    $0.lineId == line.name && $0.type == line.type
                 })?.status ?? .normal
-                coloredPolyline.status = status
-                
-                mapView.addOverlay(coloredPolyline)
+
+                for polyline in line.polylines {
+                    if !isDashedLine {
+                        let casing = ColoredPolyline(
+                            points: polyline.points(), count: polyline.pointCount)
+                        casing.color = lineColor
+                        casing.lineName = line.name
+                        casing.type = line.type
+                        casing.isDashed = false
+                        casing.isCasing = true
+                        casing.status = status
+                        casingOverlays.append(casing)
+                    }
+
+                    let coloredPolyline = ColoredPolyline(
+                        points: polyline.points(), count: polyline.pointCount)
+                    coloredPolyline.color = lineColor
+                    coloredPolyline.lineName = line.name
+                    coloredPolyline.type = line.type
+                    coloredPolyline.isDashed = isDashedLine
+                    coloredPolyline.isCasing = false
+                    coloredPolyline.status = status
+                    fillOverlays.append(coloredPolyline)
+                }
             }
+
+            mapView.addOverlays(casingOverlays + fillOverlays, level: .aboveRoads)
         }
     }
 
@@ -734,14 +752,14 @@ struct MapViewControllerBridge: UIViewRepresentable {
         var currentTask: Task<Void, Never>?
         var lastSelectedStationId: String?
         var lastSelectedStationCoordinate: CLLocationCoordinate2D?
+        var lastDrawnJourneyId: String?
         var lastZoomedJourneyId: String?
         var lastZoomedSectionId: String?
         var lastSelectionTime: Date?
         var lastActiveCategories: Set<String> = []
         var lastRecenterTrigger = false
         var lastSimulatedTrackingMode: MKUserTrackingMode = .none
-        var lastPolylineStyle: MapPolylineStyle?
-        var lastStationCount: Int = 0
+        var lastStationsRevision: Int = -1
 
         init(_ parent: MapViewControllerBridge) {
             self.parent = parent
@@ -869,39 +887,22 @@ struct MapViewControllerBridge: UIViewRepresentable {
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             if let coloredPolyline = overlay as? ColoredPolyline {
-                let style = parent.data.polylineStyle
-                let renderer: MKPolylineRenderer
-                
-                switch style {
-                case .classic:
-                    renderer = BorderedPolylineRenderer(polyline: coloredPolyline)
-                case .neon:
-                    renderer = NeonPolylineRenderer(polyline: coloredPolyline)
-                case .glass:
-                    renderer = GlassPolylineRenderer(polyline: coloredPolyline)
-                }
-                
-                renderer.strokeColor = coloredPolyline.color
-                
-                if style == .neon {
-                    renderer.lineWidth = 4.0
-                } else if style == .glass {
-                    renderer.lineWidth = 6.0
-                } else {
-                    renderer.lineWidth = 5.0
-                }
-
-                // Smoothing: arrondir les jonctions et les caps
+                let renderer = BorderedPolylineRenderer(polyline: coloredPolyline)
                 renderer.lineJoin = .round
                 renderer.lineCap = .round
+                renderer.alpha = 1.0
 
-                // Additional smoothing
-                renderer.shouldRasterize = false  // Keep vector rendering for smoothness
-                renderer.alpha = 0.95
-
-                if coloredPolyline.isDashed || ["15", "16", "17", "18"].contains(coloredPolyline.lineName) {
-                    renderer.lineDashPattern = [10, 8] as [NSNumber]
-                    renderer.lineWidth = style == .glass ? 4.5 : (style == .neon ? 3.0 : 3.5)
+                if coloredPolyline.isCasing {
+                    renderer.strokeColor = UIColor.black.withAlphaComponent(0.22)
+                    renderer.lineWidth = 4.8
+                } else {
+                    renderer.strokeColor = coloredPolyline.color
+                    if coloredPolyline.isDashed || ["15", "16", "17", "18"].contains(coloredPolyline.lineName) {
+                        renderer.lineDashPattern = [8, 6] as [NSNumber]
+                        renderer.lineWidth = 2.8
+                    } else {
+                        renderer.lineWidth = 3.6
+                    }
                 }
 
                 return renderer
@@ -915,7 +916,7 @@ struct MapViewControllerBridge: UIViewRepresentable {
                 (view as? StationSwiftUIAnnotationView)?.annotation = stationAnnotation // Trigger update
                 
                 self.lastSelectionTime = Date()
-                parent.selectedStation = stationAnnotation.station
+                parent.selectedStation = stationAnnotation.stationWithPrioritizedLine()
             }
         }
         
@@ -929,7 +930,7 @@ struct MapViewControllerBridge: UIViewRepresentable {
                 stationAnnotation.isSelected = false
                 (view as? StationSwiftUIAnnotationView)?.annotation = stationAnnotation // Trigger update
                 
-                if parent.selectedStation?.id == stationAnnotation.station.id {
+                if parent.selectedStation?.id == stationAnnotation.station.id && mapView.selectedAnnotations.isEmpty {
                     // Defer state modification to avoid "Modifying state during view update"
                     DispatchQueue.main.async {
                         self.parent.selectedStation = nil
@@ -956,40 +957,160 @@ struct MapViewControllerBridge: UIViewRepresentable {
         
         nonisolated static let exitVisibilityZoomThreshold: Double = 0.008
 
+        nonisolated private static func normalizeLineKey(_ name: String, type: TransportType) -> String {
+            let upper = name.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            if type == .tram && upper.hasPrefix("T") && upper.count > 1 {
+                return String(upper.dropFirst())
+            }
+            return upper
+        }
+
+        nonisolated private static func buildAnnotations(
+            for stations: [MapStation],
+            zoomLevel: StationMapZoomLevel,
+            activeCategories: Set<String>,
+            favoriteStationIds: Set<String>
+        ) -> [StationAnnotation] {
+            var result: [StationAnnotation] = []
+            result.reserveCapacity(stations.count)
+
+            for station in stations {
+                let isFav = favoriteStationIds.contains(station.id)
+                let activeNonBusLines = station.lines.filter { line in
+                    guard line.type != .bus else { return false }
+                    if isFav { return true }
+                    switch line.type {
+                    case .metro: return activeCategories.contains("Métro")
+                    case .rer, .transilien, .train: return activeCategories.contains("RER / Train")
+                    case .tram: return activeCategories.contains("Tram")
+                    case .bus: return activeCategories.contains("Bus")
+                    case .cable: return true
+                    }
+                }.sorted { a, b in
+                    if a.type.priority != b.type.priority { return a.type.priority > b.type.priority }
+                    return a.name.localizedStandardCompare(b.name) == .orderedAscending
+                }
+
+                if activeNonBusLines.isEmpty {
+                    result.append(
+                        StationAnnotation(
+                            station: station,
+                            coordinate: station.coordinate,
+                            focusedLine: nil,
+                            showStationName: true,
+                            zoomLevel: zoomLevel
+                        )
+                    )
+                    continue
+                }
+
+                var placedCoords: [CLLocationCoordinate2D] = []
+                var namedCoords: [CLLocationCoordinate2D] = []
+
+                for line in activeNonBusLines {
+                    let normLine = normalizeLineKey(line.name, type: line.type)
+                    let matchingPlatforms = station.platforms.filter { plat in
+                        plat.type == line.type && normalizeLineKey(plat.lineName, type: plat.type) == normLine
+                    }
+
+                    var coord: CLLocationCoordinate2D
+                    if !matchingPlatforms.isEmpty {
+                        let avgLat = matchingPlatforms.reduce(0.0) { $0 + $1.coordinate.latitude } / Double(matchingPlatforms.count)
+                        let avgLon = matchingPlatforms.reduce(0.0) { $0 + $1.coordinate.longitude } / Double(matchingPlatforms.count)
+                        coord = CLLocationCoordinate2D(latitude: avgLat, longitude: avgLon)
+                    } else {
+                        coord = station.coordinate
+                    }
+
+                    // Éviter la superposition exacte uniquement en dernier recours si deux marqueurs sont à < 6 m
+                    let coordLoc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+                    let collisionCount = placedCoords.filter {
+                        CLLocation(latitude: $0.latitude, longitude: $0.longitude).distance(from: coordLoc) < 6.0
+                    }.count
+                    if collisionCount > 0 {
+                        coord = CLLocationCoordinate2D(
+                            latitude: coord.latitude,
+                            longitude: coord.longitude + 0.00008 * Double(collisionCount)
+                        )
+                    }
+                    placedCoords.append(coord)
+
+                    // Afficher le nom sur le premier quai et sur tout autre quai éloigné (>= 55 m)
+                    let finalLoc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+                    let hasCloseNamedMarker = namedCoords.contains {
+                        CLLocation(latitude: $0.latitude, longitude: $0.longitude).distance(from: finalLoc) < 55.0
+                    }
+                    let shouldShowName = namedCoords.isEmpty || !hasCloseNamedMarker
+                    if shouldShowName {
+                        namedCoords.append(coord)
+                    }
+
+                    result.append(
+                        StationAnnotation(
+                            station: station,
+                            coordinate: coord,
+                            focusedLine: line,
+                            showStationName: shouldShowName,
+                            zoomLevel: zoomLevel
+                        )
+                    )
+                }
+            }
+
+            return result
+        }
+
         func updateAnnotations(in region: MKCoordinateRegion, for mapView: MKMapView) {
             currentTask?.cancel()
 
             let hasJourney = self.parent.journey != nil
             let shouldShowExits = !hasJourney && (region.span.latitudeDelta <= Self.exitVisibilityZoomThreshold)
             let stationData = self.parent.data
+            let activeCategories = stationData.activeCategories
+            let favoriteStationIds = FavoritesService.shared.favoriteStationIds
 
             currentTask = Task.detached(priority: .userInitiated) { [weak self] in
                 guard let self = self else { return }
 
                 let visibleStations = await stationData.fetchStations(in: region)
+                let newZoomLevel = StationMapZoomLevel.from(latitudeDelta: region.span.latitudeDelta)
+                let targetAnnotations = Self.buildAnnotations(
+                    for: visibleStations,
+                    zoomLevel: newZoomLevel,
+                    activeCategories: activeCategories,
+                    favoriteStationIds: favoriteStationIds
+                )
+                let targetIDs = Set(targetAnnotations.map { $0.annotationId })
                 
                 // Requête des sorties si aucun itinéraire n'est actif et que le zoom est suffisant
                 let visibleExits = shouldShowExits ? await MainActor.run { StationExitsService.shared.exits(in: region) } : []
 
                 await MainActor.run {
-                    // 1. Mise à jour des annotations de stations
+                    // 1. Mise à jour des annotations de stations (une annotation par quai ferré)
                     let currentAnnotations = mapView.annotations.compactMap {
                         $0 as? StationAnnotation
                     }
-                    let currentIDs = Set(currentAnnotations.map { $0.station.id })
+                    let currentIDs = Set(currentAnnotations.map { $0.annotationId })
 
-                    let newStations = visibleStations.filter { !currentIDs.contains($0.id) }
-                    let stationsToRemove = currentAnnotations.filter { annotation in
-                        !visibleStations.contains { $0.id == annotation.station.id }
+                    let annotationsToAdd = targetAnnotations.filter { !currentIDs.contains($0.annotationId) }
+                    let annotationsToRemove = currentAnnotations.filter { !targetIDs.contains($0.annotationId) }
+
+                    if !annotationsToRemove.isEmpty {
+                        mapView.removeAnnotations(annotationsToRemove)
                     }
 
-                    if !stationsToRemove.isEmpty {
-                        mapView.removeAnnotations(stationsToRemove)
+                    // Mettre à jour le niveau de zoom des annotations conservées si le seuil a changé
+                    for existingAnnotation in currentAnnotations where targetIDs.contains(existingAnnotation.annotationId) {
+                        if existingAnnotation.zoomLevel != newZoomLevel {
+                            existingAnnotation.zoomLevel = newZoomLevel
+                            if let view = mapView.view(for: existingAnnotation) as? StationSwiftUIAnnotationView {
+                                view.refreshZoomLevel()
+                            }
+                        }
                     }
 
-                    if !newStations.isEmpty {
-                        let newAnnotations = newStations.map { StationAnnotation(station: $0) }
-                        mapView.addAnnotations(newAnnotations)
+                    if !annotationsToAdd.isEmpty {
+                        mapView.addAnnotations(annotationsToAdd)
                     }
                     
                     // 2. Mise à jour des annotations de sorties de stations (exploration hors itinéraire)
@@ -1077,18 +1198,58 @@ class BusStopTempAnnotation: NSObject, MKAnnotation {
 }
 
 // Custom Annotation Class
-class StationAnnotation: NSObject, MKAnnotation {
+nonisolated class StationAnnotation: NSObject, MKAnnotation {
+    let annotationId: String
     let station: MapStation
     let coordinate: CLLocationCoordinate2D
     let title: String?
     let subtitle: String?
+    let focusedLine: StationLine?
+    var showStationName: Bool
     var isSelected: Bool = false
+    var zoomLevel: StationMapZoomLevel
 
-    init(station: MapStation) {
+    nonisolated init(
+        station: MapStation,
+        coordinate: CLLocationCoordinate2D? = nil,
+        focusedLine: StationLine? = nil,
+        showStationName: Bool = true,
+        zoomLevel: StationMapZoomLevel = .detailed
+    ) {
         self.station = station
-        self.coordinate = station.coordinate
+        self.coordinate = coordinate ?? station.coordinate
+        self.focusedLine = focusedLine
+        self.showStationName = showStationName
         self.title = station.name
         self.subtitle = station.lines.map { $0.name }.joined(separator: ", ")
+        self.zoomLevel = zoomLevel
+        if let line = focusedLine {
+            self.annotationId = "\(station.id)__\(line.type.rawValue)_\(line.name)"
+        } else {
+            self.annotationId = station.id
+        }
+    }
+
+    /// Retourne la station complète en plaçant la ligne du quai cliqué en priorité.
+    func stationWithPrioritizedLine() -> MapStation {
+        guard let focusedLine = focusedLine else { return station }
+        var prioritizedLines = station.lines
+        prioritizedLines.sort { a, b in
+            if a.id == focusedLine.id { return true }
+            if b.id == focusedLine.id { return false }
+            return false
+        }
+        return MapStation(
+            id: station.id,
+            name: station.name,
+            coordinate: self.coordinate,
+            platforms: station.platforms,
+            isHub: station.isHub,
+            mainType: station.mainType,
+            lines: prioritizedLines,
+            city: station.city,
+            prioritizedLine: focusedLine
+        )
     }
 }
 
@@ -1114,31 +1275,48 @@ class StationSwiftUIAnnotationView: MKAnnotationView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    func refreshZoomLevel() {
+        setupView()
+    }
+
     private func setupView() {
         guard let stationAnnotation = annotation as? StationAnnotation else { return }
         let station = stationAnnotation.station
 
-        // Remove old view
-        hostingController?.view.removeFromSuperview()
-        hostingController = nil
+        let badgeView = StationBadgeView(
+            station: station,
+            isSelected: stationAnnotation.isSelected,
+            zoomLevel: stationAnnotation.zoomLevel,
+            focusedLine: stationAnnotation.focusedLine,
+            showStationName: stationAnnotation.showStationName
+        )
 
-        // Create SwiftUI view
-        let badgeView = StationBadgeView(station: station, isSelected: stationAnnotation.isSelected)
-        let hc = UIHostingController(rootView: badgeView)
+        let hc: UIHostingController<StationBadgeView>
+        if let existingHC = hostingController {
+            existingHC.rootView = badgeView
+            hc = existingHC
+        } else {
+            let newHC = UIHostingController(rootView: badgeView)
+            #if canImport(UIKit)
+            newHC.view.backgroundColor = .clear
+            #endif
+            addSubview(newHC.view)
+            self.hostingController = newHC
+            hc = newHC
+        }
+
         #if canImport(UIKit)
-        hc.view.backgroundColor = .clear
         let size = hc.view.sizeThatFits(CGSize(width: 300, height: 100))
         #else
         let size = hc.view.fittingSize
         #endif
         self.bounds = CGRect(origin: .zero, size: size)
         hc.view.frame = self.bounds
-        
-        addSubview(hc.view)
-        self.hostingController = hc
-        
-        // Centrer l'ancre au milieu de la vue de l'annotation
-        self.centerOffset = CGPoint.zero
+
+        // Caler le centre exact du marqueur (pastille ou badge/pilule en bas) sur la coordonnée GPS
+        let anchorHeight = badgeView.markerAnchorHeight
+        let verticalOffset = -max(0, (size.height - anchorHeight) / 2.0)
+        self.centerOffset = CGPoint(x: 0, y: verticalOffset)
         
         // Set display priority
         if stationAnnotation.isSelected {
@@ -1146,8 +1324,8 @@ class StationSwiftUIAnnotationView: MKAnnotationView {
             self.zPriority = .max
         } else {
             let hasPriorityMode = station.lines.contains { line in
-                line.type == .metro || line.type == .rer || line.type == .tram
-            } || station.mainType == .metro || station.mainType == .rer || station.mainType == .tram
+                line.type == .metro || line.type == .rer || line.type == .tram || line.type == .transilien
+            } || station.mainType == .metro || station.mainType == .rer || station.mainType == .tram || station.mainType == .transilien
             
             if hasPriorityMode {
                 self.displayPriority = .defaultHigh

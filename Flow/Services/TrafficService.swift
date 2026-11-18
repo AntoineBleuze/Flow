@@ -49,6 +49,7 @@ class TrafficService: ObservableObject {
     func fetchTrafficInfo() {
         // Mode serveur : passer par FlowServer si activé
         if FlowServerService.shared.isEnabled {
+            isRefreshing = true
             print("📡 [Server Mode] Traffic via FlowServer")
             FlowServerService.shared.fetchTrafficInfo()
                 .sink(
@@ -181,7 +182,7 @@ class TrafficService: ObservableObject {
             .store(in: &cancellables)
     }
 
-    private func updateLines(with disruptions: [Disruption]) {
+    func updateLines(with disruptions: [Disruption]) {
         // Remettre tout le monde à normal d'abord
         var updatedLines = self.getAllLines()
         let now = Date()
@@ -371,33 +372,46 @@ class TrafficService: ObservableObject {
     private func matchLine(line: TransportLine, code: String, modeName: String) -> Bool {
         let normalizedModeName = modeName.lowercased().folding(
             options: .diacriticInsensitive, locale: .current)
+        let trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
 
         switch line.type {
         case .metro:
-            return normalizedModeName.contains("metro") && line.lineId == code
+            guard normalizedModeName.contains("metro") else { return false }
+            let normalizedCode: String
+            switch trimmedCode.uppercased() {
+            case "3B", "3BIS": normalizedCode = "3bis"
+            case "7B", "7BIS": normalizedCode = "7bis"
+            default: normalizedCode = trimmedCode
+            }
+            return line.lineId.caseInsensitiveCompare(normalizedCode) == .orderedSame
         case .rer:
             return
                 (normalizedModeName.contains("rer")
-                || normalizedModeName.contains("regional express")) && line.lineId == code
+                || normalizedModeName.contains("regional express"))
+                && line.lineId.caseInsensitiveCompare(trimmedCode) == .orderedSame
         case .tram:
             return normalizedModeName.contains("tram")
-                && (line.lineId == code || line.lineId == "T\(code)")
+                && (line.lineId.caseInsensitiveCompare(trimmedCode) == .orderedSame
+                    || line.lineId.caseInsensitiveCompare("T\(trimmedCode)") == .orderedSame)
         case .transilien, .train:
             if line.lineId.caseInsensitiveCompare("orlyval") == .orderedSame {
-                return normalizedModeName.contains("val") || code.localizedCaseInsensitiveContains("orlyval")
+                return normalizedModeName.contains("val") || trimmedCode.localizedCaseInsensitiveContains("orlyval")
             }
             if line.lineId.caseInsensitiveCompare("cdgval") == .orderedSame {
-                return normalizedModeName.contains("val") || code.localizedCaseInsensitiveContains("cdgval")
+                return normalizedModeName.contains("val") || trimmedCode.localizedCaseInsensitiveContains("cdgval")
             }
-            return normalizedModeName.contains("train") && line.lineId == code
+            return (normalizedModeName.contains("train") || normalizedModeName.contains("transilien"))
+                && line.lineId.caseInsensitiveCompare(trimmedCode) == .orderedSame
         case .cable:
             if line.lineId.caseInsensitiveCompare("fun") == .orderedSame || line.lineId.localizedCaseInsensitiveContains("funiculaire") {
-                return normalizedModeName.contains("funiculaire") || code.localizedCaseInsensitiveContains("fun")
+                return normalizedModeName.contains("funiculaire") || trimmedCode.localizedCaseInsensitiveContains("fun")
             }
-            return
-                (normalizedModeName.contains("cable") || normalizedModeName.contains("funiculaire"))
+            return normalizedModeName.contains("cable")
+                && (line.lineId.caseInsensitiveCompare(trimmedCode) == .orderedSame
+                    || trimmedCode.caseInsensitiveCompare("C1") == .orderedSame)
         case .bus:
-            return normalizedModeName.contains("bus") && line.lineId == code
+            return normalizedModeName.contains("bus")
+                && line.lineId.caseInsensitiveCompare(trimmedCode) == .orderedSame
         }
     }
 

@@ -220,7 +220,10 @@ struct LineIcon: View {
         case .transilien, .train:
             return "transilien\(clean)"
         case .cable:
-            return "cable1"
+            if clean.contains("1") {
+                return "Cable1"
+            }
+            return "Cable"
         case .bus:
             return "bus\(clean)"
         }

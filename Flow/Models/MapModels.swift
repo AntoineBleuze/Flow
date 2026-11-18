@@ -18,6 +18,7 @@ nonisolated public class ColoredPolyline: MKPolyline, @unchecked Sendable {
     var color: MapPlatformColor = .blue
     var lineName: String = ""
     var isDashed: Bool = false
+    var isCasing: Bool = false
     var status: LineStatus = .normal
     var type: TransportType = .metro
 }
@@ -161,12 +162,23 @@ struct MapStation: Identifiable, Equatable, Codable, Sendable {
     let mainType: TransportType  // Type principal pour l'affichage (ex: Métro gagne sur Bus)
     let lines: [StationLine]  // Lignes desservant la station
     let city: String? // Ville de la station
+    var prioritizedLine: StationLine? = nil  // Ligne cliquée à afficher en priorité
 
     nonisolated var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     }
 
-    nonisolated init(id: String, name: String, coordinate: CLLocationCoordinate2D, platforms: [StopPoint], isHub: Bool, mainType: TransportType, lines: [StationLine], city: String? = nil) {
+    nonisolated init(
+        id: String,
+        name: String,
+        coordinate: CLLocationCoordinate2D,
+        platforms: [StopPoint],
+        isHub: Bool,
+        mainType: TransportType,
+        lines: [StationLine],
+        city: String? = nil,
+        prioritizedLine: StationLine? = nil
+    ) {
         self.id = id
         self.name = name
         self.latitude = coordinate.latitude
@@ -176,10 +188,11 @@ struct MapStation: Identifiable, Equatable, Codable, Sendable {
         self.mainType = mainType
         self.lines = lines
         self.city = city
+        self.prioritizedLine = prioritizedLine
     }
 
     static func == (lhs: MapStation, rhs: MapStation) -> Bool {
-        return lhs.id == rhs.id
+        return lhs.id == rhs.id && lhs.prioritizedLine == rhs.prioritizedLine
     }
 }
 
@@ -196,12 +209,6 @@ class MapDataService: ObservableObject {
     @Published var loadingProgress: Double = 0.0
 
     @Published var activeCategories: Set<String> = ["Métro", "RER / Train", "Tram", "Bus"]
-
-    @Published var polylineStyle: MapPolylineStyle = MapPolylineStyle.current {
-        didSet {
-            MapPolylineStyle.current = polylineStyle
-        }
-    }
 
     func isLineTypeEnabled(_ type: TransportType) -> Bool {
         switch type {
@@ -230,6 +237,9 @@ class MapDataService: ObservableObject {
     // Stockage de toutes les stations non fusionnées (pour zoom élevé)
     @Published var unmergedStations: [MapStation] = []
 
+    // Compteur incrémenté après chaque mise à jour / snap des stations
+    @Published var stationsRevision: Int = 0
+
     // Cache des couleurs de lignes (Nom -> Couleur)
     var lineColorCache: [String: Color] = [:]
 
@@ -243,7 +253,7 @@ class MapDataService: ObservableObject {
 
     nonisolated private var stationsCacheURL: URL {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("stationsCache_SwiftData_v1.json")
+            .appendingPathComponent("stationsCache_SwiftData_v4.json")
     }
 
     nonisolated private var colorsCacheURL: URL {
@@ -276,6 +286,7 @@ class MapDataService: ObservableObject {
                 self.allStations = cached.allStations
                 self.visibleStations = cached.allStations
                 self.majorHubs = cached.allStations.filter { $0.isHub }
+                self.stationsRevision += 1
             }
             return true
         } catch {
@@ -799,7 +810,7 @@ class MapDataService: ObservableObject {
         
         let appVersion = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
         let cachedVersion = UserDefaults.standard.string(forKey: "cached_data_version")
-        let tracesVersion = "v3_traces_enrichment"
+        let tracesVersion = "v7_parallel_crossings"
         let cachedTracesVersion = UserDefaults.standard.string(forKey: "cached_traces_version")
         if cachedVersion != appVersion || cachedTracesVersion != tracesVersion {
             print("🔄 Nouvelle version de l'application ou des tracés détectée (\(cachedVersion ?? "aucune") -> \(appVersion), \(cachedTracesVersion ?? "aucune") -> \(tracesVersion)). Purge du cache...")
@@ -965,7 +976,7 @@ class MapDataService: ObservableObject {
 
                 let line = LineTrace(
                     id: UUID().uuidString, name: finalName, color: color,
-                    polylines: group.polylines, type: type)
+                    polylines: Self.stitchAndSmoothPolylines(group.polylines), type: type)
                 newLines.append(line)
 
                 // Debug spécifique
@@ -1357,6 +1368,7 @@ class MapDataService: ObservableObject {
         self.allStations = finalStations
         self.visibleStations = finalStations  // Initialement tout
         self.majorHubs = finalStations.filter { $0.isHub }
+        self.stationsRevision += 1
         self.loadingProgress = 0.9
         print("✅ \(finalStations.count) stations finales (après fusion des pôles).")
         
@@ -1475,6 +1487,10 @@ class MapDataService: ObservableObject {
 
     // Helper to get normalized base name for clustering comparison
     nonisolated private func getNormalizedBaseName(_ name: String) -> String {
+        Self.getNormalizedBaseNameStatic(name)
+    }
+
+    nonisolated private static func getNormalizedBaseNameStatic(_ name: String) -> String {
         // Replace long dashes with standard hyphens
         let cleanName = name
             .replacingOccurrences(of: "—", with: "-")
@@ -1532,6 +1548,10 @@ class MapDataService: ObservableObject {
 
     // Helper to clean and reduce station names to their shortest/cleanest form
     nonisolated private func cleanStationName(_ name: String) -> String {
+        Self.cleanStationNameStatic(name)
+    }
+
+    nonisolated private static func cleanStationNameStatic(_ name: String) -> String {
         var clean = name
             .replacingOccurrences(of: "—", with: "-")
             .replacingOccurrences(of: "–", with: "-")
@@ -1746,6 +1766,10 @@ class MapDataService: ObservableObject {
 
     // Helper pour parser le CSV proprement
     nonisolated private func parseCSVLine(_ line: String) -> [String] {
+        Self.parseCSVLineStatic(line)
+    }
+
+    nonisolated private static func parseCSVLineStatic(_ line: String) -> [String] {
         var result: [String] = []
         var current = ""
         var insideQuotes = false
@@ -1826,6 +1850,10 @@ class MapDataService: ObservableObject {
 
     // Mapping des strings CSV vers l'enum TransportType existant
     nonisolated private func mapTransportType(_ typeString: String, lineName: String) -> TransportType {
+        Self.mapTransportTypeStatic(typeString, lineName: lineName)
+    }
+
+    nonisolated private static func mapTransportTypeStatic(_ typeString: String, lineName: String) -> TransportType {
         // Nettoyage du nom pour la détection
         let cleanName = lineName.uppercased()
             .replacingOccurrences(of: "RER", with: "")
@@ -1916,7 +1944,7 @@ class MapDataService: ObservableObject {
                             id: UUID().uuidString,
                             name: lineName,
                             color: color,
-                            polylines: polylines,
+                            polylines: Self.stitchAndSmoothPolylines(polylines),
                             type: type
                         )
                         newLines.append(lineTrace)
@@ -2016,10 +2044,11 @@ class MapDataService: ObservableObject {
             source = self.majorHubs
         }
 
-        let minLat = center.latitude - span.latitudeDelta / 2
-        let maxLat = center.latitude + span.latitudeDelta / 2
-        let minLon = center.longitude - span.longitudeDelta / 2
-        let maxLon = center.longitude + span.longitudeDelta / 2
+        let margin = 0.006
+        let minLat = center.latitude - span.latitudeDelta / 2 - margin
+        let maxLat = center.latitude + span.latitudeDelta / 2 + margin
+        let minLon = center.longitude - span.longitudeDelta / 2 - margin
+        let maxLon = center.longitude + span.longitudeDelta / 2 + margin
 
         var filtered = source.filter { station in
             let lat = station.coordinate.latitude
@@ -2028,14 +2057,12 @@ class MapDataService: ObservableObject {
         }
 
         // Si le zoom est très élevé, on ajoute les arrêts de bus
-        if span.latitudeDelta < 0.015 {
+        if span.latitudeDelta < 0.012 {
             let busStations = await fetchBusStations(in: minLat, maxLat: maxLat, minLon: minLon, maxLon: maxLon)
-            filtered.append(contentsOf: busStations)
+            filtered = self.mergeBusStationsIntoRailStations(railStations: filtered, busStations: busStations)
         }
 
-        // Fusionner dynamiquement les stations et les arrêts de bus
-        let merged = self.mergeHubs(filtered)
-        return merged.filter { station in
+        return filtered.filter { station in
             FavoritesService.shared.isFavorite(stationId: station.id) ||
             station.lines.contains { self.isLineTypeEnabled($0.type) }
         }
@@ -2056,10 +2083,11 @@ class MapDataService: ObservableObject {
                 source = await self.majorHubs
             }
 
-            let minLat = center.latitude - span.latitudeDelta / 2
-            let maxLat = center.latitude + span.latitudeDelta / 2
-            let minLon = center.longitude - span.longitudeDelta / 2
-            let maxLon = center.longitude + span.longitudeDelta / 2
+            let margin = 0.006
+            let minLat = center.latitude - span.latitudeDelta / 2 - margin
+            let maxLat = center.latitude + span.latitudeDelta / 2 + margin
+            let minLon = center.longitude - span.longitudeDelta / 2 - margin
+            let maxLon = center.longitude + span.longitudeDelta / 2 + margin
 
             var filtered = source.filter { station in
                 let lat = station.coordinate.latitude
@@ -2067,17 +2095,55 @@ class MapDataService: ObservableObject {
                 return lat >= minLat && lat <= maxLat && lon >= minLon && lon <= maxLon
             }
 
-            if delta < 0.015 {
+            if delta < 0.012 {
                 let busStations = await self.fetchBusStations(in: minLat, maxLat: maxLat, minLon: minLon, maxLon: maxLon)
-                filtered.append(contentsOf: busStations)
+                filtered = self.mergeBusStationsIntoRailStations(railStations: filtered, busStations: busStations)
             }
 
-            let merged = self.mergeHubs(filtered)
-
+            let finalVisible = filtered
             await MainActor.run {
-                self.visibleStations = merged
+                self.visibleStations = finalVisible
             }
         }
+    }
+
+    /// Rattache les arrêts de bus proches (< 250 m) partageant le même nom de base aux stations ferrées
+    /// tout en préservant les coordonnées exactes des quais ferrés.
+    nonisolated private func mergeBusStationsIntoRailStations(railStations: [MapStation], busStations: [MapStation]) -> [MapStation] {
+        var result = railStations
+        var unmergedBuses: [MapStation] = []
+
+        for busStation in busStations {
+            let busBase = getNormalizedBaseName(busStation.name)
+            let busLoc = CLLocation(latitude: busStation.coordinate.latitude, longitude: busStation.coordinate.longitude)
+
+            if let idx = result.firstIndex(where: { rail in
+                guard rail.mainType != .bus else { return false }
+                guard getNormalizedBaseName(rail.name) == busBase else { return false }
+                let railLoc = CLLocation(latitude: rail.coordinate.latitude, longitude: rail.coordinate.longitude)
+                return railLoc.distance(from: busLoc) < 250.0
+            }) {
+                let rail = result[idx]
+                let mergedPlatforms = rail.platforms + busStation.platforms
+                let mergedLines = Array(Set(rail.lines + busStation.lines)).sorted { $0.name < $1.name }
+                result[idx] = MapStation(
+                    id: rail.id,
+                    name: rail.name,
+                    coordinate: rail.coordinate,
+                    platforms: mergedPlatforms,
+                    isHub: true,
+                    mainType: rail.mainType,
+                    lines: mergedLines,
+                    city: rail.city ?? busStation.city,
+                    prioritizedLine: rail.prioritizedLine
+                )
+            } else {
+                unmergedBuses.append(busStation)
+            }
+        }
+
+        result.append(contentsOf: unmergedBuses)
+        return result
     }
 
     // Helper pour récupérer toutes les stations (pour le bridge si besoin)
@@ -2092,177 +2158,797 @@ class MapDataService: ObservableObject {
     // MARK: - Overlay Precalculation (Anti-Freeze)
 
     func precalculateOverlays() async {
-        print("⚙️ Initialisation du calcul des overlays (offsets)...")
+        print("⚙️ Initialisation du calcul des overlays, décalages parallèles et lissage des tracés...")
         let linesToProcess = self.lines
+        let currentAllStations = self.allStations
+        let currentMajorHubs = self.majorHubs
 
         // Ce calcul est lourd, on le fait hors du MainActor
-        let calculatedOverlays: [ColoredPolyline] = await Task.detached(priority: .userInitiated) {
-            var allPolylines: [(line: LineTrace, polyline: MKPolyline, index: Int)] = []
-            for line in linesToProcess {
-                for (index, polyline) in line.polylines.enumerated() {
-                    allPolylines.append((line: line, polyline: polyline, index: index))
+        let (calculatedOverlays, snappedAll, snappedHubs) = await Task.detached(priority: .userInitiated) {
+            let sortedLines = linesToProcess.sorted { $0.type.priority < $1.type.priority }
+            let offsetLines = MapDataService.applyParallelCorridorOffsets(to: sortedLines)
+
+            var casingOverlays: [ColoredPolyline] = []
+            var fillOverlays: [ColoredPolyline] = []
+
+            for line in offsetLines {
+                let isDashedLine = line.isDashed || ["15", "16", "17", "18"].contains(line.name)
+                let platformColor = MapPlatformColor(line.color)
+
+                for polyline in line.polylines {
+                    if !isDashedLine {
+                        let casing = ColoredPolyline(
+                            points: polyline.points(), count: polyline.pointCount)
+                        casing.color = platformColor
+                        casing.lineName = line.name
+                        casing.type = line.type
+                        casing.isDashed = false
+                        casing.isCasing = true
+                        casingOverlays.append(casing)
+                    }
+
+                    let colored = ColoredPolyline(
+                        points: polyline.points(), count: polyline.pointCount)
+                    colored.color = platformColor
+                    colored.lineName = line.name
+                    colored.type = line.type
+                    colored.isDashed = isDashedLine
+                    colored.isCasing = false
+                    fillOverlays.append(colored)
                 }
             }
 
-            var results: [ColoredPolyline] = []
+            let results = casingOverlays + fillOverlays
+            let snappedAllStations = MapDataService.snapStationsToPolylines(currentAllStations, lines: offsetLines)
+            let snappedMajorHubs = MapDataService.snapStationsToPolylines(currentMajorHubs, lines: offsetLines)
 
-            for (lineIndex, item) in allPolylines.enumerated() {
-
-                let overlappingPolylines = allPolylines.enumerated().filter {
-                    otherIndex, otherItem in
-                    guard otherIndex != lineIndex else { return false }
-                    return MapDataService.polylinesOverlap(item.polyline, otherItem.polyline)
-                }
-
-                let totalOverlapping = overlappingPolylines.count + 1
-                var offsetIndex = 0
-
-                let allInGroup = ([item] + overlappingPolylines.map { $0.element }).sorted {
-                    $0.line.name < $1.line.name
-                }
-
-                if let myPosition = allInGroup.firstIndex(where: {
-                    $0.line.name == item.line.name && $0.index == item.index
-                }) {
-                    offsetIndex = myPosition
-                }
-
-                let offsetDistance: CLLocationDistance
-                if totalOverlapping > 1 {
-                    let baseOffset: CLLocationDistance = 15.0
-                    let centerOffset = Double(totalOverlapping - 1) / 2.0
-                    offsetDistance = (Double(offsetIndex) - centerOffset) * baseOffset
-                } else {
-                    offsetDistance = 0
-                }
-
-                let finalPolyline: MKPolyline
-                if offsetDistance != 0 {
-                    finalPolyline = MapDataService.offsetPolyline(item.polyline, by: offsetDistance)
-                } else {
-                    finalPolyline = item.polyline
-                }
-
-                let colored = ColoredPolyline(
-                    points: finalPolyline.points(), count: finalPolyline.pointCount)
-                colored.color = MapPlatformColor(item.line.color)
-                colored.lineName = item.line.name
-                colored.type = item.line.type
-                results.append(colored)
-            }
-            return results
+            return (results, snappedAllStations, snappedMajorHubs)
         }.value
 
         print("✅ Calcul des overlays terminé: \(calculatedOverlays.count) segments prêts.")
 
         await MainActor.run {
             self.cachedOverlays = calculatedOverlays
+            self.allStations = snappedAll
+            self.majorHubs = snappedHubs
+            self.visibleStations = snappedAll
+            self.stationsRevision += 1
         }
     }
 
-    // MARK: - Geometry Helpers
+    // MARK: - Parallel Corridor Offsetting & Crossing Handling
 
-    /// Check if two polylines overlap (share similar paths)
-    nonisolated static func polylinesOverlap(_ polyline1: MKPolyline, _ polyline2: MKPolyline)
-        -> Bool
-    {
-        // Sample a few points and check if they're close
-        let sampleCount = min(5, polyline1.pointCount, polyline2.pointCount)
-        var matchingPoints = 0
-        let threshold: CLLocationDistance = 50  // 50 meters threshold
+    nonisolated private struct SpatialSeg: Sendable {
+        let lineKey: String
+        let lat1: Double
+        let lon1: Double
+        let lat2: Double
+        let lon2: Double
+        let tx: Double
+        let ty: Double
+    }
 
-        for i in 0..<sampleCount {
-            let idx1 = (i * polyline1.pointCount) / sampleCount
-            let idx2 = (i * polyline2.pointCount) / sampleCount
+    nonisolated private struct GridKey: Hashable, Sendable {
+        let ix: Int
+        let iy: Int
+    }
 
-            guard idx1 < polyline1.pointCount, idx2 < polyline2.pointCount else { continue }
+    nonisolated private static func subdivideLongSegments(_ coords: [CLLocationCoordinate2D], maxStepMeters: Double = 32.0) -> [CLLocationCoordinate2D] {
+        guard coords.count >= 2 else { return coords }
+        var out: [CLLocationCoordinate2D] = []
+        out.reserveCapacity(coords.count * 2)
+        out.append(coords[0])
 
-            let p1 = polyline1.points()[idx1]
-            let p2 = polyline2.points()[idx2]
-
-            let coord1 = p1.coordinate
-            let coord2 = p2.coordinate
-
-            let location1 = CLLocation(latitude: coord1.latitude, longitude: coord1.longitude)
-            let location2 = CLLocation(latitude: coord2.latitude, longitude: coord2.longitude)
-
-            if location1.distance(from: location2) < threshold {
-                matchingPoints += 1
+        for i in 0..<(coords.count - 1) {
+            let a = coords[i]
+            let b = coords[i + 1]
+            let dist = approxMetersDistance(a, b)
+            if dist > maxStepMeters {
+                let steps = min(32, Int(ceil(dist / maxStepMeters)))
+                if steps > 1 {
+                    for s in 1..<steps {
+                        let t = Double(s) / Double(steps)
+                        out.append(CLLocationCoordinate2D(
+                            latitude: a.latitude + (b.latitude - a.latitude) * t,
+                            longitude: a.longitude + (b.longitude - a.longitude) * t
+                        ))
+                    }
+                }
             }
+            out.append(b)
         }
-
-        return Double(matchingPoints) / Double(sampleCount) > 0.6
+        return out
     }
 
-    /// Offset a polyline by a given distance perpendicular to its path
-    nonisolated static func offsetPolyline(_ polyline: MKPolyline, by distance: CLLocationDistance)
-        -> MKPolyline
-    {
-        let pointsPtr = polyline.points()
-        let count = polyline.pointCount
-        var offsetCoordinates: [CLLocationCoordinate2D] = []
-
-        for i in 0..<count {
-            let currentPoint = pointsPtr[i].coordinate
-
-            // Calculate perpendicular direction based on neighboring points
-            var bearing: Double = 0
-
-            if i == 0 && count > 1 {
-                bearing = calculateBearing(from: currentPoint, to: pointsPtr[1].coordinate)
-            } else if i == count - 1 {
-                bearing = calculateBearing(from: pointsPtr[i - 1].coordinate, to: currentPoint)
-            } else {
-                let bearingIn = calculateBearing(
-                    from: pointsPtr[i - 1].coordinate, to: currentPoint)
-                let bearingOut = calculateBearing(
-                    from: currentPoint, to: pointsPtr[i + 1].coordinate)
-                bearing = (bearingIn + bearingOut) / 2
-            }
-
-            let perpendicularBearing = bearing + 90
-            let offsetCoord = coordinate(
-                from: currentPoint, distance: distance, bearing: perpendicularBearing)
-            offsetCoordinates.append(offsetCoord)
-        }
-
-        return MKPolyline(coordinates: offsetCoordinates, count: offsetCoordinates.count)
-    }
-
-    nonisolated static func calculateBearing(
-        from coord1: CLLocationCoordinate2D, to coord2: CLLocationCoordinate2D
+    nonisolated private static func pointToSegmentDistanceMeters(
+        lat: Double, lon: Double,
+        lat1: Double, lon1: Double,
+        lat2: Double, lon2: Double,
+        latScale: Double
     ) -> Double {
-        let lat1 = coord1.latitude * .pi / 180
-        let lon1 = coord1.longitude * .pi / 180
-        let lat2 = coord2.latitude * .pi / 180
-        let lon2 = coord2.longitude * .pi / 180
-
-        let dLon = lon2 - lon1
-        let y = sin(dLon) * cos(lat2)
-        let x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon)
-        let bearing = atan2(y, x)
-
-        return bearing * 180 / .pi
+        let px = (lon - lon1) * latScale
+        let py = lat - lat1
+        let dx = (lon2 - lon1) * latScale
+        let dy = lat2 - lat1
+        let lenSq = dx * dx + dy * dy
+        let projX: Double
+        let projY: Double
+        if lenSq > 0 {
+            let t = max(0.0, min(1.0, (px * dx + py * dy) / lenSq))
+            projX = t * dx
+            projY = t * dy
+        } else {
+            projX = 0
+            projY = 0
+        }
+        let dLonMeters = (px - projX) * 111319.5
+        let dLatMeters = (py - projY) * 111319.5
+        return sqrt(dLonMeters * dLonMeters + dLatMeters * dLatMeters)
     }
 
-    nonisolated static func coordinate(
-        from coord: CLLocationCoordinate2D, distance: CLLocationDistance, bearing: Double
+    /// Applique un décalage parallèle propre et lissé aux tronçons partagés par plusieurs lignes,
+    /// en orientant la normale de manière cohérente même si les tracés sont en sens opposé.
+    nonisolated static func applyParallelCorridorOffsets(to lines: [LineTrace]) -> [LineTrace] {
+        guard !lines.isEmpty else { return lines }
+
+        let cellSize = 0.0005
+        var preparedLines: [(line: LineTrace, key: String, chains: [[CLLocationCoordinate2D]])] = []
+        preparedLines.reserveCapacity(lines.count)
+
+        var grid: [GridKey: [SpatialSeg]] = [:]
+
+        for line in lines {
+            let lineKey = "\(line.type.rawValue)_\(normalizeLineKeyName(line.name, type: line.type))"
+            let chains = line.polylines.map { subdivideLongSegments(extractCoordinates(from: $0), maxStepMeters: 32.0) }
+            preparedLines.append((line: line, key: lineKey, chains: chains))
+
+            for chain in chains where chain.count >= 2 {
+                for i in 0..<(chain.count - 1) {
+                    let a = chain[i]
+                    let b = chain[i + 1]
+                    let latMid = (a.latitude + b.latitude) * 0.5
+                    let latScale = cos(latMid * .pi / 180.0)
+                    let dx = (b.longitude - a.longitude) * latScale
+                    let dy = b.latitude - a.latitude
+                    let len = sqrt(dx * dx + dy * dy)
+                    guard len > 1e-9 else { continue }
+                    let tx = dx / len
+                    let ty = dy / len
+
+                    let seg = SpatialSeg(
+                        lineKey: lineKey,
+                        lat1: a.latitude, lon1: a.longitude,
+                        lat2: b.latitude, lon2: b.longitude,
+                        tx: tx, ty: ty
+                    )
+
+                    let minIx = Int(floor(min(a.longitude, b.longitude) / cellSize))
+                    let maxIx = Int(floor(max(a.longitude, b.longitude) / cellSize))
+                    let minIy = Int(floor(min(a.latitude, b.latitude) / cellSize))
+                    let maxIy = Int(floor(max(a.latitude, b.latitude) / cellSize))
+
+                    for ix in minIx...maxIx {
+                        for iy in minIy...maxIy {
+                            grid[GridKey(ix: ix, iy: iy), default: []].append(seg)
+                        }
+                    }
+                }
+            }
+        }
+
+        let parallelCosThreshold = 0.72
+        let corridorRadiusMeters = 15.0
+        let laneSpacingMeters = 5.0
+
+        var resultLines: [LineTrace] = []
+        resultLines.reserveCapacity(preparedLines.count)
+
+        for entry in preparedLines {
+            var newPolylines: [MKPolyline] = []
+            newPolylines.reserveCapacity(entry.chains.count)
+
+            for chain in entry.chains {
+                guard chain.count >= 2 else { continue }
+
+                var dxMeters = [Double](repeating: 0.0, count: chain.count)
+                var dyMeters = [Double](repeating: 0.0, count: chain.count)
+                var hasAnyOffset = false
+
+                for i in 0..<chain.count {
+                    let pt = chain[i]
+                    let prevPt = chain[max(0, i - 1)]
+                    let nextPt = chain[min(chain.count - 1, i + 1)]
+                    let latScale = cos(pt.latitude * .pi / 180.0)
+
+                    let vx = (nextPt.longitude - prevPt.longitude) * latScale
+                    let vy = nextPt.latitude - prevPt.latitude
+                    let vLen = sqrt(vx * vx + vy * vy)
+                    guard vLen > 1e-9 else { continue }
+                    let tx = vx / vLen
+                    let ty = vy / vLen
+
+                    let cx = Int(floor(pt.longitude / cellSize))
+                    let cy = Int(floor(pt.latitude / cellSize))
+
+                    var matchingLeaders: [String: (tx: Double, ty: Double, dist: Double)] = [:]
+
+                    for ix in (cx - 1)...(cx + 1) {
+                        for iy in (cy - 1)...(cy + 1) {
+                            guard let cellSegs = grid[GridKey(ix: ix, iy: iy)] else { continue }
+                            for seg in cellSegs {
+                                guard seg.lineKey != entry.key else { continue }
+                                let dot = tx * seg.tx + ty * seg.ty
+                                guard abs(dot) >= parallelCosThreshold else { continue }
+
+                                let dist = pointToSegmentDistanceMeters(
+                                    lat: pt.latitude, lon: pt.longitude,
+                                    lat1: seg.lat1, lon1: seg.lon1,
+                                    lat2: seg.lat2, lon2: seg.lon2,
+                                    latScale: latScale
+                                )
+                                if dist <= corridorRadiusMeters {
+                                    if let existing = matchingLeaders[seg.lineKey] {
+                                        if dist < existing.dist {
+                                            matchingLeaders[seg.lineKey] = (seg.tx, seg.ty, dist)
+                                        }
+                                    } else {
+                                        matchingLeaders[seg.lineKey] = (seg.tx, seg.ty, dist)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    guard !matchingLeaders.isEmpty else { continue }
+
+                    var sharedKeys = [entry.key]
+                    sharedKeys.append(contentsOf: matchingLeaders.keys)
+                    sharedKeys.sort()
+
+                    guard let myRank = sharedKeys.firstIndex(of: entry.key),
+                          let leaderKey = sharedKeys.first else { continue }
+
+                    // Tangente de référence déterminée par le leader (sharedKeys[0]) pour orienter la normale de façon identique
+                    var refTx = tx
+                    var refTy = ty
+                    if leaderKey != entry.key, let leaderTangent = matchingLeaders[leaderKey] {
+                        refTx = leaderTangent.tx
+                        refTy = leaderTangent.ty
+                    }
+
+                    // Si le leader est un autre tracé et pointe en sens inverse, inverser notre tangente locale
+                    var orientedTx = tx
+                    var orientedTy = ty
+                    if orientedTx * refTx + orientedTy * refTy < 0 {
+                        orientedTx = -orientedTx
+                        orientedTy = -orientedTy
+                    }
+
+                    // Normale perpendiculaire à la tangente orientée
+                    let nx = -orientedTy
+                    let ny = orientedTx
+
+                    let rankOffset = (Double(myRank) - Double(sharedKeys.count - 1) / 2.0) * laneSpacingMeters
+                    dxMeters[i] = nx * rankOffset
+                    dyMeters[i] = ny * rankOffset
+                    hasAnyOffset = true
+                }
+
+                if hasAnyOffset {
+                    // Lissage en 2 passes des vecteurs de décalage pour une transition fluide entrée/sortie de couloir
+                    for _ in 0..<2 {
+                        var smoothDx = dxMeters
+                        var smoothDy = dyMeters
+                        for i in 1..<(chain.count - 1) {
+                            smoothDx[i] = 0.25 * dxMeters[i - 1] + 0.50 * dxMeters[i] + 0.25 * dxMeters[i + 1]
+                            smoothDy[i] = 0.25 * dyMeters[i - 1] + 0.50 * dyMeters[i] + 0.25 * dyMeters[i + 1]
+                        }
+                        dxMeters = smoothDx
+                        dyMeters = smoothDy
+                    }
+
+                    var shiftedCoords: [CLLocationCoordinate2D] = []
+                    shiftedCoords.reserveCapacity(chain.count)
+                    for i in 0..<chain.count {
+                        let pt = chain[i]
+                        if abs(dxMeters[i]) < 0.01 && abs(dyMeters[i]) < 0.01 {
+                            shiftedCoords.append(pt)
+                        } else {
+                            let latScale = max(0.01, cos(pt.latitude * .pi / 180.0))
+                            let dLat = dyMeters[i] / 111319.5
+                            let dLon = dxMeters[i] / (111319.5 * latScale)
+                            shiftedCoords.append(CLLocationCoordinate2D(latitude: pt.latitude + dLat, longitude: pt.longitude + dLon))
+                        }
+                    }
+
+                    let finalCoords = smoothCoordinates(shiftedCoords, passes: 1, maxCornerOffsetMeters: 16.0)
+                    if finalCoords.count >= 2 {
+                        newPolylines.append(MKPolyline(coordinates: finalCoords, count: finalCoords.count))
+                    }
+                } else {
+                    newPolylines.append(MKPolyline(coordinates: chain, count: chain.count))
+                }
+            }
+
+            resultLines.append(LineTrace(
+                id: entry.line.id,
+                name: entry.line.name,
+                color: entry.line.color,
+                polylines: newPolylines.isEmpty ? entry.line.polylines : newPolylines,
+                type: entry.line.type,
+                isDashed: entry.line.isDashed
+            ))
+        }
+
+        return resultLines
+    }
+
+    // MARK: - Geometry Helpers (Chaînage, Lissage & Snap)
+
+    nonisolated private static func approxMetersDistance(_ c1: CLLocationCoordinate2D, _ c2: CLLocationCoordinate2D) -> Double {
+        let latMid = (c1.latitude + c2.latitude) * 0.5 * .pi / 180.0
+        let dLon = (c2.longitude - c1.longitude) * cos(latMid) * 111319.5
+        let dLat = (c2.latitude - c1.latitude) * 111319.5
+        return sqrt(dLon * dLon + dLat * dLat)
+    }
+
+    nonisolated private static func extractCoordinates(from polyline: MKPolyline) -> [CLLocationCoordinate2D] {
+        let ptr = polyline.points()
+        let count = polyline.pointCount
+        var coords: [CLLocationCoordinate2D] = []
+        coords.reserveCapacity(count)
+        for i in 0..<count {
+            coords.append(ptr[i].coordinate)
+        }
+        return coords
+    }
+
+    /// Fusionne les segments contigus dont les extrémités sont à moins de `stitchThresholdMeters` et lisse les courbes.
+    nonisolated static func stitchAndSmoothPolylines(
+        _ polylines: [MKPolyline],
+        isDashed: Bool = false,
+        stitchThresholdMeters: Double = 18.0
+    ) -> [MKPolyline] {
+        var chains = polylines.map { extractCoordinates(from: $0) }.filter { $0.count >= 2 }
+        guard !chains.isEmpty else { return polylines }
+
+        // Chaînage glouton des tronçons contigus pour éviter les cassures entre segments GeoJSON
+        var didMerge = true
+        while didMerge {
+            didMerge = false
+            var i = 0
+            while i < chains.count {
+                var current = chains[i]
+                var j = i + 1
+                var mergedCurrent = false
+
+                while j < chains.count {
+                    let other = chains[j]
+                    guard let cFirst = current.first, let cLast = current.last,
+                          let oFirst = other.first, let oLast = other.last else {
+                        j += 1
+                        continue
+                    }
+
+                    if approxMetersDistance(cLast, oFirst) <= stitchThresholdMeters {
+                        current.append(contentsOf: other.dropFirst())
+                        chains[i] = current
+                        chains.remove(at: j)
+                        didMerge = true
+                        mergedCurrent = true
+                        break
+                    } else if approxMetersDistance(cLast, oLast) <= stitchThresholdMeters {
+                        current.append(contentsOf: other.reversed().dropFirst())
+                        chains[i] = current
+                        chains.remove(at: j)
+                        didMerge = true
+                        mergedCurrent = true
+                        break
+                    } else if approxMetersDistance(cFirst, oLast) <= stitchThresholdMeters {
+                        current = Array(other) + Array(current.dropFirst())
+                        chains[i] = current
+                        chains.remove(at: j)
+                        didMerge = true
+                        mergedCurrent = true
+                        break
+                    } else if approxMetersDistance(cFirst, oFirst) <= stitchThresholdMeters {
+                        current = Array(other.reversed()) + Array(current.dropFirst())
+                        chains[i] = current
+                        chains.remove(at: j)
+                        didMerge = true
+                        mergedCurrent = true
+                        break
+                    }
+                    j += 1
+                }
+
+                if !mergedCurrent {
+                    i += 1
+                }
+            }
+        }
+
+        return chains.compactMap { coords -> MKPolyline? in
+            let finalCoords = smoothCoordinates(coords, passes: isDashed ? 1 : 2, maxCornerOffsetMeters: 22.0)
+            guard finalCoords.count >= 2 else { return nil }
+            return MKPolyline(coordinates: finalCoords, count: finalCoords.count)
+        }
+    }
+
+    /// Lissage de Chaikin borné : arrondit les angles marqués tout en restant fidèle à la géométrie des voies.
+    nonisolated static func smoothCoordinates(
+        _ coordinates: [CLLocationCoordinate2D],
+        passes: Int = 2,
+        maxCornerOffsetMeters: Double = 22.0
+    ) -> [CLLocationCoordinate2D] {
+        guard coordinates.count > 2, passes > 0 else { return coordinates }
+
+        // Déduplication préalable des points quasi confondus (< 1.5 m)
+        var deduped: [CLLocationCoordinate2D] = []
+        deduped.reserveCapacity(coordinates.count)
+        for pt in coordinates {
+            if let last = deduped.last, approxMetersDistance(last, pt) < 1.5 {
+                continue
+            }
+            deduped.append(pt)
+        }
+        if deduped.count <= 2 { return deduped }
+
+        let cosFlatThreshold = cos(2.0 * .pi / 180.0)
+        var current = deduped
+
+        for _ in 0..<passes {
+            guard current.count > 2 else { break }
+            var next: [CLLocationCoordinate2D] = []
+            next.reserveCapacity(current.count * 2)
+            next.append(current[0])
+
+            for i in 1..<(current.count - 1) {
+                let prev = current[i - 1]
+                let curr = current[i]
+                let after = current[i + 1]
+
+                let len1 = approxMetersDistance(prev, curr)
+                let len2 = approxMetersDistance(curr, after)
+
+                guard len1 > 0.5 && len2 > 0.5 else {
+                    next.append(curr)
+                    continue
+                }
+
+                let latScale = cos(curr.latitude * .pi / 180.0)
+                let v1x = (curr.longitude - prev.longitude) * latScale
+                let v1y = curr.latitude - prev.latitude
+                let v2x = (after.longitude - curr.longitude) * latScale
+                let v2y = after.latitude - curr.latitude
+
+                let n1 = sqrt(v1x * v1x + v1y * v1y)
+                let n2 = sqrt(v2x * v2x + v2y * v2y)
+
+                if n1 > 0 && n2 > 0 {
+                    let dot = (v1x * v2x + v1y * v2y) / (n1 * n2)
+                    // Angle quasi plat (< 2°) : conserver le sommet tel quel
+                    if dot >= cosFlatThreshold {
+                        next.append(curr)
+                        continue
+                    }
+                }
+
+                let d1 = min(0.25 * len1, maxCornerOffsetMeters)
+                let d2 = min(0.25 * len2, maxCornerOffsetMeters)
+                let t1 = d1 / len1
+                let t2 = d2 / len2
+
+                let q = CLLocationCoordinate2D(
+                    latitude: curr.latitude + (prev.latitude - curr.latitude) * t1,
+                    longitude: curr.longitude + (prev.longitude - curr.longitude) * t1
+                )
+                let r = CLLocationCoordinate2D(
+                    latitude: curr.latitude + (after.latitude - curr.latitude) * t2,
+                    longitude: curr.longitude + (after.longitude - curr.longitude) * t2
+                )
+                next.append(q)
+                next.append(r)
+            }
+
+            if let last = current.last {
+                next.append(last)
+            }
+            current = next
+        }
+
+        return current
+    }
+
+    nonisolated private static func normalizeLineKeyName(_ name: String, type: TransportType) -> String {
+        let upper = name.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        if type == .tram && upper.hasPrefix("T") && upper.count > 1 {
+            return String(upper.dropFirst())
+        }
+        return upper
+    }
+
+    nonisolated private static let stopWordsForMatching: Set<String> = [
+        "de", "du", "des", "la", "le", "les", "et", "en", "sur", "sous",
+        "aux", "au", "d", "l", "gare", "station", "rer", "metro", "train", "tram", "sncf", "paris"
+    ]
+
+    nonisolated private static func extractNormalizedWords(_ name: String) -> Set<String> {
+        let folded = name.folding(options: .diacriticInsensitive, locale: .current).lowercased()
+        let cleaned = folded.replacingOccurrences(of: "[^a-z0-9]+", with: " ", options: .regularExpression)
+        let parts = cleaned.split(separator: " ").map(String.init)
+        return Set(parts.filter { $0.count >= 2 && !stopWordsForMatching.contains($0) })
+    }
+
+    /// Charge les coordonnées précises par ligne depuis `arrets-lignes.csv` (hors bus), indexées avec mots normalisés.
+    nonisolated private static func loadPlatformCoordinatesLookup() -> [String: [(words: Set<String>, coord: CLLocationCoordinate2D)]] {
+        guard let url = Bundle.main.url(forResource: "arrets-lignes", withExtension: "csv"),
+              let content = try? String(contentsOf: url, encoding: .utf8) else {
+            return [:]
+        }
+
+        var lookup: [String: [(words: Set<String>, coord: CLLocationCoordinate2D)]] = [:]
+        let rows = content.components(separatedBy: .newlines)
+
+        for (index, row) in rows.enumerated() where index > 0 {
+            guard !row.isEmpty else { continue }
+            let columns = parseCSVLineStatic(row)
+            guard columns.count > 8 else { continue }
+
+            let modeStr = columns[8]
+            if modeStr == "Bus" { continue }
+
+            guard let lat = Double(columns[5]), let lon = Double(columns[4]) else { continue }
+
+            let words = extractNormalizedWords(columns[3])
+            let lineName = columns[7].uppercased()
+                .replacingOccurrences(of: "RER", with: "")
+                .replacingOccurrences(of: "TRANSILIEN", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let type = mapTransportTypeStatic(modeStr, lineName: lineName)
+            let normLine = normalizeLineKeyName(lineName, type: type)
+            let key = "\(type.rawValue)_\(normLine)"
+            lookup[key, default: []].append((words: words, coord: CLLocationCoordinate2D(latitude: lat, longitude: lon)))
+        }
+
+        return lookup
+    }
+
+    /// Fait glisser une coordonnée projetée le long de sa propre polyline de `distanceMeters` (positif ou négatif).
+    nonisolated private static func slideAlongPolyline(
+        _ coord: CLLocationCoordinate2D,
+        polylines: [MKPolyline],
+        distanceMeters: Double
     ) -> CLLocationCoordinate2D {
-        let earthRadius: Double = 6_371_000
-        let lat1 = coord.latitude * .pi / 180
-        let lon1 = coord.longitude * .pi / 180
-        let bearingRad = bearing * .pi / 180
+        let targetPoint = MKMapPoint(coord)
+        var bestPolyline: MKPolyline?
+        var bestSegIndex = 0
+        var bestT = 0.0
+        var bestDistance = Double.infinity
 
-        let lat2 = asin(
-            sin(lat1) * cos(distance / earthRadius) + cos(lat1) * sin(distance / earthRadius)
-                * cos(bearingRad))
-        let lon2 =
-            lon1
-            + atan2(
-                sin(bearingRad) * sin(distance / earthRadius) * cos(lat1),
-                cos(distance / earthRadius) - sin(lat1) * sin(lat2))
+        for polyline in polylines {
+            let count = polyline.pointCount
+            guard count >= 2 else { continue }
+            let pts = polyline.points()
 
-        return CLLocationCoordinate2D(latitude: lat2 * 180 / .pi, longitude: lon2 * 180 / .pi)
+            for i in 0..<(count - 1) {
+                let a = pts[i]
+                let b = pts[i + 1]
+                let dx = b.x - a.x
+                let dy = b.y - a.y
+                let lenSq = dx * dx + dy * dy
+                let t = lenSq > 0 ? max(0.0, min(1.0, ((targetPoint.x - a.x) * dx + (targetPoint.y - a.y) * dy) / lenSq)) : 0.0
+                let proj = MKMapPoint(x: a.x + t * dx, y: a.y + t * dy)
+                let dist = targetPoint.distance(to: proj)
+                if dist < bestDistance {
+                    bestDistance = dist
+                    bestPolyline = polyline
+                    bestSegIndex = i
+                    bestT = t
+                }
+            }
+        }
+
+        guard let poly = bestPolyline, poly.pointCount >= 2 else { return coord }
+        let pts = poly.points()
+        let count = poly.pointCount
+        var remaining = abs(distanceMeters)
+
+        if distanceMeters >= 0 {
+            var segIdx = bestSegIndex
+            var currentPt = MKMapPoint(
+                x: pts[segIdx].x + bestT * (pts[segIdx + 1].x - pts[segIdx].x),
+                y: pts[segIdx].y + bestT * (pts[segIdx + 1].y - pts[segIdx].y)
+            )
+            while segIdx < count - 1 {
+                let nextPt = pts[segIdx + 1]
+                let segDist = currentPt.distance(to: nextPt)
+                if remaining <= segDist && segDist > 1e-6 {
+                    let ratio = remaining / segDist
+                    return MKMapPoint(
+                        x: currentPt.x + (nextPt.x - currentPt.x) * ratio,
+                        y: currentPt.y + (nextPt.y - currentPt.y) * ratio
+                    ).coordinate
+                }
+                remaining -= segDist
+                segIdx += 1
+                currentPt = pts[segIdx]
+            }
+            return pts[count - 1].coordinate
+        } else {
+            var segIdx = bestSegIndex
+            var currentPt = MKMapPoint(
+                x: pts[segIdx].x + bestT * (pts[segIdx + 1].x - pts[segIdx].x),
+                y: pts[segIdx].y + bestT * (pts[segIdx + 1].y - pts[segIdx].y)
+            )
+            while segIdx >= 0 {
+                let prevPt = pts[segIdx]
+                let segDist = currentPt.distance(to: prevPt)
+                if remaining <= segDist && segDist > 1e-6 {
+                    let ratio = remaining / segDist
+                    return MKMapPoint(
+                        x: currentPt.x + (prevPt.x - currentPt.x) * ratio,
+                        y: currentPt.y + (prevPt.y - currentPt.y) * ratio
+                    ).coordinate
+                }
+                remaining -= segDist
+                segIdx -= 1
+                if segIdx >= 0 {
+                    currentPt = pts[segIdx + 1]
+                }
+            }
+            return pts[0].coordinate
+        }
+    }
+
+    /// Projette chaque quai ferré sur le tracé de sa propre ligne (enrichi par les coordonnées réelles de quais CSV).
+    nonisolated static func snapStationsToPolylines(_ stations: [MapStation], lines: [LineTrace]) -> [MapStation] {
+        guard !stations.isEmpty, !lines.isEmpty else { return stations }
+
+        let maxSnapDistance: Double = 260.0
+        var polylinesByKey: [String: [MKPolyline]] = [:]
+        for line in lines {
+            let normName = normalizeLineKeyName(line.name, type: line.type)
+            let key = "\(line.type.rawValue)_\(normName)"
+            polylinesByKey[key, default: []].append(contentsOf: line.polylines)
+        }
+
+        let platformLookup = loadPlatformCoordinatesLookup()
+
+        func closestPointOnPolylines(_ coord: CLLocationCoordinate2D, polylines: [MKPolyline], maxDist: Double) -> CLLocationCoordinate2D? {
+            let mapPoint = MKMapPoint(coord)
+            var bestPoint: MKMapPoint?
+            var bestDistance = maxDist
+
+            for polyline in polylines {
+                let count = polyline.pointCount
+                guard count >= 2 else { continue }
+                let pts = polyline.points()
+
+                for i in 0..<(count - 1) {
+                    let a = pts[i]
+                    let b = pts[i + 1]
+                    let dx = b.x - a.x
+                    let dy = b.y - a.y
+                    let lenSq = dx * dx + dy * dy
+                    let proj: MKMapPoint
+                    if lenSq > 0 {
+                        let t = max(0.0, min(1.0, ((mapPoint.x - a.x) * dx + (mapPoint.y - a.y) * dy) / lenSq))
+                        proj = MKMapPoint(x: a.x + t * dx, y: a.y + t * dy)
+                    } else {
+                        proj = a
+                    }
+
+                    let dist = mapPoint.distance(to: proj)
+                    if dist < bestDistance {
+                        bestDistance = dist
+                        bestPoint = proj
+                    }
+                }
+            }
+            return bestPoint?.coordinate
+        }
+
+        return stations.map { station in
+            let railLines = station.lines.filter {
+                $0.type == .metro || $0.type == .rer || $0.type == .tram || $0.type == .transilien || $0.type == .cable
+            }
+            guard !railLines.isEmpty else { return station }
+
+            var stationWords = extractNormalizedWords(station.name)
+            if stationWords.contains("halles") {
+                stationWords.insert("chatelet")
+            }
+
+            var updatedPlatforms: [StopPoint] = []
+            updatedPlatforms.reserveCapacity(station.platforms.count)
+            var placedByLineKey: [String: CLLocationCoordinate2D] = [:]
+
+            for platform in station.platforms {
+                guard platform.type != .bus else {
+                    updatedPlatforms.append(platform)
+                    continue
+                }
+
+                let normLine = normalizeLineKeyName(platform.lineName, type: platform.type)
+                let lineKey = "\(platform.type.rawValue)_\(normLine)"
+
+                if let alreadyPlaced = placedByLineKey[lineKey] {
+                    updatedPlatforms.append(StopPoint(
+                        id: platform.id,
+                        stopAreaId: platform.stopAreaId,
+                        name: platform.name,
+                        coordinate: alreadyPlaced,
+                        type: platform.type,
+                        lineName: platform.lineName
+                    ))
+                    continue
+                }
+
+                var seedCoord = platform.coordinate
+                if let entries = platformLookup[lineKey] {
+                    let nearbyMatches = entries.filter { entry in
+                        approxMetersDistance(entry.coord, station.coordinate) <= 550.0 &&
+                        !stationWords.isDisjoint(with: entry.words)
+                    }
+                    if !nearbyMatches.isEmpty {
+                        let avgLat = nearbyMatches.reduce(0.0) { $0 + $1.coord.latitude } / Double(nearbyMatches.count)
+                        let avgLon = nearbyMatches.reduce(0.0) { $0 + $1.coord.longitude } / Double(nearbyMatches.count)
+                        seedCoord = CLLocationCoordinate2D(latitude: avgLat, longitude: avgLon)
+                    }
+                }
+
+                let matchingPolylines = polylinesByKey[lineKey] ?? []
+                var finalCoord: CLLocationCoordinate2D
+                if !matchingPolylines.isEmpty,
+                   let snapped = closestPointOnPolylines(seedCoord, polylines: matchingPolylines, maxDist: maxSnapDistance) {
+                    finalCoord = snapped
+                } else {
+                    finalCoord = seedCoord
+                }
+
+                // Si ce point est à < 18 m d'un autre quai déjà placé sur une autre ligne de cette station,
+                // faire glisser le marqueur le long de sa propre polyline pour éviter la collision aux croisements.
+                let collisionCount = placedByLineKey.values.filter {
+                    approxMetersDistance($0, finalCoord) < 18.0
+                }.count
+                if collisionCount > 0 && !matchingPolylines.isEmpty {
+                    let stepSign = (collisionCount % 2 == 1) ? 1.0 : -1.0
+                    let stepMagnitude = 14.0 * Double((collisionCount + 1) / 2)
+                    finalCoord = slideAlongPolyline(finalCoord, polylines: matchingPolylines, distanceMeters: stepSign * stepMagnitude)
+                }
+
+                placedByLineKey[lineKey] = finalCoord
+                updatedPlatforms.append(StopPoint(
+                    id: platform.id,
+                    stopAreaId: platform.stopAreaId,
+                    name: platform.name,
+                    coordinate: finalCoord,
+                    type: platform.type,
+                    lineName: platform.lineName
+                ))
+            }
+
+            let primaryCoord: CLLocationCoordinate2D
+            if let primaryPlatform = updatedPlatforms.first(where: { $0.type == station.mainType }) ?? updatedPlatforms.first(where: { $0.type != .bus }) {
+                primaryCoord = primaryPlatform.coordinate
+            } else {
+                primaryCoord = station.coordinate
+            }
+
+            return MapStation(
+                id: station.id,
+                name: station.name,
+                coordinate: primaryCoord,
+                platforms: updatedPlatforms,
+                isHub: station.isHub,
+                mainType: station.mainType,
+                lines: station.lines,
+                city: station.city,
+                prioritizedLine: station.prioritizedLine
+            )
+        }
     }
 
     // MARK: - Grand Paris Express Loader
@@ -2491,7 +3177,7 @@ class MapDataService: ObservableObject {
                     id: "GPE_\(lineName)",
                     name: lineName,
                     color: color,
-                    polylines: polylines,
+                    polylines: Self.stitchAndSmoothPolylines(polylines, isDashed: isDashed),
                     type: .metro,
                     isDashed: isDashed
                 )
@@ -2508,8 +3194,16 @@ class MapDataService: ObservableObject {
                 var updatedUnmerged = self.unmergedStations
                 
                 for newStat in parsedStations {
-                    if let index = updatedAll.firstIndex(where: {
-                        $0.name.lowercased().trimmingCharacters(in: .whitespaces) == newStat.name.lowercased().trimmingCharacters(in: .whitespaces)
+                    let newBase = self.getNormalizedBaseName(newStat.name)
+                    let newLoc = CLLocation(latitude: newStat.coordinate.latitude, longitude: newStat.coordinate.longitude)
+
+                    if let index = updatedAll.firstIndex(where: { existing in
+                        if existing.name.lowercased().trimmingCharacters(in: .whitespaces) == newStat.name.lowercased().trimmingCharacters(in: .whitespaces) {
+                            return true
+                        }
+                        guard self.getNormalizedBaseName(existing.name) == newBase else { return false }
+                        let existingLoc = CLLocation(latitude: existing.coordinate.latitude, longitude: existing.coordinate.longitude)
+                        return existingLoc.distance(from: newLoc) < 400.0
                     }) {
                         let existing = updatedAll[index]
                         let mergedLines = Array(Set(existing.lines + newStat.lines)).sorted(by: { $0.name < $1.name })
@@ -2522,15 +3216,21 @@ class MapDataService: ObservableObject {
                             platforms: mergedPlatforms,
                             isHub: true,
                             mainType: existing.mainType,
-                            lines: mergedLines
+                            lines: mergedLines,
+                            city: existing.city
                         )
                         updatedAll[index] = mergedStation
                     } else {
                         updatedAll.append(newStat)
                     }
                     
-                    if let index = updatedUnmerged.firstIndex(where: {
-                        $0.name.lowercased().trimmingCharacters(in: .whitespaces) == newStat.name.lowercased().trimmingCharacters(in: .whitespaces)
+                    if let index = updatedUnmerged.firstIndex(where: { existing in
+                        if existing.name.lowercased().trimmingCharacters(in: .whitespaces) == newStat.name.lowercased().trimmingCharacters(in: .whitespaces) {
+                            return true
+                        }
+                        guard self.getNormalizedBaseName(existing.name) == newBase else { return false }
+                        let existingLoc = CLLocation(latitude: existing.coordinate.latitude, longitude: existing.coordinate.longitude)
+                        return existingLoc.distance(from: newLoc) < 400.0
                     }) {
                         let existing = updatedUnmerged[index]
                         let mergedLines = Array(Set(existing.lines + newStat.lines)).sorted(by: { $0.name < $1.name })
@@ -2543,7 +3243,8 @@ class MapDataService: ObservableObject {
                             platforms: mergedPlatforms,
                             isHub: true,
                             mainType: existing.mainType,
-                            lines: mergedLines
+                            lines: mergedLines,
+                            city: existing.city
                         )
                         updatedUnmerged[index] = mergedStation
                     } else {
@@ -2554,6 +3255,8 @@ class MapDataService: ObservableObject {
                 self.allStations = updatedAll
                 self.unmergedStations = updatedUnmerged
                 self.visibleStations = updatedAll
+                self.majorHubs = updatedAll.filter { $0.isHub }
+                self.stationsRevision += 1
                 self.loadingProgress = 1.0
                 
                 print("🚇 [GPE] Chargement de \(parsedStations.count) gares et \(newLines.count) tracés du Grand Paris Express terminés.")

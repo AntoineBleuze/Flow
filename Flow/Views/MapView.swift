@@ -54,7 +54,7 @@ struct AppMapView: View {
     var showControls: Bool = true
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        ZStack(alignment: duoPosture == .foldedDuoOuterScreen ? .topLeading : .topTrailing) {
             MapViewControllerBridge(
                 data: data,
                 selectedStation: selectedStationBinding,
@@ -68,11 +68,12 @@ struct AppMapView: View {
             .ignoresSafeArea()
             
             if showControls {
-                // Contrôles flottants en haut à droite (Carte, Filtres & Localisation)
+                // Contrôles flottants (Carte, Filtres & Localisation)
                 // Regroupés dans un GlassEffectContainer pour unifier l'échantillonnage optique (Style Localiser iOS 26)
                 mapControlToolbar
-                    .padding(.top, 58)
-                    .padding(.trailing, duoPosture == .unfoldedDualScreen ? 24 : 16)
+                    .padding(.top, duoPosture == .foldedDuoOuterScreen ? 20 : (duoPosture == .unfoldedDualScreen ? 64 : 58))
+                    .padding(.leading, duoPosture == .foldedDuoOuterScreen ? 16 : 0)
+                    .padding(.trailing, duoPosture == .foldedDuoOuterScreen ? 0 : (duoPosture == .unfoldedDualScreen ? 24 : 16))
                     .zIndex(15)
             }
 
@@ -177,32 +178,6 @@ struct AppMapView: View {
     private var mapControlToolbar: some View {
         GlassEffectContainer(spacing: 12) {
             VStack(spacing: 0) {
-                // Polyline Style Selector Menu (Mode cartographique)
-                Menu {
-                    ForEach(MapPolylineStyle.allCases) { style in
-                        Button(action: {
-                            data.polylineStyle = style
-                        }) {
-                            HStack {
-                                Text(style.rawValue)
-                                if data.polylineStyle == style {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    Image(systemName: data.polylineStyle.systemImageName)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(data.polylineStyle != .classic ? Color.blue : Color.primary)
-                        .frame(width: 44, height: 46)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                Divider()
-                    .frame(width: 28)
-
                 // Transport Category Filter Menu
                 Menu {
                     ForEach(["Métro", "RER / Train", "Tram", "Bus"], id: \.self) { category in

@@ -1,10 +1,68 @@
 import SwiftUI
 
+enum StationMapZoomLevel: Int, Equatable {
+    case minimal   // latitudeDelta >= 0.035 : pastilles seules sur les lignes
+    case medium    // 0.012 <= latitudeDelta < 0.035 : pastilles + noms (ferré)
+    case detailed  // 0.0045 <= latitudeDelta < 0.012 : logos révélés + noms (ferré), pastille discrète (bus)
+    case closeUp   // latitudeDelta < 0.0045 : logos + noms pour tout (y compris bus)
+
+    nonisolated static func from(latitudeDelta: Double) -> StationMapZoomLevel {
+        if latitudeDelta >= 0.035 {
+            return .minimal
+        } else if latitudeDelta >= 0.012 {
+            return .medium
+        } else if latitudeDelta >= 0.0045 {
+            return .detailed
+        } else {
+            return .closeUp
+        }
+    }
+}
+
+/// Texte détouré façon Apple Maps sans boîte de fond, avec contour de lisibilité.
+struct MapHaloText: View {
+    let text: String
+    var font: Font
+    var foregroundColor: Color
+    var haloColor: Color = Color(UIColor.systemBackground)
+
+    var body: some View {
+        ZStack {
+            Group {
+                Text(text).offset(x: -1.1, y: 0)
+                Text(text).offset(x: 1.1, y: 0)
+                Text(text).offset(x: 0, y: -1.1)
+                Text(text).offset(x: 0, y: 1.1)
+                Text(text).offset(x: -0.8, y: -0.8)
+                Text(text).offset(x: 0.8, y: -0.8)
+                Text(text).offset(x: -0.8, y: 0.8)
+                Text(text).offset(x: 0.8, y: 0.8)
+            }
+            .font(font)
+            .foregroundColor(haloColor)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+
+            Text(text)
+                .font(font)
+                .foregroundColor(foregroundColor)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+    }
+}
+
 struct StationBadgeView: View {
     let station: MapStation
     let isSelected: Bool
+    var zoomLevel: StationMapZoomLevel = .detailed
+    var focusedLine: StationLine? = nil
+    var showStationName: Bool = true
 
     private var nonBusLines: [StationLine] {
+        if let focusedLine = focusedLine, focusedLine.type != .bus {
+            return [focusedLine]
+        }
         let lines: [StationLine]
         if FavoritesService.shared.isFavorite(stationId: station.id) {
             lines = station.lines
@@ -38,151 +96,206 @@ struct StationBadgeView: View {
         }
     }
 
-    var body: some View {
-        VStack(spacing: 3) {
-            // Nom de la station avec fond légèrement translucide
-            Text(station.name)
-                .font(.system(size: isSelected ? 9.5 : 8.0, weight: isSelected ? .black : .bold))
-                .foregroundColor(isSelected ? .blue : .primary)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 1.5)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-                .background(
-                    RoundedRectangle(cornerRadius: 3.5)
-                        .fill(Color(UIColor.systemBackground).opacity(0.85))
-                        .shadow(color: Color.black.opacity(0.1), radius: 1, x: 0, y: 0.5)
-                )
-                .scaleEffect(isSelected ? 1.15 : 1.0)
+    private var isBusOnly: Bool {
+        nonBusLines.isEmpty
+    }
 
-            Group {
-                if nonBusLines.isEmpty {
-                    if hasBusEnabled && !sortedBusLines.isEmpty {
-                        if sortedBusLines.count == 1, let firstBus = sortedBusLines.first {
-                            LineBadge(line: firstBus)
-                                .shadow(color: isSelected ? resolveLineColor(firstBus.name, type: firstBus.type).opacity(0.6) : Color.black.opacity(0.15),
-                                        radius: isSelected ? 6 : 2, x: 0, y: isSelected ? 3 : 1)
-                                .scaleEffect(isSelected ? 1.25 : 1.0)
-                        } else {
-                            // Plus d'une ligne de bus : Capsule moderne effet verre
-                            HStack(spacing: 3) {
-                                Image(systemName: "bus.fill")
-                                    .font(.system(size: 8, weight: .black))
-                                    .foregroundColor(.primary.opacity(0.7))
-                                    .frame(width: 12, height: 12)
-                                
-                                HStack(spacing: 2) {
-                                    ForEach(sortedBusLines.prefix(4), id: \.id) { line in
-                                        LineBadge(line: line, mini: true)
-                                    }
-                                    if sortedBusLines.count > 4 {
-                                        Text("+\(sortedBusLines.count - 4)")
-                                            .font(.system(size: 7, weight: .bold))
-                                            .foregroundColor(.secondary)
-                                            .padding(.horizontal, 2)
-                                    }
-                                }
-                            }
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 3)
-                            .background(
-                                Capsule()
-                                    .fill(Color(UIColor.systemBackground).opacity(0.75))
-                            )
-                            .overlay(
-                                Capsule()
-                                    .fill(Color.white.opacity(0.15))
-                            )
-                            .overlay(
-                                Capsule()
-                                    .stroke(isSelected ? Color.blue : Color.primary.opacity(0.15), lineWidth: isSelected ? 1.5 : 0.5)
-                            )
-                            .shadow(color: isSelected ? Color.blue.opacity(0.4) : Color.black.opacity(0.15),
-                                    radius: isSelected ? 6 : 3, x: 0, y: isSelected ? 3 : 1.5)
-                            .scaleEffect(isSelected ? 1.2 : 1.0)
-                        }
-                    } else {
-                        // Station sans ligne (fallback)
-                        Circle()
-                            .fill(Color.gray)
-                            .frame(width: 14, height: 14)
-                            .shadow(radius: 2)
-                    }
-                } else if nonBusLines.count == 1 && !hasBusEnabled, let firstLine = nonBusLines.first {
-                    // Station avec une seule ligne non-bus et pas de bus : on affiche directement son badge officiel
-                    LineBadge(line: firstLine)
-                        .shadow(color: isSelected ? resolveLineColor(firstLine.name, type: firstLine.type).opacity(0.6) : Color.black.opacity(0.15),
-                                radius: isSelected ? 6 : 2, x: 0, y: isSelected ? 3 : 1)
-                        .scaleEffect(isSelected ? 1.25 : 1.0)
-                } else {
-                    // Hub multi-lignes : conteneur capsule moderne effet verre (glassmorphism)
-                    HStack(spacing: 3) {
-                        // Petite icône de transport principal
-                        Image(systemName: modeIconName)
-                            .font(.system(size: 8, weight: .black))
-                            .foregroundColor(.primary.opacity(0.7))
-                            .frame(width: 12, height: 12)
-                        
-                        // Liste horizontale des badges des lignes (limité à 4 pour ne pas surcharger, bus compris)
-                        HStack(spacing: 2) {
-                            let maxNonBusToShow = hasBusEnabled ? 3 : 4
-                            ForEach(nonBusLines.prefix(maxNonBusToShow), id: \.id) { line in
-                                LineBadge(line: line, mini: true)
-                            }
-                            
-                            if hasBusEnabled {
-                                Image("Bus")
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: 14, height: 14)
-                            }
-                            
-                            if nonBusLines.count > maxNonBusToShow {
-                                Text("+\(nonBusLines.count - maxNonBusToShow)")
-                                    .font(.system(size: 7, weight: .bold))
-                                    .foregroundColor(.secondary)
-                                    .padding(.horizontal, 2)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 3)
-                    .background(
-                        Capsule()
-                            .fill(Color(UIColor.systemBackground).opacity(0.75))
-                    )
-                    .overlay(
-                        Capsule()
-                            .fill(Color.white.opacity(0.15))
-                    )
-                    .overlay(
-                        Capsule()
-                            .stroke(isSelected ? Color.blue : Color.primary.opacity(0.15), lineWidth: isSelected ? 1.5 : 0.5)
-                    )
-                    .shadow(color: isSelected ? Color.blue.opacity(0.4) : Color.black.opacity(0.15),
-                            radius: isSelected ? 6 : 3, x: 0, y: isSelected ? 3 : 1.5)
-                    .scaleEffect(isSelected ? 1.2 : 1.0)
-                }
+    private var shouldShowName: Bool {
+        if isSelected { return true }
+        guard showStationName else { return false }
+        if isBusOnly { return zoomLevel == .closeUp }
+        return zoomLevel != .minimal
+    }
+
+    /// Hauteur exacte de l'élément d'ancrage (pastille ou badge/pilule en bas de la vue)
+    /// pour caler `centerOffset` pile sur la coordonnée GPS de la ligne.
+    var markerAnchorHeight: CGFloat {
+        if isBusOnly {
+            if isSelected || zoomLevel == .closeUp {
+                return sortedBusLines.count > 1 ? 20.0 : 14.0
             }
+            return 9.0
+        }
+
+        if isSelected || zoomLevel == .detailed || zoomLevel == .closeUp {
+            if nonBusLines.count == 1 {
+                return (!isSelected && zoomLevel == .detailed) ? 16.0 : 20.0
+            }
+            return 20.0
+        }
+
+        // Mode pastille minimale
+        if nonBusLines.count > 1 {
+            return zoomLevel == .minimal ? 11.0 : 13.0
+        }
+        return zoomLevel == .minimal ? 9.0 : 11.0
+    }
+
+    var body: some View {
+        VStack(spacing: 2) {
+            if shouldShowName {
+                MapHaloText(
+                    text: station.name,
+                    font: .system(
+                        size: isSelected ? 11.0 : (isBusOnly ? 9.0 : 10.0),
+                        weight: isSelected ? .bold : .semibold
+                    ),
+                    foregroundColor: isSelected ? .blue : .primary
+                )
+            }
+
+            markerSymbol
         }
         .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isSelected)
     }
 
-    private var modeIconName: String {
-        let mainTypeToUse: TransportType
-        if let firstNonBus = nonBusLines.first {
-            mainTypeToUse = firstNonBus.type
+    @ViewBuilder
+    private var markerSymbol: some View {
+        if isBusOnly {
+            if hasBusEnabled && !sortedBusLines.isEmpty {
+                if isSelected || zoomLevel == .closeUp {
+                    if sortedBusLines.count == 1, let firstBus = sortedBusLines.first {
+                        LineBadge(line: firstBus, mini: true)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 2.5)
+                                    .stroke(Color(UIColor.systemBackground), lineWidth: 1.0)
+                            )
+                            .shadow(
+                                color: isSelected
+                                    ? resolveLineColor(firstBus.name, type: firstBus.type).opacity(0.6)
+                                    : Color.black.opacity(0.18),
+                                radius: isSelected ? 5 : 2, x: 0, y: 1
+                            )
+                            .scaleEffect(isSelected ? 1.2 : 1.0)
+                    } else {
+                        HStack(spacing: 2) {
+                            ForEach(sortedBusLines.prefix(3), id: \.id) { line in
+                                LineBadge(line: line, mini: true)
+                            }
+                            if sortedBusLines.count > 3 {
+                                Text("+\(sortedBusLines.count - 3)")
+                                    .font(.system(size: 7, weight: .bold))
+                                    .foregroundColor(.secondary)
+                                    .padding(.horizontal, 1.5)
+                            }
+                        }
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2.5)
+                        .background(
+                            Capsule()
+                                .fill(Color(UIColor.systemBackground).opacity(0.95))
+                        )
+                        .overlay(
+                            Capsule()
+                                .stroke(isSelected ? Color.blue : Color.primary.opacity(0.18), lineWidth: isSelected ? 1.5 : 0.7)
+                        )
+                        .shadow(color: isSelected ? Color.blue.opacity(0.35) : Color.black.opacity(0.15),
+                                radius: isSelected ? 5 : 2.5, x: 0, y: 1)
+                        .scaleEffect(isSelected ? 1.15 : 1.0)
+                    }
+                } else {
+                    // Pastille bus discrète (9×9 pt)
+                    let dotColor = sortedBusLines.first.map { resolveLineColor($0.name, type: $0.type) } ?? Color(hex: "008B5E")
+                    Circle()
+                        .fill(dotColor)
+                        .frame(width: 9, height: 9)
+                        .overlay(
+                            Circle()
+                                .stroke(Color(UIColor.systemBackground), lineWidth: 1.5)
+                        )
+                        .shadow(color: Color.black.opacity(0.22), radius: 1.5, x: 0, y: 0.5)
+                }
+            } else {
+                Circle()
+                    .fill(Color.gray)
+                    .frame(width: 9, height: 9)
+                    .overlay(Circle().stroke(Color(UIColor.systemBackground), lineWidth: 1.5))
+                    .shadow(radius: 1.5)
+            }
+        } else if isSelected || zoomLevel == .detailed || zoomLevel == .closeUp {
+            // Mode Logos Révélés (ferré)
+            if nonBusLines.count == 1, let firstLine = nonBusLines.first {
+                let useMini = !isSelected && zoomLevel == .detailed
+                LineBadge(line: firstLine, mini: useMini, customSize: useMini ? 16 : 20)
+                    .overlay(
+                        badgeBorder(for: firstLine, cornerRadius: useMini ? 3.5 : 4.5)
+                    )
+                    .shadow(
+                        color: isSelected
+                            ? resolveLineColor(firstLine.name, type: firstLine.type).opacity(0.6)
+                            : Color.black.opacity(0.2),
+                        radius: isSelected ? 6 : 2, x: 0, y: isSelected ? 2 : 1
+                    )
+                    .scaleEffect(isSelected ? 1.2 : 1.0)
+            } else {
+                // Pilule épurée style Apple Maps (logos seuls, sans icône générique de mode)
+                HStack(spacing: 2.5) {
+                    let maxNonBusToShow = 4
+                    ForEach(nonBusLines.prefix(maxNonBusToShow), id: \.id) { line in
+                        LineBadge(line: line, mini: true)
+                    }
+                    if nonBusLines.count > maxNonBusToShow {
+                        Text("+\(nonBusLines.count - maxNonBusToShow)")
+                            .font(.system(size: 7.5, weight: .bold))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 1.5)
+                    }
+                }
+                .padding(.horizontal, 4.5)
+                .padding(.vertical, 3)
+                .background(
+                    Capsule()
+                        .fill(Color(UIColor.systemBackground).opacity(0.95))
+                )
+                .overlay(
+                    Capsule()
+                        .stroke(isSelected ? Color.blue : Color.primary.opacity(0.18), lineWidth: isSelected ? 1.5 : 0.8)
+                )
+                .shadow(
+                    color: isSelected ? Color.blue.opacity(0.4) : Color.black.opacity(0.18),
+                    radius: isSelected ? 6 : 2.5, x: 0, y: 1
+                )
+                .scaleEffect(isSelected ? 1.15 : 1.0)
+            }
         } else {
-            mainTypeToUse = station.mainType
+            // Mode Pastille Minimale sur la ligne (.minimal ou .medium)
+            if nonBusLines.count == 1, let firstLine = nonBusLines.first {
+                let dotSize: CGFloat = zoomLevel == .minimal ? 9 : 11
+                let lineColor = resolveLineColor(firstLine.name, type: firstLine.type)
+                Circle()
+                    .fill(lineColor)
+                    .frame(width: dotSize, height: dotSize)
+                    .overlay(
+                        Circle()
+                            .stroke(Color(UIColor.systemBackground), lineWidth: 2.0)
+                    )
+                    .shadow(color: Color.black.opacity(0.24), radius: 1.5, x: 0, y: 0.5)
+            } else {
+                // Hub multi-lignes : pastille blanche avec anneau sombre/primaire style Apple Maps
+                let dotSize: CGFloat = zoomLevel == .minimal ? 11 : 13
+                Circle()
+                    .fill(Color(UIColor.systemBackground))
+                    .frame(width: dotSize, height: dotSize)
+                    .overlay(
+                        Circle()
+                            .stroke(Color.primary.opacity(0.85), lineWidth: 2.2)
+                    )
+                    .shadow(color: Color.black.opacity(0.25), radius: 2, x: 0, y: 0.5)
+            }
         }
-        
-        switch mainTypeToUse {
-        case .metro: return "tram.fill"
-        case .rer: return "train.side.front.car"
-        case .transilien: return "train.side.front.car"
-        case .tram: return "tram"
-        case .bus: return "bus.fill"
-        default: return "train.side.front.car"
+    }
+
+    @ViewBuilder
+    private func badgeBorder(for line: StationLine, cornerRadius: CGFloat) -> some View {
+        let strokeColor = isSelected ? Color.blue : Color(UIColor.systemBackground)
+        let strokeWidth: CGFloat = isSelected ? 1.5 : 1.2
+        switch line.type {
+        case .metro:
+            Circle().stroke(strokeColor, lineWidth: strokeWidth)
+        case .tram:
+            Capsule().stroke(strokeColor, lineWidth: strokeWidth)
+        default:
+            RoundedRectangle(cornerRadius: cornerRadius).stroke(strokeColor, lineWidth: strokeWidth)
         }
     }
 }
@@ -191,11 +304,12 @@ struct StationBadgeView: View {
 struct LineBadge: View {
     let line: StationLine
     var mini: Bool = false
+    var customSize: CGFloat? = nil
 
     var body: some View {
         let color = resolveLineColor(line.name, type: line.type)
-        let size: CGFloat = mini ? 14 : 20
-        let fontSize: CGFloat = mini ? 8 : 11
+        let size: CGFloat = customSize ?? (mini ? 14 : 20)
+        let fontSize: CGFloat = customSize != nil ? (size * 0.55) : (mini ? 8 : 11)
         let cornerRadius: CGFloat = mini ? 2.5 : 4
 
         Group {

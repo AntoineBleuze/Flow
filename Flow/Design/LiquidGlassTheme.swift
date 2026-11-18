@@ -233,23 +233,28 @@ public struct LiquidGlassCircleButton: View {
 
 // MARK: - En-tête de feuille modale style Apple Localiser (Find My) iOS 26
 
-public struct LiquidGlassSheetHeader<TrailingContent: View>: View {
+public struct LiquidGlassSheetHeader<LeadingContent: View, TrailingContent: View>: View {
     public let title: String
     public let subtitle: String?
+    public let leadingContent: LeadingContent
     public let trailingContent: TrailingContent
     
     public init(
         title: String,
         subtitle: String? = nil,
+        @ViewBuilder leadingContent: () -> LeadingContent,
         @ViewBuilder trailingContent: () -> TrailingContent
     ) {
         self.title = title
         self.subtitle = subtitle
+        self.leadingContent = leadingContent()
         self.trailingContent = trailingContent()
     }
     
     public var body: some View {
         HStack(alignment: .center, spacing: 12) {
+            leadingContent
+            
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.system(size: 28, weight: .bold, design: .rounded))
@@ -272,11 +277,19 @@ public struct LiquidGlassSheetHeader<TrailingContent: View>: View {
     }
 }
 
-public extension LiquidGlassSheetHeader where TrailingContent == EmptyView {
+public extension LiquidGlassSheetHeader where LeadingContent == EmptyView {
+    init(
+        title: String,
+        subtitle: String? = nil,
+        @ViewBuilder trailingContent: () -> TrailingContent
+    ) {
+        self.init(title: title, subtitle: subtitle, leadingContent: { EmptyView() }, trailingContent: trailingContent)
+    }
+}
+
+public extension LiquidGlassSheetHeader where LeadingContent == EmptyView, TrailingContent == EmptyView {
     init(title: String, subtitle: String? = nil) {
-        self.init(title: title, subtitle: subtitle) {
-            EmptyView()
-        }
+        self.init(title: title, subtitle: subtitle, leadingContent: { EmptyView() }, trailingContent: { EmptyView() })
     }
 }
 
@@ -541,17 +554,20 @@ public struct LiquidGlassTabItem: Identifiable, Sendable, Equatable {
         LiquidGlassTabItem(id: "Explore", icon: "map.fill", label: "Explorer"),
         LiquidGlassTabItem(id: "Nearby", icon: "location.circle.fill", label: "Proximité"),
         LiquidGlassTabItem(id: "Favorites", icon: "star.fill", label: "Favoris"),
-        LiquidGlassTabItem(id: "Trafic", icon: "tram.fill", label: "Trafic")
+        LiquidGlassTabItem(id: "Trafic", icon: "tram.fill", label: "Trafic"),
+        LiquidGlassTabItem(id: "AI", icon: "sparkles", label: "Flow IA")
     ]
 }
 
 #if canImport(UIKit)
-// MARK: - Sous-classe UITabBar fusionnable dans la Sheet réduite (Style Localiser iOS 26)
+// MARK: - Sous-classe UITabBar fusionnable dans la Sheet réduite (Style Localiser iOS 26+)
 
 /// Sous-classe de `UITabBar` capable d'estomper son contour externe (`outline` / platter global)
 /// lorsque la `.sheet` est réduite au minimum afin de se fondre dans le verre de la sheet,
-/// tout en conservant la pilule de sélection interne de l'onglet actif et la loupe réfractive au glissement.
+/// tout en conservant la pilule de sélection interne de l'onglet actif et la dalle en verre réfractive qui se soulève au glissement.
 public final class MorphingPlatterUITabBar: UITabBar {
+    private var savedPlatterGlassEffect: AnyObject?
+
     public var isMergedIntoSheet: Bool = false {
         didSet {
             guard oldValue != isMergedIntoSheet else { return }
@@ -565,6 +581,13 @@ public final class MorphingPlatterUITabBar: UITabBar {
         }
     }
 
+    public var expandProgress: CGFloat = 1.0 {
+        didSet {
+            guard abs(oldValue - expandProgress) > 0.005 else { return }
+            applyPlatterMergeState()
+        }
+    }
+
     public override func layoutSubviews() {
         super.layoutSubviews()
         applyPlatterMergeState()
@@ -573,10 +596,38 @@ public final class MorphingPlatterUITabBar: UITabBar {
     public func applyPlatterMergeState() {
         let barWidth = self.bounds.width
         guard barWidth > 0 else { return }
-        // Seuil distinguant le platter/outline global de la TabBar (> 60 % de la largeur)
-        // des éléments propres à un onglet individuel ou à la loupe réfractive (~20-45 % de la largeur).
+        let clampedExpand = min(1.0, max(0.0, expandProgress))
+        let effectiveFill: Double = isMergedIntoSheet ? 0.0 : Double(clampedExpand)
         let fullBarWidthThreshold = barWidth * 0.60
         let targetAlpha: CGFloat = isMergedIntoSheet ? 0.0 : 1.0
+
+        // 1. Piloter directement la progression du matériau de barre sur _UITabBarVisualProvider_Floating
+        if let vp = self.value(forKey: "_visualProvider") as? NSObject {
+            let fillSelector = NSSelectorFromString("setBarMaterialFillProgress:")
+            if vp.responds(to: fillSelector) {
+                typealias SetDoubleMethod = @convention(c) (AnyObject, Selector, Double) -> Void
+                let methodIMP = vp.method(for: fillSelector)
+                let fn = unsafeBitCast(methodIMP, to: SetDoubleMethod.self)
+                fn(vp, fillSelector, effectiveFill)
+            }
+
+            let bgTransitionSelector = NSSelectorFromString("setBackgroundTransitionProgress:")
+            if vp.responds(to: bgTransitionSelector) {
+                typealias SetDoubleMethod = @convention(c) (AnyObject, Selector, Double) -> Void
+                let methodIMP = vp.method(for: bgTransitionSelector)
+                let fn = unsafeBitCast(methodIMP, to: SetDoubleMethod.self)
+                fn(vp, bgTransitionSelector, isMergedIntoSheet ? 0.0 : Double(clampedExpand))
+            }
+        }
+
+        // 2. Supprimer ou restaurer le verre / outline externe de _UITabBarItemPlatterView
+        // tout en préservant les boutons (_UITabButton) et la pilule active (_UILiquidLensView).
+        for subview in self.subviews {
+            let className = String(describing: type(of: subview))
+            if className.contains("PlatterView") {
+                updatePlatterViewGlassAndOutline(subview, effectiveFill: effectiveFill, threshold: fullBarWidthThreshold)
+            }
+        }
 
         updateSubtreeForPlatterMerge(
             in: self,
@@ -586,33 +637,73 @@ public final class MorphingPlatterUITabBar: UITabBar {
         )
     }
 
+    private func updatePlatterViewGlassAndOutline(
+        _ platter: UIView,
+        effectiveFill: Double,
+        threshold: CGFloat
+    ) {
+        let getGlassSel = NSSelectorFromString("_glassEffect")
+        let setGlassSel = NSSelectorFromString("_setGlassEffect:")
+
+        if savedPlatterGlassEffect == nil,
+           platter.responds(to: getGlassSel),
+           let currentEffect = platter.perform(getGlassSel)?.takeUnretainedValue() {
+            savedPlatterGlassEffect = currentEffect
+        }
+
+        if isMergedIntoSheet {
+            if platter.responds(to: setGlassSel) {
+                _ = platter.perform(setGlassSel, with: nil)
+            }
+            platter.backgroundColor = .clear
+            platter.layer.borderWidth = 0
+            platter.layer.shadowOpacity = 0
+        } else {
+            if let savedEffect = savedPlatterGlassEffect,
+               platter.responds(to: getGlassSel),
+               platter.responds(to: setGlassSel),
+               platter.perform(getGlassSel)?.takeUnretainedValue() == nil {
+                _ = platter.perform(setGlassSel, with: savedEffect)
+            }
+            platter.setNeedsLayout()
+        }
+
+        if let sublayers = platter.layer.sublayers {
+            for layer in sublayers where !(layer.delegate is UIView) {
+                if layer.bounds.width >= threshold {
+                    layer.opacity = Float(isMergedIntoSheet ? 0.0 : effectiveFill)
+                }
+            }
+        }
+    }
+
     private func updateSubtreeForPlatterMerge(
         in view: UIView,
         barWidth: CGFloat,
         threshold: CGFloat,
         targetAlpha: CGFloat
     ) {
+        let className = String(describing: type(of: view))
+        if className.contains("LiquidLens") || className.contains("TabSelection") || className.contains("BadgeContainer") {
+            return
+        }
+
         if view !== self {
             let isFullWidth = view.bounds.width >= threshold
             let hasTabOrPill = Self.subtreeContainsTabOrPillElement(view, barWidth: barWidth, threshold: threshold)
 
             if isFullWidth && !hasTabOrPill {
-                // Vue d'arrière-plan, verre externe ou contour (outline) global de la TabBar :
-                // disparaît quand la sheet est réduite pour se fondre dans la sheet.
                 view.alpha = targetAlpha
                 return
             }
 
-            if isFullWidth && hasTabOrPill {
-                if isMergedIntoSheet {
-                    view.backgroundColor = .clear
-                    view.layer.borderWidth = 0
-                    view.layer.shadowOpacity = 0
-                }
+            if isFullWidth && hasTabOrPill && isMergedIntoSheet {
+                view.backgroundColor = .clear
+                view.layer.borderWidth = 0
+                view.layer.shadowOpacity = 0
             }
         }
 
-        // Masquer également les sous-calques CALayer directs (rim/stroke/shadow/backdrop) de pleine largeur
         if let sublayers = view.layer.sublayers {
             for layer in sublayers {
                 if layer.delegate is UIView {
@@ -642,8 +733,6 @@ public final class MorphingPlatterUITabBar: UITabBar {
         if view is UIControl {
             return true
         }
-        // Préserver la pilule de sélection de l'onglet actif ainsi que la bulle loupe réfractive
-        // (dont la largeur est celle d'un onglet : entre 14 % et 58 % de la largeur totale de la barre).
         let w = view.bounds.width
         let h = view.bounds.height
         if w >= barWidth * 0.14 && w < threshold && h >= 30 {
@@ -658,12 +747,13 @@ public final class MorphingPlatterUITabBar: UITabBar {
     }
 }
 
-// MARK: - Native UIKit UITabBar Bridge (Bulle Loupe Réfractive Native iOS 26 & Concentricité Écran)
+// MARK: - Native UIKit UITabBar Bridge (Dalle en Verre Réfractive Native iOS 26+)
 
 public struct NativeLiquidGlassUITabBarRepresentable: UIViewRepresentable {
     @Binding public var selectedTab: String
     public var tabs: [LiquidGlassTabItem]
     public var isMergedIntoSheet: Bool
+    public var expandProgress: CGFloat
     public var onSelectTab: ((String) -> Void)?
     public var onVerticalSwipe: ((Bool) -> Void)?
 
@@ -671,12 +761,14 @@ public struct NativeLiquidGlassUITabBarRepresentable: UIViewRepresentable {
         selectedTab: Binding<String>,
         tabs: [LiquidGlassTabItem] = LiquidGlassTabItem.unifiedTabs,
         isMergedIntoSheet: Bool = false,
+        expandProgress: CGFloat = 1.0,
         onSelectTab: ((String) -> Void)? = nil,
         onVerticalSwipe: ((Bool) -> Void)? = nil
     ) {
         self._selectedTab = selectedTab
         self.tabs = tabs
         self.isMergedIntoSheet = isMergedIntoSheet
+        self.expandProgress = expandProgress
         self.onSelectTab = onSelectTab
         self.onVerticalSwipe = onVerticalSwipe
     }
@@ -690,17 +782,17 @@ public struct NativeLiquidGlassUITabBarRepresentable: UIViewRepresentable {
         tabBar.delegate = context.coordinator
         tabBar.tintColor = .systemBlue
         tabBar.isTranslucent = true
-        // Important : ne pas clipper la bulle loupe Liquid Glass d'iOS 26 qui déborde verticalement au glissement
+        // Important : ne pas clipper la dalle en verre Liquid Glass d'iOS 26+ qui se soulève au glissement
         tabBar.clipsToBounds = false
+        tabBar.expandProgress = expandProgress
         tabBar.isMergedIntoSheet = isMergedIntoSheet
 
         let items: [UITabBarItem] = tabs.enumerated().map { index, tab in
-            let item = UITabBarItem(
+            UITabBarItem(
                 title: tab.label,
                 image: UIImage(systemName: tab.icon),
                 tag: index
             )
-            return item
         }
         tabBar.items = items
 
@@ -709,7 +801,7 @@ public struct NativeLiquidGlassUITabBarRepresentable: UIViewRepresentable {
             tabBar.selectedItem = items[selectedIndex]
         }
 
-        // Geste vertical simultané permettant aussi d'ouvrir/réduire la sheet en glissant verticalement sur la Tab Bar
+        // Geste vertical simultané permettant d'ouvrir/réduire la sheet en glissant verticalement sur la Tab Bar
         let verticalPan = UIPanGestureRecognizer(
             target: context.coordinator,
             action: #selector(Coordinator.handleVerticalPan(_:))
@@ -725,6 +817,7 @@ public struct NativeLiquidGlassUITabBarRepresentable: UIViewRepresentable {
     public func updateUIView(_ tabBar: MorphingPlatterUITabBar, context: Context) {
         context.coordinator.parent = self
         tabBar.clipsToBounds = false
+        tabBar.expandProgress = expandProgress
         tabBar.isMergedIntoSheet = isMergedIntoSheet
         guard let items = tabBar.items else { return }
 
@@ -748,6 +841,20 @@ public struct NativeLiquidGlassUITabBarRepresentable: UIViewRepresentable {
             let index = item.tag
             guard index >= 0 && index < parent.tabs.count else { return }
             let chosenTabId = parent.tabs[index].id
+
+            if chosenTabId == "AI" {
+                // Conserver l'onglet actif sous-jacent et laisser la pilule dessus pendant l'ouverture de la sheet IA
+                if let items = tabBar.items,
+                   let currentIdx = parent.tabs.firstIndex(where: { $0.id == parent.selectedTab }),
+                   currentIdx < items.count {
+                    DispatchQueue.main.async {
+                        tabBar.selectedItem = items[currentIdx]
+                    }
+                }
+                parent.onSelectTab?("AI")
+                return
+            }
+
             if parent.selectedTab != chosenTabId {
                 parent.selectedTab = chosenTabId
             }
@@ -758,7 +865,7 @@ public struct NativeLiquidGlassUITabBarRepresentable: UIViewRepresentable {
             guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
             let velocity = pan.velocity(in: pan.view)
             // Ne déclencher que sur un mouvement majoritairement vertical afin de laisser 100 %
-            // de liberté à la loupe réfractive horizontale native de la UITabBar
+            // de liberté à la dalle en verre horizontale native de la UITabBar
             return abs(velocity.y) > abs(velocity.x) * 1.35
         }
 
@@ -789,155 +896,17 @@ public struct NativeLiquidGlassUITabBarRepresentable: UIViewRepresentable {
         }
     }
 }
-
-// MARK: - Architecture Multi-Fenêtre PassThroughOverlayWindow (Indépendance Totale Sheet / TabBar)
-
-/// Fenêtre secondaire transparente positionnée au-dessus de la `.sheet` système (`windowLevel = .normal + 1`).
-/// Intercepte exclusivement les touchers sur les contrôles interactifs (comme la `UITabBar` Liquid Glass
-/// ou la pilule d'itinéraire actif) et laisse passer 100 % des autres événements vers la `.sheet` et la carte.
-public final class PassThroughOverlayWindow: UIWindow {
-    public override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        guard let rootView = self.rootViewController?.view else { return nil }
-        guard let hitView = super.hitTest(point, with: event) else { return nil }
-
-        // Laisser traverser les touchers qui tombent sur le fond transparent du UIHostingController
-        if hitView === rootView {
-            return nil
-        }
-
-        // Vérifier si la vue touchée appartient à un contrôle UIKit natif (ex: UITabBar) ou possède une région interactive
-        if isInteractiveTarget(hitView, at: point, in: rootView, with: event) {
-            return hitView
-        }
-
-        return nil
-    }
-
-    private func isInteractiveTarget(_ hitView: UIView, at windowPoint: CGPoint, in rootView: UIView, with event: UIEvent?) -> Bool {
-        // 1. Si le toucher tombe dans une UITabBar ou l'une de ses sous-vues :
-        // laisser passer la bande supérieure au niveau du Grabber central pour que la poignée de la sheet reste 100 % saisissable.
-        var current: UIView? = hitView
-        while let view = current {
-            if let tabBar = view as? UITabBar {
-                let localPoint = tabBar.convert(windowPoint, from: self)
-                let isInCenterGrabberColumn = abs(windowPoint.x - self.bounds.midX) < 56
-                if isInCenterGrabberColumn && localPoint.y < 14 {
-                    return false
-                }
-                return true
-            }
-            if view is UIControl {
-                // Vérifier également si ce UIControl est dans une UITabBar sous la zone de la poignée centrale
-                if let parentTabBar = findParentTabBar(of: view) {
-                    let localPoint = parentTabBar.convert(windowPoint, from: self)
-                    let isInCenterGrabberColumn = abs(windowPoint.x - self.bounds.midX) < 56
-                    if isInCenterGrabberColumn && localPoint.y < 14 {
-                        return false
-                    }
-                }
-                return true
-            }
-            current = view.superview
-        }
-
-        // 2. Recherche récursive des UITabBar ou zones interactives dont la frame contient le point
-        return containsInteractiveControl(in: rootView, windowPoint: windowPoint, event: event, hitView: hitView)
-    }
-
-    private func findParentTabBar(of view: UIView) -> UITabBar? {
-        var current = view.superview
-        while let v = current {
-            if let tabBar = v as? UITabBar {
-                return tabBar
-            }
-            current = v.superview
-        }
-        return nil
-    }
-
-    private func containsInteractiveControl(in view: UIView, windowPoint: CGPoint, event: UIEvent?, hitView: UIView) -> Bool {
-        for subview in view.subviews {
-            guard !subview.isHidden && subview.alpha > 0.01 else { continue }
-            let localPoint = subview.convert(windowPoint, from: self)
-            if subview.point(inside: localPoint, with: event) {
-                if let tabBar = subview as? UITabBar {
-                    let isInCenterGrabberColumn = abs(windowPoint.x - self.bounds.midX) < 56
-                    if isInCenterGrabberColumn && localPoint.y < 14 {
-                        return false
-                    }
-                    return true
-                }
-                if subview is UIControl {
-                    return true
-                }
-                // Pour la pilule SwiftUI ActiveRouteResumePill (située juste au-dessus de la TabBar, hauteur <= 90pt)
-                if subview.frame.height > 20 && subview.frame.height <= 90 && windowPoint.y >= (self.bounds.height - 190) {
-                    if hitView !== view && !(SubtreeContainsOnlyHostingBackground(hitView)) {
-                        return true
-                    }
-                }
-                if containsInteractiveControl(in: subview, windowPoint: windowPoint, event: event, hitView: hitView) {
-                    return true
-                }
-            }
-        }
-        return false
-    }
-
-    private func SubtreeContainsOnlyHostingBackground(_ view: UIView) -> Bool {
-        let typeName = String(describing: type(of: view))
-        return typeName.contains("UIHostingView")
-    }
-}
-
-/// Gestionnaire singleton de la fenêtre PassThrough contenant la TabBar flottante Liquid Glass
-@MainActor
-public final class FloatingTabBarWindowManager {
-    public static let shared = FloatingTabBarWindowManager()
-    private var overlayWindow: PassThroughOverlayWindow?
-
-    private init() {}
-
-    public func showOverlay<Content: View>(@ViewBuilder content: () -> Content) {
-        if let existingWindow = overlayWindow,
-           let hosting = existingWindow.rootViewController as? UIHostingController<Content> {
-            hosting.rootView = content()
-            existingWindow.isHidden = false
-            return
-        }
-
-        guard let windowScene = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .first(where: { $0.activationState == .foregroundActive || $0.activationState == .foregroundInactive })
-            ?? UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first
-        else { return }
-
-        let window = PassThroughOverlayWindow(windowScene: windowScene)
-        window.windowLevel = UIWindow.Level.normal + 1
-        window.backgroundColor = .clear
-
-        let hostingController = UIHostingController(rootView: content())
-        hostingController.view.backgroundColor = .clear
-        hostingController.sizingOptions = []
-
-        window.rootViewController = hostingController
-        window.isHidden = false
-        self.overlayWindow = window
-    }
-
-    public func setHidden(_ hidden: Bool) {
-        overlayWindow?.isHidden = hidden
-    }
-}
 #endif
 
-/// Barre d'onglets flottante native iOS 26 inspirée de l'application Localiser (Find My).
-/// Utilise `NativeLiquidGlassUITabBarRepresentable` pour bénéficier de la vraie capsule Liquid Glass
-/// d'Apple, de la concentricité exacte avec les coins de l'écran et de la loupe réfractive au glissement du doigt.
+/// Barre d'onglets flottante native iOS 26+ inspirée de l'application Localiser (Find My).
+/// Utilise `NativeLiquidGlassUITabBarRepresentable` directement dans la `.sheet` pour bénéficier
+/// de l'animation native Apple Liquid Glass (dalle en verre qui se soulève et suit le doigt au glissement)
+/// tout en se fondant dans la feuille modale au palier réduit.
 public struct LiquidGlassFloatingTabBar: View {
     @Binding public var selectedTab: String
     public var tabs: [LiquidGlassTabItem]
     public var isMergedIntoSheet: Bool
+    public var expandProgress: CGFloat
     public var onSelectTab: ((String) -> Void)?
     public var onVerticalSwipe: ((Bool) -> Void)?
 
@@ -945,12 +914,14 @@ public struct LiquidGlassFloatingTabBar: View {
         selectedTab: Binding<String>,
         tabs: [LiquidGlassTabItem] = LiquidGlassTabItem.unifiedTabs,
         isMergedIntoSheet: Bool = false,
+        expandProgress: CGFloat = 1.0,
         onSelectTab: ((String) -> Void)? = nil,
         onVerticalSwipe: ((Bool) -> Void)? = nil
     ) {
         self._selectedTab = selectedTab
         self.tabs = tabs
         self.isMergedIntoSheet = isMergedIntoSheet
+        self.expandProgress = expandProgress
         self.onSelectTab = onSelectTab
         self.onVerticalSwipe = onVerticalSwipe
     }
@@ -961,10 +932,11 @@ public struct LiquidGlassFloatingTabBar: View {
             selectedTab: $selectedTab,
             tabs: tabs,
             isMergedIntoSheet: isMergedIntoSheet,
+            expandProgress: expandProgress,
             onSelectTab: onSelectTab,
             onVerticalSwipe: onVerticalSwipe
         )
-        .frame(height: 58)
+        .frame(height: 62)
         #else
         EmptyView()
         #endif

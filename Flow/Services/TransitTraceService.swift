@@ -61,6 +61,7 @@ final class TransitTraceService: @unchecked Sendable {
         do {
             let data = try Data(contentsOf: url)
             buildGraphs(from: data)
+            loadGPEGraphs()
             isLoaded = true
             print("✅ [TransitTraceService] \(lineGraphs.count) graphes de lignes ferrées chargés avec succès")
         } catch {
@@ -128,6 +129,68 @@ final class TransitTraceService: @unchecked Sendable {
         }
 
         // Construire les graphes pour chaque ligne
+        buildLineGraphs(from: rawSegmentsByLine)
+    }
+
+    /// Charge les tracés du Grand Paris Express (15, 16, 17, 18) depuis `projets_lignes_idf.geojson`
+    private func loadGPEGraphs() {
+        guard let url = Bundle.main.url(forResource: "projets_lignes_idf", withExtension: "geojson") ??
+                Bundle.main.url(forResource: "projets_lignes_idf", withExtension: "geojson", subdirectory: "Data") ??
+                Bundle.main.url(forResource: "projets_lignes_idf", withExtension: "geojson", subdirectory: "Flow/Data"),
+              let data = try? Data(contentsOf: url) else {
+            return
+        }
+
+        struct GPEProjGeometry: Decodable {
+            let type: String
+            let lineCoordinates: [[[Double]]]
+
+            enum CodingKeys: String, CodingKey { case type, coordinates }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.type = try container.decode(String.self, forKey: .type)
+                if self.type == "LineString" {
+                    let coords = try container.decode([[Double]].self, forKey: .coordinates)
+                    self.lineCoordinates = [coords]
+                } else if self.type == "MultiLineString" {
+                    let coords = try container.decode([[[Double]]].self, forKey: .coordinates)
+                    self.lineCoordinates = coords
+                } else {
+                    self.lineCoordinates = []
+                }
+            }
+        }
+
+        struct GPEProjProperties: Decodable { let indice: String? }
+        struct GPEProjFeature: Decodable {
+            let properties: GPEProjProperties
+            let geometry: GPEProjGeometry
+        }
+        struct GPEProjCollection: Decodable { let features: [GPEProjFeature] }
+
+        guard let collection = try? JSONDecoder().decode(GPEProjCollection.self, from: data) else { return }
+
+        var rawSegmentsByLine: [String: [[CLLocationCoordinate2D]]] = [:]
+        for feature in collection.features {
+            guard let indice = feature.properties.indice,
+                  ["15", "16", "17", "18"].contains(indice) else { continue }
+            let groupKey = "METRO_\(indice)"
+            for lineCoords in feature.geometry.lineCoordinates {
+                let segCoords = lineCoords.compactMap { pt -> CLLocationCoordinate2D? in
+                    guard pt.count >= 2 else { return nil }
+                    return CLLocationCoordinate2D(latitude: pt[1], longitude: pt[0])
+                }
+                if segCoords.count >= 2 {
+                    rawSegmentsByLine[groupKey, default: []].append(segCoords)
+                }
+            }
+        }
+
+        buildLineGraphs(from: rawSegmentsByLine)
+    }
+
+    private func buildLineGraphs(from rawSegmentsByLine: [String: [[CLLocationCoordinate2D]]]) {
         for (groupKey, segments) in rawSegmentsByLine {
             let components = groupKey.components(separatedBy: "_")
             let lineTypeStr = components[0]
@@ -337,12 +400,15 @@ final class TransitTraceService: @unchecked Sendable {
             }
 
             if allSucceeded && stitched.count > 2 {
-                return stitched
+                return MapDataService.smoothCoordinates(stitched)
             }
         }
 
         // Sinon ou en cas d'échec sur les intermédiaires, chercher le chemin direct from -> to sur le réseau ferré
-        return findPath(in: graph, from: from, to: to)
+        if let direct = findPath(in: graph, from: from, to: to) {
+            return MapDataService.smoothCoordinates(direct)
+        }
+        return nil
     }
 
     private func findPath(
@@ -404,7 +470,6 @@ final class TransitTraceService: @unchecked Sendable {
 
         // Assembler les coordonnées
         var result: [CLLocationCoordinate2D] = []
-        result.append(from)
 
         for step in segmentsInOrder {
             let seg = graph.segments[step.segmentIndex]
@@ -418,7 +483,13 @@ final class TransitTraceService: @unchecked Sendable {
             }
         }
 
-        if let last = result.last, distanceMeters(from: last, to: to) >= 5 {
+        if let first = result.first, distanceMeters(from: from, to: first) > 120 {
+            result.insert(from, at: 0)
+        } else if result.isEmpty {
+            result.append(from)
+        }
+
+        if let last = result.last, distanceMeters(from: last, to: to) > 120 {
             result.append(to)
         }
 
