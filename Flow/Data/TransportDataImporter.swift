@@ -82,6 +82,67 @@ actor TransportDataImporter {
         )
         return try modelContext.fetch(fetchDescriptor)
     }
+
+    /// Recherche asynchrone des arrêts SwiftData hors du `@MainActor` et retourne des modèles `StopPoint` `Sendable`.
+    func searchBusStops(variants: [String], busOnly: Bool = true, fetchLimit: Int = 80) throws -> [StopPoint] {
+        var seenIds = Set<String>()
+        var results: [StopPoint] = []
+
+        for variant in variants.prefix(6) {
+            var descriptor: FetchDescriptor<StopPointModel>
+            if busOnly {
+                descriptor = FetchDescriptor<StopPointModel>(
+                    predicate: #Predicate<StopPointModel> { stop in
+                        stop.type == "Bus" && stop.name.contains(variant)
+                    },
+                    sortBy: [SortDescriptor(\.name, order: .forward)]
+                )
+            } else {
+                descriptor = FetchDescriptor<StopPointModel>(
+                    predicate: #Predicate<StopPointModel> { stop in
+                        stop.name.contains(variant)
+                    },
+                    sortBy: [SortDescriptor(\.name, order: .forward)]
+                )
+            }
+            descriptor.fetchLimit = fetchLimit
+
+            let fetched = try modelContext.fetch(descriptor)
+            for entity in fetched where seenIds.insert(entity.id).inserted {
+                let type = Self.mapTransportType(entity.type)
+                results.append(
+                    StopPoint(
+                        id: entity.id,
+                        stopAreaId: entity.stopAreaId,
+                        name: entity.name,
+                        coordinate: CLLocationCoordinate2D(latitude: entity.latitude, longitude: entity.longitude),
+                        type: type,
+                        lineName: entity.lineName
+                    )
+                )
+            }
+        }
+
+        return results
+    }
+
+    private static func mapTransportType(_ typeStr: String) -> TransportType {
+        let folded = typeStr.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+        if folded.contains("rer") { return .rer }
+        if folded.contains("metro") { return .metro }
+        if folded.contains("tram") { return .tram }
+        if folded.contains("train") || folded.contains("transilien") || folded.contains("rail") { return .transilien }
+        return .bus
+    }
+
+    func fetchStops(lineName: String, typeRawValue: String) throws -> [StopPointModel] {
+        let fetchDescriptor = FetchDescriptor<StopPointModel>(
+            predicate: #Predicate<StopPointModel> {
+                $0.lineName == lineName && $0.type == typeRawValue
+            }
+        )
+        return try modelContext.fetch(fetchDescriptor)
+    }
     
     private func cleanStationName(_ name: String) -> String {
         var clean = name

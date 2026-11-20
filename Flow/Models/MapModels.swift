@@ -124,6 +124,26 @@ nonisolated struct StationLine: Hashable, Identifiable, Codable, Sendable {
             return "bus\(name)"
         }
     }
+
+    nonisolated private static func displaySortKey(for line: StationLine) -> String {
+        let trimmed = line.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if line.type == .tram {
+            let upper = trimmed.uppercased()
+            if upper.hasPrefix("T") && upper.count > 1 {
+                return String(trimmed.dropFirst())
+            }
+        }
+        return trimmed
+    }
+
+    nonisolated static func isOrderedBeforeForDisplay(_ a: StationLine, _ b: StationLine) -> Bool {
+        let rankA = a.type.displayOrderRank
+        let rankB = b.type.displayOrderRank
+        if rankA != rankB {
+            return rankA < rankB
+        }
+        return displaySortKey(for: a).localizedStandardCompare(displaySortKey(for: b)) == .orderedAscending
+    }
 }
 
 // Modèle pour un arrêt (Quai individuel)
@@ -196,10 +216,167 @@ struct MapStation: Identifiable, Equatable, Codable, Sendable {
     }
 }
 
+/// Règle de regroupement d'un grand pôle parisien multi-stations (ex: Châtelet–Les Halles, Saint-Lazare–Haussmann–Auber).
+nonisolated struct MegaPoleRule: Sendable {
+    let key: String
+    let displayName: String
+    let anchorLatitude: Double
+    let anchorLongitude: Double
+    let maxRadiusMeters: CLLocationDistance
+    let keywords: [String]
+    let excludedKeywords: [String]
+
+    nonisolated func matches(_ station: MapStation) -> Bool {
+        let hasNonBus = station.lines.contains { $0.type != .bus } || station.mainType != .bus
+        guard hasNonBus else { return false }
+
+        let normalizedName = station.name.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+        guard excludedKeywords.allSatisfy({ !normalizedName.contains($0) }) else { return false }
+        guard keywords.contains(where: { normalizedName.contains($0) }) else { return false }
+
+        let anchor = CLLocation(latitude: anchorLatitude, longitude: anchorLongitude)
+        let stationLoc = CLLocation(latitude: station.coordinate.latitude, longitude: station.coordinate.longitude)
+        return stationLoc.distance(from: anchor) <= maxRadiusMeters
+    }
+}
+
 // Service de données pour la carte
 @MainActor
 class MapDataService: ObservableObject {
     static let shared = MapDataService()
+
+    nonisolated static let megaPoleRules: [MegaPoleRule] = [
+        MegaPoleRule(
+            key: "chatelet_les_halles",
+            displayName: "Châtelet - Les Halles",
+            anchorLatitude: 48.8598,
+            anchorLongitude: 2.3468,
+            maxRadiusMeters: 650,
+            keywords: ["chatelet", "les halles"],
+            excludedKeywords: []
+        ),
+        MegaPoleRule(
+            key: "saint_lazare_haussmann_auber",
+            displayName: "Saint-Lazare - Haussmann - Auber",
+            anchorLatitude: 48.8740,
+            anchorLongitude: 2.3278,
+            maxRadiusMeters: 750,
+            keywords: ["saint-lazare", "haussmann", "auber", "havre-caumartin", "havre - caumartin", "opera"],
+            excludedKeywords: []
+        ),
+        MegaPoleRule(
+            key: "la_defense",
+            displayName: "La Défense",
+            anchorLatitude: 48.8919,
+            anchorLongitude: 2.2382,
+            maxRadiusMeters: 700,
+            keywords: ["la defense"],
+            excludedKeywords: ["esplanade"]
+        ),
+        MegaPoleRule(
+            key: "cdg_etoile",
+            displayName: "Charles de Gaulle - Étoile",
+            anchorLatitude: 48.8738,
+            anchorLongitude: 2.2950,
+            maxRadiusMeters: 500,
+            keywords: ["charles de gaulle", "etoile"],
+            excludedKeywords: ["roissy", "aeroport", "cdg"]
+        ),
+        MegaPoleRule(
+            key: "nation",
+            displayName: "Nation",
+            anchorLatitude: 48.8483,
+            anchorLongitude: 2.3959,
+            maxRadiusMeters: 500,
+            keywords: ["nation"],
+            excludedKeywords: ["assemblee", "nationale", "international"]
+        ),
+        MegaPoleRule(
+            key: "gare_du_nord",
+            displayName: "Gare du Nord",
+            anchorLatitude: 48.8809,
+            anchorLongitude: 2.3553,
+            maxRadiusMeters: 600,
+            keywords: ["gare du nord", "magenta", "la chapelle"],
+            excludedKeywords: ["porte de la chapelle"]
+        ),
+        MegaPoleRule(
+            key: "gare_de_lest",
+            displayName: "Gare de l'Est",
+            anchorLatitude: 48.8763,
+            anchorLongitude: 2.3592,
+            maxRadiusMeters: 500,
+            keywords: ["gare de l'est", "chateau-landon"],
+            excludedKeywords: ["souppes"]
+        ),
+        MegaPoleRule(
+            key: "gare_de_lyon",
+            displayName: "Gare de Lyon",
+            anchorLatitude: 48.8448,
+            anchorLongitude: 2.3735,
+            maxRadiusMeters: 550,
+            keywords: ["gare de lyon"],
+            excludedKeywords: []
+        ),
+        MegaPoleRule(
+            key: "montparnasse",
+            displayName: "Montparnasse",
+            anchorLatitude: 48.8422,
+            anchorLongitude: 2.3219,
+            maxRadiusMeters: 650,
+            keywords: ["montparnasse"],
+            excludedKeywords: []
+        ),
+        MegaPoleRule(
+            key: "saint_michel_notre_dame",
+            displayName: "Saint-Michel - Notre-Dame",
+            anchorLatitude: 48.8534,
+            anchorLongitude: 2.3442,
+            maxRadiusMeters: 500,
+            keywords: ["saint-michel", "cluny"],
+            excludedKeywords: ["sur-orge"]
+        ),
+        MegaPoleRule(
+            key: "porte_maillot",
+            displayName: "Porte Maillot",
+            anchorLatitude: 48.8780,
+            anchorLongitude: 2.2825,
+            maxRadiusMeters: 500,
+            keywords: ["porte maillot"],
+            excludedKeywords: []
+        ),
+        MegaPoleRule(
+            key: "gare_dausterlitz",
+            displayName: "Gare d'Austerlitz",
+            anchorLatitude: 48.8423,
+            anchorLongitude: 2.3652,
+            maxRadiusMeters: 500,
+            keywords: ["austerlitz"],
+            excludedKeywords: []
+        ),
+        MegaPoleRule(
+            key: "bercy",
+            displayName: "Bercy",
+            anchorLatitude: 48.8400,
+            anchorLongitude: 2.3794,
+            maxRadiusMeters: 500,
+            keywords: ["bercy"],
+            excludedKeywords: ["cour saint", "cour st"]
+        ),
+        MegaPoleRule(
+            key: "republique",
+            displayName: "République",
+            anchorLatitude: 48.8675,
+            anchorLongitude: 2.3638,
+            maxRadiusMeters: 450,
+            keywords: ["republique"],
+            excludedKeywords: []
+        )
+    ]
+
+    nonisolated static func matchingMegaPoleRule(for station: MapStation) -> MegaPoleRule? {
+        megaPoleRules.first { $0.matches(station) }
+    }
 
     @Published var lines: [LineTrace] = []
     @Published var visibleStations: [MapStation] = []  // Stations visibles sur la carte
@@ -246,6 +423,10 @@ class MapDataService: ObservableObject {
     // Cache des overlays complets (Calculés une seule fois pour éviter le freeze au chargement)
     @Published var cachedOverlays: [ColoredPolyline] = []
 
+    private var isLoadingData: Bool = false
+    private let busColorsLock = NSLock()
+    nonisolated(unsafe) private var hasPreloadedBusColors: Bool = false
+
     nonisolated private var cacheURL: URL {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
             .appendingPathComponent("lineTraces.json")
@@ -274,12 +455,13 @@ class MapDataService: ObservableObject {
 
     nonisolated private func loadStationsFromCache() -> Bool {
         guard FileManager.default.fileExists(atPath: stationsCacheURL.path) else { return false }
+        let token = FlowPerformanceProfiler.beginInterval("LoadStationsCache")
         do {
             let data = try Data(contentsOf: stationsCacheURL)
             let cached = try JSONDecoder().decode(CacheableStations.self, from: data)
             print("✅ Loaded stations from cache: \(cached.allStations.count) stations, \(cached.unmergedStations.count) unmerged")
             
-            self.loadColorsFromCache()
+            _ = self.loadColorsFromCache()
             
             DispatchQueue.main.async {
                 self.unmergedStations = cached.unmergedStations
@@ -288,8 +470,10 @@ class MapDataService: ObservableObject {
                 self.majorHubs = cached.allStations.filter { $0.isHub }
                 self.stationsRevision += 1
             }
+            FlowPerformanceProfiler.endInterval(token, detail: "stations=\(cached.allStations.count)")
             return true
         } catch {
+            FlowPerformanceProfiler.endInterval(token, detail: "error")
             print("⚠️ Cache stations read error: \(error)")
             return false
         }
@@ -341,11 +525,14 @@ class MapDataService: ObservableObject {
         }
     }
 
-    nonisolated private func loadColorsFromCache() {
+    @discardableResult
+    nonisolated private func loadColorsFromCache() -> Int {
+        var loadedCount = 0
         if FileManager.default.fileExists(atPath: colorsCacheURL.path) {
             do {
                 let data = try Data(contentsOf: colorsCacheURL)
                 let dict = try JSONDecoder().decode([String: String].self, from: data)
+                loadedCount = dict.count
                 var parsedColors: [String: Color] = [:]
                 for (name, hex) in dict {
                     let cleanHex = hex.replacingOccurrences(of: "#", with: "").uppercased()
@@ -365,8 +552,10 @@ class MapDataService: ObservableObject {
             }
         }
         
-        // Toujours précharger les couleurs des bus
-        self.preloadBusColors()
+        if loadedCount < 50 {
+            self.preloadBusColors()
+        }
+        return loadedCount
     }
 
     private func saveColorsToCache() {
@@ -376,16 +565,27 @@ class MapDataService: ObservableObject {
                 dict[name] = hex
             }
         }
-        do {
-            let data = try JSONEncoder().encode(dict)
-            try data.write(to: colorsCacheURL)
-            print("✅ Saved \(dict.count) colors to cache")
-        } catch {
-            print("⚠️ Colors cache write error: \(error)")
+        let targetURL = self.colorsCacheURL
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                let data = try JSONEncoder().encode(dict)
+                try data.write(to: targetURL)
+                print("✅ Saved \(dict.count) colors to cache")
+            } catch {
+                print("⚠️ Colors cache write error: \(error)")
+            }
         }
     }
 
     nonisolated private func preloadBusColors() {
+        busColorsLock.lock()
+        if hasPreloadedBusColors {
+            busColorsLock.unlock()
+            return
+        }
+        hasPreloadedBusColors = true
+        busColorsLock.unlock()
+
         DispatchQueue.global(qos: .userInitiated).async {
             guard let url = Bundle.main.url(forResource: "referentiel-des-lignes", withExtension: "geojson") else {
                 print("⚠️ Fichier referentiel-des-lignes.geojson introuvable.")
@@ -488,6 +688,9 @@ class MapDataService: ObservableObject {
                             count += 1
                         }
                     }
+                    if count > 0 {
+                        self.saveColorsToCache()
+                    }
                     print("🚌 [Preload Colors] \(count) couleurs de lignes de bus préchargées et regroupées depuis le référentiel.")
                 }
             } catch {
@@ -523,11 +726,13 @@ class MapDataService: ObservableObject {
 
     nonisolated private func loadTracesFromCache() -> Bool {
         guard FileManager.default.fileExists(atPath: cacheURL.path) else { return false }
+        let token = FlowPerformanceProfiler.beginInterval("LoadTracesCache")
         do {
             let data = try Data(contentsOf: cacheURL)
             let cached = try JSONDecoder().decode([CacheableLineTrace].self, from: data)
             let traces = cached.map { $0.toLineTrace() }
-            print("✅ Loaded \(traces.count) lines from cache")
+            let overlays = Self.buildOverlays(from: traces)
+            print("✅ Loaded \(traces.count) lines and \(overlays.count) overlays directly from cache")
             
             DispatchQueue.main.async {
                 self.lines = traces
@@ -540,19 +745,18 @@ class MapDataService: ObservableObject {
                         self.lineColorCache[name] = Color(hex: hex)
                     }
                 }
-                // Déclencher le calcul des overlays
-                Task {
-                    await self.precalculateOverlays()
-                }
+                self.cachedOverlays = overlays
             }
+            FlowPerformanceProfiler.endInterval(token, detail: "lines=\(traces.count),overlays=\(overlays.count)")
             return true
         } catch {
+            FlowPerformanceProfiler.endInterval(token, detail: "error")
             print("⚠️ Cache read error: \(error)")
             return false
         }
     }
 
-    private func saveTracesToCache(_ traces: [LineTrace]) {
+    nonisolated private func saveTracesToCache(_ traces: [LineTrace]) {
         let cacheable = traces.map { CacheableLineTrace(from: $0) }
         do {
             let data = try JSONEncoder().encode(cacheable)
@@ -801,16 +1005,15 @@ class MapDataService: ObservableObject {
             return
         }
         #endif
+        guard !isLoadingData && (allStations.isEmpty || cachedOverlays.isEmpty) else { return }
+        isLoadingData = true
         loadingProgress = 0.0
-        
-        // Précharger les couleurs de bus
-        self.preloadBusColors()
         
         let container = SwiftDataStack.shared.container
         
         let appVersion = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
         let cachedVersion = UserDefaults.standard.string(forKey: "cached_data_version")
-        let tracesVersion = "v7_parallel_crossings"
+        let tracesVersion = "v8_precomputed_offsets_snaps"
         let cachedTracesVersion = UserDefaults.standard.string(forKey: "cached_traces_version")
         if cachedVersion != appVersion || cachedTracesVersion != tracesVersion {
             print("🔄 Nouvelle version de l'application ou des tracés détectée (\(cachedVersion ?? "aucune") -> \(appVersion), \(cachedTracesVersion ?? "aucune") -> \(tracesVersion)). Purge du cache...")
@@ -820,6 +1023,7 @@ class MapDataService: ObservableObject {
             UserDefaults.standard.set(tracesVersion, forKey: "cached_traces_version")
         }
 
+        let loadToken = FlowPerformanceProfiler.beginInterval("MapDataLoad")
         DispatchQueue.global(qos: .userInitiated).async {
             // Tenter le chargement depuis le cache unifié
             let tracesLoaded = self.loadTracesFromCache()
@@ -827,14 +1031,18 @@ class MapDataService: ObservableObject {
             
             if tracesLoaded && stationsLoaded {
                 print("⚡️ Unified cache hit! Chargement instantané réussi.")
+                FlowPerformanceProfiler.endInterval(loadToken, detail: "CacheHit")
                 DispatchQueue.main.async {
                     self.loadingProgress = 1.0
+                    self.isLoadingData = false
                 }
                 return
             }
             
             // Sinon, chargement froid complet
             print("⏳ Unified cache miss. Démarrage du chargement froid...")
+            FlowPerformanceProfiler.endInterval(loadToken, detail: "ColdLoadStart")
+            self.preloadBusColors()
             // S'assurer que les caches partiels sont nettoyés pour éviter des états incohérents
             try? FileManager.default.removeItem(at: self.cacheURL)
             try? FileManager.default.removeItem(at: self.stationsCacheURL)
@@ -2029,20 +2237,282 @@ class MapDataService: ObservableObject {
         }
     }
 
+    nonisolated private static func lineLookupKey(_ name: String, type: TransportType) -> String {
+        let upper = name.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        if type == .tram && upper.hasPrefix("T") && upper.count > 1 {
+            return String(upper.dropFirst())
+        }
+        return upper
+    }
+
+    nonisolated private static func normalizedStopGroupName(_ name: String) -> String {
+        name.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    nonisolated private static func traceDirectionalStops(
+        start: MapStation,
+        target: MapStation,
+        pool: [MapStation],
+        avoidDuplicateNames: Bool
+    ) -> [MapStation] {
+        var path: [MapStation] = [start]
+        var usedIds = Set<String>([start.id])
+        var usedNames = Set<String>([normalizedStopGroupName(start.name)])
+        var prevVec: (dx: Double, dy: Double)? = nil
+
+        while true {
+            guard let curr = path.last else { break }
+            let currLoc = CLLocation(latitude: curr.coordinate.latitude, longitude: curr.coordinate.longitude)
+            let targetLoc = CLLocation(latitude: target.coordinate.latitude, longitude: target.coordinate.longitude)
+
+            if curr.id == target.id { break }
+            if path.count >= 3 && currLoc.distance(from: targetLoc) < 220.0 {
+                break
+            }
+
+            let candidates = pool.filter { cand in
+                guard !usedIds.contains(cand.id) else { return false }
+                if avoidDuplicateNames && cand.id != target.id {
+                    return !usedNames.contains(normalizedStopGroupName(cand.name))
+                }
+                return true
+            }
+            guard !candidates.isEmpty else { break }
+
+            let goalDx = target.coordinate.longitude - curr.coordinate.longitude
+            let goalDy = target.coordinate.latitude - curr.coordinate.latitude
+            let goalLen = hypot(goalDx, goalDy)
+            let goalUnit = goalLen > 0 ? (dx: goalDx / goalLen, dy: goalDy / goalLen) : (dx: 0.0, dy: 0.0)
+
+            var bestCandidate: MapStation?
+            var bestScore = Double.greatestFiniteMagnitude
+            var bestRawDist = Double.greatestFiniteMagnitude
+            var bestStepUnit: (dx: Double, dy: Double)?
+
+            for cand in candidates {
+                let candLoc = CLLocation(latitude: cand.coordinate.latitude, longitude: cand.coordinate.longitude)
+                let dist = currLoc.distance(from: candLoc)
+                let dx = cand.coordinate.longitude - curr.coordinate.longitude
+                let dy = cand.coordinate.latitude - curr.coordinate.latitude
+                let len = hypot(dx, dy)
+                let stepUnit = len > 0 ? (dx: dx / len, dy: dy / len) : (dx: 0.0, dy: 0.0)
+
+                let goalAlign = stepUnit.dx * goalUnit.dx + stepUnit.dy * goalUnit.dy
+                let headingAlign = prevVec.map { stepUnit.dx * $0.dx + stepUnit.dy * $0.dy } ?? goalAlign
+                let score = dist * (1.0 - 0.28 * headingAlign - 0.16 * goalAlign)
+
+                if score < bestScore {
+                    bestScore = score
+                    bestRawDist = dist
+                    bestCandidate = cand
+                    bestStepUnit = stepUnit
+                }
+            }
+
+            guard let chosen = bestCandidate else { break }
+            if bestRawDist > 2500.0 && currLoc.distance(from: targetLoc) < 1200.0 {
+                break
+            }
+
+            path.append(chosen)
+            usedIds.insert(chosen.id)
+            usedNames.insert(normalizedStopGroupName(chosen.name))
+            if let unit = bestStepUnit, bestRawDist > 20.0 {
+                prevVec = unit
+            }
+            if chosen.id == target.id {
+                break
+            }
+        }
+
+        return path
+    }
+
+    nonisolated private static func buildOrderedLinePolylines(from stops: [MapStation]) -> [MKPolyline] {
+        guard stops.count >= 2 else { return [] }
+
+        let avgLat = stops.reduce(0.0) { $0 + $1.coordinate.latitude } / Double(stops.count)
+        let avgLon = stops.reduce(0.0) { $0 + $1.coordinate.longitude } / Double(stops.count)
+        let centroid = CLLocation(latitude: avgLat, longitude: avgLon)
+
+        // Trouver les deux extrémités globales de la ligne (diamètre approximatif)
+        let p0 = stops.max { a, b in
+            let locA = CLLocation(latitude: a.coordinate.latitude, longitude: a.coordinate.longitude)
+            let locB = CLLocation(latitude: b.coordinate.latitude, longitude: b.coordinate.longitude)
+            return locA.distance(from: centroid) < locB.distance(from: centroid)
+        } ?? stops[0]
+
+        let p0Loc = CLLocation(latitude: p0.coordinate.latitude, longitude: p0.coordinate.longitude)
+        let endB = stops.max { a, b in
+            let locA = CLLocation(latitude: a.coordinate.latitude, longitude: a.coordinate.longitude)
+            let locB = CLLocation(latitude: b.coordinate.latitude, longitude: b.coordinate.longitude)
+            return locA.distance(from: p0Loc) < locB.distance(from: p0Loc)
+        } ?? stops[stops.count - 1]
+
+        let endBLoc = CLLocation(latitude: endB.coordinate.latitude, longitude: endB.coordinate.longitude)
+        let startA = stops.max { a, b in
+            let locA = CLLocation(latitude: a.coordinate.latitude, longitude: a.coordinate.longitude)
+            let locB = CLLocation(latitude: b.coordinate.latitude, longitude: b.coordinate.longitude)
+            return locA.distance(from: endBLoc) < locB.distance(from: endBLoc)
+        } ?? p0
+
+        // Aller : startA -> endB (en évitant de passer deux fois par un arrêt de même nom sur sens opposés)
+        let path1 = traceDirectionalStops(start: startA, target: endB, pool: stops, avoidDuplicateNames: true)
+        let usedIds1 = Set(path1.map { $0.id })
+
+        // Retour : arrêts restants de endB -> startA (séparant les rues à sens unique)
+        let remaining = stops.filter { !usedIds1.contains($0.id) }
+        var rawPaths: [[CLLocationCoordinate2D]] = []
+        if path1.count >= 2 {
+            rawPaths.append(path1.map { $0.coordinate })
+        }
+
+        if remaining.count >= 2 {
+            let returnStart = remaining.min { a, b in
+                let locA = CLLocation(latitude: a.coordinate.latitude, longitude: a.coordinate.longitude)
+                let locB = CLLocation(latitude: b.coordinate.latitude, longitude: b.coordinate.longitude)
+                return locA.distance(from: endBLoc) < locB.distance(from: endBLoc)
+            } ?? remaining[0]
+
+            var returnPool = remaining
+            let returnStartLoc = CLLocation(latitude: returnStart.coordinate.latitude, longitude: returnStart.coordinate.longitude)
+            let returnStartCoordPrefix: [CLLocationCoordinate2D] =
+                (endBLoc.distance(from: returnStartLoc) > 40.0 && endBLoc.distance(from: returnStartLoc) < 600.0)
+                ? [endB.coordinate]
+                : []
+
+            if !returnPool.contains(where: { $0.id == startA.id }) {
+                let startALoc = CLLocation(latitude: startA.coordinate.latitude, longitude: startA.coordinate.longitude)
+                if remaining.contains(where: { CLLocation(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude).distance(from: startALoc) < 700.0 }) {
+                    returnPool.append(startA)
+                }
+            }
+
+            let path2 = traceDirectionalStops(start: returnStart, target: startA, pool: returnPool, avoidDuplicateNames: true)
+            if path2.count >= 2 {
+                rawPaths.append(returnStartCoordPrefix + path2.map { $0.coordinate })
+            }
+        }
+
+        return rawPaths.compactMap { coords in
+            let smoothed = Self.smoothCoordinates(coords, passes: 1, maxCornerOffsetMeters: 10.0)
+            guard smoothed.count >= 2 else { return nil }
+            return MKPolyline(coordinates: smoothed, count: smoothed.count)
+        }
+    }
+
+    func buildFocusedLinePreview(
+        lineName: String,
+        type: TransportType,
+        preferredColor: Color? = nil
+    ) async -> FocusedLinePreview? {
+        let targetKey = Self.lineLookupKey(lineName, type: type)
+
+        let matchingTrace = self.lines.first { trace in
+            let typeMatches = trace.type == type
+                || (type == .transilien && trace.type == .train)
+                || (type == .train && trace.type == .transilien)
+            return typeMatches && Self.lineLookupKey(trace.name, type: trace.type) == targetKey
+        }
+
+        var stops: [MapStation] = []
+        if type != .bus {
+            stops = self.allStations.filter { station in
+                station.lines.contains { line in
+                    let typeMatches = line.type == type
+                        || (type == .transilien && line.type == .train)
+                        || (type == .train && line.type == .transilien)
+                    return typeMatches && Self.lineLookupKey(line.name, type: line.type) == targetKey
+                }
+            }
+        }
+
+        if stops.isEmpty {
+            let container = SwiftDataStack.shared.container
+            let importer = TransportDataImporter(modelContainer: container)
+            do {
+                var entities = try await importer.fetchStops(lineName: lineName, typeRawValue: type.rawValue)
+                if entities.isEmpty && type == .tram {
+                    let altName = lineName.uppercased().hasPrefix("T")
+                        ? String(lineName.dropFirst())
+                        : "T\(lineName)"
+                    entities = try await importer.fetchStops(lineName: altName, typeRawValue: type.rawValue)
+                }
+
+                var grouped: [String: [StopPoint]] = [:]
+                for entity in entities {
+                    let stop = StopPoint(
+                        id: entity.id,
+                        stopAreaId: entity.stopAreaId,
+                        name: entity.name,
+                        coordinate: CLLocationCoordinate2D(latitude: entity.latitude, longitude: entity.longitude),
+                        type: type,
+                        lineName: lineName
+                    )
+                    let key = "\(entity.name)_\(entity.city)"
+                    grouped[key, default: []].append(stop)
+                }
+
+                let clusterRadius: CLLocationDistance = (type == .bus) ? 15.0 : 40.0
+                for (_, groupStops) in grouped {
+                    let clusters = MapDataService.clusterStops(groupStops, maxDistance: clusterRadius)
+                    for (clusterIndex, clusterStops) in clusters.enumerated() {
+                        guard let first = clusterStops.first else { continue }
+                        let totalLat = clusterStops.reduce(0.0) { $0 + $1.coordinate.latitude }
+                        let totalLon = clusterStops.reduce(0.0) { $0 + $1.coordinate.longitude }
+                        let center = CLLocationCoordinate2D(
+                            latitude: totalLat / Double(clusterStops.count),
+                            longitude: totalLon / Double(clusterStops.count)
+                        )
+                        let baseId = first.stopAreaId.isEmpty ? first.id : first.stopAreaId
+                        let stationId = clusters.count > 1 ? "\(baseId)_\(clusterIndex)" : baseId
+                        stops.append(
+                            MapStation(
+                                id: stationId,
+                                name: first.name,
+                                coordinate: center,
+                                platforms: clusterStops,
+                                isHub: false,
+                                mainType: type,
+                                lines: [StationLine(name: lineName, type: type)]
+                            )
+                        )
+                    }
+                }
+            } catch {
+                print("❌ [Line Preview] Error fetching stops for \(lineName): \(error)")
+            }
+        }
+
+        let polylines: [MKPolyline]
+        let showDirectionArrows: Bool
+        if let tracePolylines = matchingTrace?.polylines, !tracePolylines.isEmpty {
+            polylines = tracePolylines
+            showDirectionArrows = false
+        } else {
+            polylines = Self.buildOrderedLinePolylines(from: stops)
+            showDirectionArrows = !polylines.isEmpty
+        }
+
+        guard !stops.isEmpty || !polylines.isEmpty else { return nil }
+
+        let resolvedColor = preferredColor ?? matchingTrace?.color ?? resolveLineColor(lineName, type: type)
+        return FocusedLinePreview(
+            id: "\(type.rawValue)__\(lineName)",
+            lineName: lineName,
+            type: type,
+            color: resolvedColor,
+            polylines: polylines,
+            stops: stops,
+            showDirectionArrows: showDirectionArrows
+        )
+    }
+
     // Méthode asynchrone pour récupérer les stations dans une région (pour le bridge)
     func fetchStations(in region: MKCoordinateRegion) async -> [MapStation] {
         let center = region.center
         let span = region.span
-
-        // Choix de la source de données :
-        // 1. Dézoomé (delta >= 0.05) : pôles majeurs uniquement (majorHubs)
-        // 2. Zoomé (delta < 0.05) : toutes les stations fusionnées (allStations)
-        let source: [MapStation]
-        if span.latitudeDelta < 0.05 || self.majorHubs.isEmpty {
-            source = self.allStations
-        } else {
-            source = self.majorHubs
-        }
 
         let margin = 0.006
         let minLat = center.latitude - span.latitudeDelta / 2 - margin
@@ -2050,10 +2520,24 @@ class MapDataService: ObservableObject {
         let minLon = center.longitude - span.longitudeDelta / 2 - margin
         let maxLon = center.longitude + span.longitudeDelta / 2 + margin
 
-        var filtered = source.filter { station in
-            let lat = station.coordinate.latitude
-            let lon = station.coordinate.longitude
-            return lat >= minLat && lat <= maxLat && lon >= minLon && lon <= maxLon
+        // Choix de la source de données :
+        // 1. Dézoomé (delta >= 0.05) : pôles majeurs + stations membres des méga-pôles
+        // 2. Zoomé (delta < 0.05) : toutes les stations fusionnées (allStations)
+        var filtered: [MapStation]
+        if span.latitudeDelta < 0.05 || self.majorHubs.isEmpty || self.allStations.isEmpty {
+            let source = (span.latitudeDelta < 0.05 || self.majorHubs.isEmpty) ? self.allStations : self.majorHubs
+            filtered = source.filter { station in
+                let lat = station.coordinate.latitude
+                let lon = station.coordinate.longitude
+                return lat >= minLat && lat <= maxLat && lon >= minLon && lon <= maxLon
+            }
+        } else {
+            filtered = self.allStations.filter { station in
+                let lat = station.coordinate.latitude
+                let lon = station.coordinate.longitude
+                guard lat >= minLat && lat <= maxLat && lon >= minLon && lon <= maxLon else { return false }
+                return station.isHub || Self.matchingMegaPoleRule(for: station) != nil
+            }
         }
 
         // Si le zoom est très élevé, on ajoute les arrêts de bus
@@ -2157,62 +2641,105 @@ class MapDataService: ObservableObject {
 
     // MARK: - Overlay Precalculation (Anti-Freeze)
 
-    func precalculateOverlays() async {
+    nonisolated static func buildOverlays(from lines: [LineTrace]) -> [ColoredPolyline] {
+        let sortedLines = lines.sorted { $0.type.priority < $1.type.priority }
+        var casingOverlays: [ColoredPolyline] = []
+        var fillOverlays: [ColoredPolyline] = []
+
+        for line in sortedLines {
+            let isDashedLine = line.isDashed || ["15", "16", "17", "18"].contains(line.name)
+            let platformColor = MapPlatformColor(line.color)
+
+            for polyline in line.polylines {
+                if !isDashedLine {
+                    let casing = ColoredPolyline(
+                        points: polyline.points(), count: polyline.pointCount)
+                    casing.color = platformColor
+                    casing.lineName = line.name
+                    casing.type = line.type
+                    casing.isDashed = false
+                    casing.isCasing = true
+                    casingOverlays.append(casing)
+                }
+
+                let colored = ColoredPolyline(
+                    points: polyline.points(), count: polyline.pointCount)
+                colored.color = platformColor
+                colored.lineName = line.name
+                colored.type = line.type
+                colored.isDashed = isDashedLine
+                colored.isCasing = false
+                fillOverlays.append(colored)
+            }
+        }
+
+        return casingOverlays + fillOverlays
+    }
+
+    func precalculateOverlays(shouldPersistCache: Bool = false) async {
         print("⚙️ Initialisation du calcul des overlays, décalages parallèles et lissage des tracés...")
+        let token = FlowPerformanceProfiler.beginInterval("PrecalculateOverlays")
         let linesToProcess = self.lines
         let currentAllStations = self.allStations
-        let currentMajorHubs = self.majorHubs
+        let currentUnmergedStations = self.unmergedStations
+        let tracesURL = self.cacheURL
+        let stationsURL = self.stationsCacheURL
 
         // Ce calcul est lourd, on le fait hors du MainActor
-        let (calculatedOverlays, snappedAll, snappedHubs) = await Task.detached(priority: .userInitiated) {
+        let (offsetLines, calculatedOverlays, snappedAll, snappedUnmerged) = await Task.detached(priority: .userInitiated) {
             let sortedLines = linesToProcess.sorted { $0.type.priority < $1.type.priority }
             let offsetLines = MapDataService.applyParallelCorridorOffsets(to: sortedLines)
+            let calculatedOverlays = MapDataService.buildOverlays(from: offsetLines)
 
-            var casingOverlays: [ColoredPolyline] = []
-            var fillOverlays: [ColoredPolyline] = []
+            let lookup = MapDataService.loadPlatformCoordinatesLookup()
+            let snappedAllStations = MapDataService.snapStationsToPolylines(
+                currentAllStations,
+                lines: offsetLines,
+                platformLookup: lookup
+            )
+            let snappedUnmergedStations = MapDataService.snapStationsToPolylines(
+                currentUnmergedStations,
+                lines: offsetLines,
+                platformLookup: lookup
+            )
 
-            for line in offsetLines {
-                let isDashedLine = line.isDashed || ["15", "16", "17", "18"].contains(line.name)
-                let platformColor = MapPlatformColor(line.color)
+            if shouldPersistCache {
+                let cacheableTraces = offsetLines.map { CacheableLineTrace(from: $0) }
+                if let tracesData = try? JSONEncoder().encode(cacheableTraces) {
+                    try? tracesData.write(to: tracesURL)
+                    print("✅ [Cache Traces] \(offsetLines.count) lignes pré-calculées sauvegardées.")
+                }
 
-                for polyline in line.polylines {
-                    if !isDashedLine {
-                        let casing = ColoredPolyline(
-                            points: polyline.points(), count: polyline.pointCount)
-                        casing.color = platformColor
-                        casing.lineName = line.name
-                        casing.type = line.type
-                        casing.isDashed = false
-                        casing.isCasing = true
-                        casingOverlays.append(casing)
+                let cacheObj = CacheableStations(
+                    unmergedStations: snappedUnmergedStations,
+                    allStations: snappedAllStations
+                )
+                if let stationsData = try? JSONEncoder().encode(cacheObj) {
+                    do {
+                        try stationsData.write(to: stationsURL)
+                        print("✅ [Cache Stations] Enregistré après snap (\(snappedAllStations.count) gares).")
+                    } catch {
+                        print("⚠️ [Cache Stations] Erreur d'écriture: \(error)")
                     }
-
-                    let colored = ColoredPolyline(
-                        points: polyline.points(), count: polyline.pointCount)
-                    colored.color = platformColor
-                    colored.lineName = line.name
-                    colored.type = line.type
-                    colored.isDashed = isDashedLine
-                    colored.isCasing = false
-                    fillOverlays.append(colored)
                 }
             }
 
-            let results = casingOverlays + fillOverlays
-            let snappedAllStations = MapDataService.snapStationsToPolylines(currentAllStations, lines: offsetLines)
-            let snappedMajorHubs = MapDataService.snapStationsToPolylines(currentMajorHubs, lines: offsetLines)
-
-            return (results, snappedAllStations, snappedMajorHubs)
+            return (offsetLines, calculatedOverlays, snappedAllStations, snappedUnmergedStations)
         }.value
 
         print("✅ Calcul des overlays terminé: \(calculatedOverlays.count) segments prêts.")
+        FlowPerformanceProfiler.endInterval(token, detail: "overlays=\(calculatedOverlays.count),persisted=\(shouldPersistCache)")
 
         await MainActor.run {
+            self.lines = offsetLines
             self.cachedOverlays = calculatedOverlays
             self.allStations = snappedAll
-            self.majorHubs = snappedHubs
+            self.unmergedStations = snappedUnmerged
+            self.majorHubs = snappedAll.filter { $0.isHub }
             self.visibleStations = snappedAll
             self.stationsRevision += 1
+            self.loadingProgress = 1.0
+            self.isLoadingData = false
         }
     }
 
@@ -2803,7 +3330,11 @@ class MapDataService: ObservableObject {
     }
 
     /// Projette chaque quai ferré sur le tracé de sa propre ligne (enrichi par les coordonnées réelles de quais CSV).
-    nonisolated static func snapStationsToPolylines(_ stations: [MapStation], lines: [LineTrace]) -> [MapStation] {
+    nonisolated static func snapStationsToPolylines(
+        _ stations: [MapStation],
+        lines: [LineTrace],
+        platformLookup providedLookup: [String: [(words: Set<String>, coord: CLLocationCoordinate2D)]]? = nil
+    ) -> [MapStation] {
         guard !stations.isEmpty, !lines.isEmpty else { return stations }
 
         let maxSnapDistance: Double = 260.0
@@ -2814,7 +3345,7 @@ class MapDataService: ObservableObject {
             polylinesByKey[key, default: []].append(contentsOf: line.polylines)
         }
 
-        let platformLookup = loadPlatformCoordinatesLookup()
+        let platformLookup = providedLookup ?? loadPlatformCoordinatesLookup()
 
         func closestPointOnPolylines(_ coord: CLLocationCoordinate2D, polylines: [MKPolyline], maxDist: Double) -> CLLocationCoordinate2D? {
             let mapPoint = MKMapPoint(coord)
@@ -2974,6 +3505,9 @@ class MapDataService: ObservableObject {
     private func loadGrandParisExpressCold() {
         guard let url = Bundle.main.url(forResource: "point-de-localisation-des-gares-du-grand-paris-express", withExtension: "geojson") else {
             print("⚠️ point-de-localisation-des-gares-du-grand-paris-express.geojson non trouvé dans le bundle")
+            Task {
+                await self.precalculateOverlays(shouldPersistCache: true)
+            }
             return
         }
         
@@ -3257,30 +3791,20 @@ class MapDataService: ObservableObject {
                 self.visibleStations = updatedAll
                 self.majorHubs = updatedAll.filter { $0.isHub }
                 self.stationsRevision += 1
-                self.loadingProgress = 1.0
+                self.loadingProgress = 0.95
                 
                 print("🚇 [GPE] Chargement de \(parsedStations.count) gares et \(newLines.count) tracés du Grand Paris Express terminés.")
                 
-                // --- SAUVEGARDE DU CACHE UNIFIÉ ---
-                self.saveTracesToCache(self.lines)
-                
-                let cacheObj = CacheableStations(unmergedStations: self.unmergedStations, allStations: self.allStations)
-                if let data = try? JSONEncoder().encode(cacheObj) {
-                    do {
-                        try data.write(to: self.stationsCacheURL)
-                        print("✅ [Cache Stations] Enregistré avec succès après GPE: \(self.allStations.count) gares.")
-                    } catch {
-                        print("⚠️ [Cache Stations] Erreur d'écriture: \(error)")
-                    }
-                }
-                
                 Task {
-                    await self.precalculateOverlays()
+                    await self.precalculateOverlays(shouldPersistCache: true)
                 }
             }
             
         } catch {
             print("❌ Erreur lors du chargement des données Grand Paris Express: \(error)")
+            Task {
+                await self.precalculateOverlays(shouldPersistCache: true)
+            }
         }
     }
 

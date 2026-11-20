@@ -405,11 +405,6 @@ final class CrowdAffluenceService: @unchecked Sendable {
 
     private func parseDate(_ isoString: String?) -> Date? {
         guard let str = isoString, !str.isEmpty else { return nil }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd'T'HHmmss"
-        if let tz = TimeZone(identifier: "Europe/Paris") {
-            formatter.timeZone = tz
-        }
-        return formatter.date(from: str)
+        return DateFormat.navitia.date(from: str)
     }
 }

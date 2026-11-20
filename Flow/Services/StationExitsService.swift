@@ -145,6 +145,23 @@ class StationExitsService {
                         .trimmingCharacters(in: .whitespacesAndNewlines)
         return exitsByStationId[cleanId] ?? []
     }
+
+    func exits(for station: MapStation) -> [StationExit] {
+        var candidateIds = Set<String>()
+        candidateIds.insert(station.id)
+        for platform in station.platforms where !platform.stopAreaId.isEmpty {
+            candidateIds.insert(platform.stopAreaId)
+        }
+
+        var seenExitIds = Set<String>()
+        var result: [StationExit] = []
+        for rawId in candidateIds {
+            for exit in exitsForStation(id: rawId) where seenExitIds.insert(exit.exit_id).inserted {
+                result.append(exit)
+            }
+        }
+        return result
+    }
     
     func exits(in region: MKCoordinateRegion) -> [StationExit] {
         let minLat = region.center.latitude - region.span.latitudeDelta / 2

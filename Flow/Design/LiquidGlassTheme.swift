@@ -567,6 +567,9 @@ public struct LiquidGlassTabItem: Identifiable, Sendable, Equatable {
 /// tout en conservant la pilule de sélection interne de l'onglet actif et la dalle en verre réfractive qui se soulève au glissement.
 public final class MorphingPlatterUITabBar: UITabBar {
     private var savedPlatterGlassEffect: AnyObject?
+    private var lastAppliedEffectiveFill: Double = -1
+    private var lastAppliedIsMerged: Bool?
+    private var lastAppliedBarWidth: CGFloat = -1
 
     public var isMergedIntoSheet: Bool = false {
         didSet {
@@ -598,6 +601,17 @@ public final class MorphingPlatterUITabBar: UITabBar {
         guard barWidth > 0 else { return }
         let clampedExpand = min(1.0, max(0.0, expandProgress))
         let effectiveFill: Double = isMergedIntoSheet ? 0.0 : Double(clampedExpand)
+
+        if lastAppliedIsMerged == isMergedIntoSheet
+            && abs(lastAppliedEffectiveFill - effectiveFill) < 0.001
+            && abs(lastAppliedBarWidth - barWidth) < 0.5
+        {
+            return
+        }
+        lastAppliedIsMerged = isMergedIntoSheet
+        lastAppliedEffectiveFill = effectiveFill
+        lastAppliedBarWidth = barWidth
+
         let fullBarWidthThreshold = barWidth * 0.60
         let targetAlpha: CGFloat = isMergedIntoSheet ? 0.0 : 1.0
 
@@ -782,6 +796,7 @@ public struct NativeLiquidGlassUITabBarRepresentable: UIViewRepresentable {
         tabBar.delegate = context.coordinator
         tabBar.tintColor = .systemBlue
         tabBar.isTranslucent = true
+        tabBar.insetsLayoutMarginsFromSafeArea = false
         // Important : ne pas clipper la dalle en verre Liquid Glass d'iOS 26+ qui se soulève au glissement
         tabBar.clipsToBounds = false
         tabBar.expandProgress = expandProgress
@@ -816,6 +831,7 @@ public struct NativeLiquidGlassUITabBarRepresentable: UIViewRepresentable {
 
     public func updateUIView(_ tabBar: MorphingPlatterUITabBar, context: Context) {
         context.coordinator.parent = self
+        tabBar.insetsLayoutMarginsFromSafeArea = false
         tabBar.clipsToBounds = false
         tabBar.expandProgress = expandProgress
         tabBar.isMergedIntoSheet = isMergedIntoSheet

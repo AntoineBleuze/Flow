@@ -20,6 +20,8 @@ struct StationDetailSheet: View {
     }
     
     @State private var departures: [Departure] = []
+    @State private var cachedLineGroups: [LineGroup] = []
+    @State private var cachedAvailableModes: [String] = []
     @ObservedObject var favoritesService = FavoritesService.shared
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -138,6 +140,7 @@ struct StationDetailSheet: View {
                 } else {
                     mergedStation = station
                 }
+                recomputeDepartureGroups()
             }
             .onReceive(NotificationCenter.default.publisher(for: .flowServerStationUpdate)) { notification in
                 if let newDepartures = notification.userInfo?["departures"] as? [Departure] {
@@ -169,6 +172,7 @@ struct StationDetailSheet: View {
                         withAnimation(.easeInOut(duration: 0.35)) {
                             self.departures = batched
                             self.isLoading = false
+                            self.recomputeDepartureGroups()
                         }
                         departureBuffer.removeAll()
                     }
@@ -408,8 +412,8 @@ struct StationDetailSheet: View {
                     }
                     
                     // Mode Picker
-                    let groups = groupDepartures(departures)
-                    let availableModes = getAvailableModes(from: groups)
+                    let groups = cachedLineGroups.isEmpty && !departures.isEmpty ? groupDepartures(departures) : cachedLineGroups
+                    let availableModes = cachedAvailableModes.isEmpty && !groups.isEmpty ? getAvailableModes(from: groups) : cachedAvailableModes
                     if availableModes.count > 1 {
                         Picker("Mode", selection: $selectedMode) {
                             Text("Tout").tag("Tout")
@@ -420,51 +424,6 @@ struct StationDetailSheet: View {
                         .pickerStyle(SegmentedPickerStyle())
                         .padding(.horizontal)
                         .padding(.top, duoPosture == .unfoldedDualScreen ? 6 : 16)
-                    }
-                    
-                    if duoPosture != .unfoldedDualScreen {
-                        // Section Title: Details
-                        HStack {
-                            Text("Détails de la station")
-                                .font(.system(.title3, design: .rounded))
-                                .fontWeight(.bold)
-                                .foregroundColor(.primary)
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundColor(.secondary)
-                            Spacer()
-                        }
-                        .padding(.horizontal)
-                        .padding(.top, 24)
-                        
-                        // Statistics Card Grid - Encapsulated in Liquid Glass
-                        let detailsStats = stationDistanceAndWalkTime
-                        
-                        LiquidGlassCard(cornerRadius: 18, padding: 16) {
-                            VStack(spacing: 14) {
-                                HStack(spacing: 12) {
-                                    metricCell(title: "TEMPS DE MARCHE", value: "\(detailsStats.walkTimeMinutes) MIN", symbol: "figure.walk", color: LiquidGlassTheme.warningMetricColor(for: colorScheme))
-                                    metricCell(title: "DISTANCE À PIED", value: detailsStats.distanceStr.uppercased(), symbol: "location.fill", color: Color(hex: "30B0C7")) // Cyan/Blue
-                                }
-                                
-                                Divider().opacity(0.4)
-                                
-                                HStack(spacing: 12) {
-                                    metricCell(title: "LIGNES DE TRANSPORT", value: "\(currentStation.lines.count) LIGNES", symbol: "tram", color: Color(hex: "FF453A")) // Red
-                                    if let status = elevatorStatus {
-                                        if status.hasEquipments {
-                                            equipmentCell(status: status)
-                                        } else {
-                                            Spacer()
-                                        }
-                                    } else {
-                                        metricCell(title: "ÉQUIPEMENTS", value: "CHARGEMENT...", symbol: "arrow.up.and.down.square", color: .secondary)
-                                    }
-                                }
-                            }
-                        }
-                        .padding(.horizontal)
-                        .padding(.top, 8)
                     }
                     
                     // Departures / Line Group rows
@@ -497,7 +456,7 @@ struct StationDetailSheet: View {
                                     let pA = isPrioritizedStationLine(a)
                                     let pB = isPrioritizedStationLine(b)
                                     if pA != pB { return pA }
-                                    return a.type.priority > b.type.priority
+                                    return StationLine.isOrderedBeforeForDisplay(a, b)
                                 }
                             let hour = Calendar.current.component(.hour, from: Date())
                             let isNight = hour >= 1 && hour < 5
@@ -687,6 +646,7 @@ struct StationDetailSheet: View {
         self.errorMessage = nil
         self.departures = []
         self.mergedStation = station
+        self.recomputeDepartureGroups()
         
         // Vider le buffer WebSocket pour la nouvelle station
         bufferTask?.cancel()
@@ -814,12 +774,7 @@ struct StationDetailSheet: View {
                         let bIsPrio = b.id == prio.id
                         if aIsPrio != bIsPrio { return aIsPrio }
                     }
-                    let priorityA = a.type.priority
-                    let priorityB = b.type.priority
-                    if priorityA != priorityB {
-                        return priorityA > priorityB
-                    }
-                    return a.name.localizedStandardCompare(b.name) == .orderedAscending
+                    return StationLine.isOrderedBeforeForDisplay(a, b)
                 }
                 
                 let merged = MapStation(
@@ -838,6 +793,7 @@ struct StationDetailSheet: View {
                     if self.station.id == stationId {
                         withAnimation(.easeInOut(duration: 0.25)) {
                             self.mergedStation = merged
+                            self.recomputeDepartureGroups()
                         }
                         
                         // Re-fetch departures if new bus lines were added
@@ -874,6 +830,14 @@ struct StationDetailSheet: View {
         if mode.contains("train") || mode.contains("transilien") || mode.contains("localtrain") { return .transilien }
         if mode.contains("cable") { return .cable }
         return .bus
+    }
+
+    private func recomputeDepartureGroups() {
+        FlowPerformanceProfiler.measure("GroupStationDepartures") {
+            let groups = groupDepartures(departures)
+            cachedLineGroups = groups
+            cachedAvailableModes = getAvailableModes(from: groups)
+        }
     }
 
     private func groupDepartures(_ departures: [Departure]) -> [LineGroup] {
@@ -1067,7 +1031,7 @@ struct StationDetailSheet: View {
                 LiquidGlassCard(cornerRadius: 18, padding: 14) {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 10) {
-                            if UIImage(named: gpeLine.assetName) != nil {
+                            if AssetPresenceCache.exists(gpeLine.assetName) {
                                 Image(gpeLine.assetName)
                                     .resizable()
                                     .scaledToFit()
@@ -1178,6 +1142,7 @@ struct StationDetailSheet: View {
             ]
             self.departures = mockDepartures
             self.isLoading = false
+            self.recomputeDepartureGroups()
             return
         }
 
@@ -1274,6 +1239,7 @@ struct StationDetailSheet: View {
                 },
                 receiveValue: { allDepartures in
                     self.departures = allDepartures
+                    self.recomputeDepartureGroups()
                     print("✅ Received \(allDepartures.count) departures")
                 })
     }
@@ -1357,10 +1323,10 @@ struct StationDetailSheet: View {
 
     private func modePriority(_ mode: String?) -> Int {
         guard let m = mode?.lowercased() else { return 99 }
-        if m.contains("metro") || m.contains("métro") { return 0 }
-        if m.contains("rer") { return 1 }
-        if m.contains("train") || m.contains("transilien") { return 2 }
-        if m.contains("tram") { return 3 }
+        if m.contains("tram") { return 0 }
+        if m.contains("metro") || m.contains("métro") { return 1 }
+        if m.contains("rer") || m.contains("train") || m.contains("transilien") { return 2 }
+        if m.contains("cable") || m.contains("câble") { return 3 }
         if m.contains("bus") { return 4 }
         return 5
     }
@@ -1376,12 +1342,15 @@ struct StationDetailSheet: View {
     }
 
     private func compareLineLabels(_ a: String, _ b: String) -> Bool {
-        if let numA = Int(a), let numB = Int(b) {
-            return numA < numB
-        }
-        if Int(a) != nil { return true }
-        if Int(b) != nil { return false }
-        return a.localizedStandardCompare(b) == .orderedAscending
+        let cleanA = a.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanB = b.trimmingCharacters(in: .whitespacesAndNewlines)
+        let keyA = (cleanA.uppercased().hasPrefix("T") && cleanA.count > 1 && cleanA.dropFirst().first?.isNumber == true)
+            ? String(cleanA.dropFirst())
+            : cleanA
+        let keyB = (cleanB.uppercased().hasPrefix("T") && cleanB.count > 1 && cleanB.dropFirst().first?.isNumber == true)
+            ? String(cleanB.dropFirst())
+            : cleanB
+        return keyA.localizedStandardCompare(keyB) == .orderedAscending
     }
 
     private func getAvailableModes(from groups: [LineGroup]) -> [String] {
@@ -1402,9 +1371,9 @@ struct StationDetailSheet: View {
             return mode.capitalized
         })
         let orderPriority: [String: Int] = [
-            "métro": 0,
-            "rer": 1,
-            "tramway": 2,
+            "tramway": 0,
+            "métro": 1,
+            "rer": 2,
             "train": 3,
             "bus": 4
         ]
@@ -1501,7 +1470,7 @@ private struct LineGroupRowSheet: View {
     private var lineHeader: some View {
         HStack(spacing: 10) {
             let assetName = TransportType.getAssetName(mode: group.mode, label: group.label)
-            if !assetName.isEmpty, UIImage(named: assetName) != nil {
+            if AssetPresenceCache.exists(assetName) {
                 Image(assetName)
                     .resizable()
                     .scaledToFit()
@@ -1532,28 +1501,26 @@ private struct LineGroupRowSheet: View {
             
             Spacer()
             
+            let lineType = mapModeToType(group.mode)
             HStack(spacing: 8) {
-                if group.mode?.lowercased().contains("bus") == true {
-                    Button(action: {
-                        locateBusStops()
-                    }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "mappin.and.ellipse")
-                                .font(.system(size: 13, weight: .bold))
-                            Text("Localiser")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                        }
-                        .foregroundColor(.blue)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.06))
-                        .clipShape(Capsule())
+                Button(action: {
+                    showFullLineOnMap(lineType: lineType)
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "point.topleft.down.to.point.bottomright.curvepath.fill")
+                            .font(.system(size: 12, weight: .bold))
+                        Text("Voir la ligne")
+                            .font(.caption)
+                            .fontWeight(.semibold)
                     }
-                    .buttonStyle(.liquidGlassInteractive)
+                    .foregroundColor(.blue)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.06))
+                    .clipShape(Capsule())
                 }
-                
-                let lineType = mapModeToType(group.mode)
+                .buttonStyle(.liquidGlassInteractive)
+
                 let isFav = favoritesService.isFavoriteLine(lineId: group.label, type: lineType, stationId: station.id)
                 Button(action: {
                     favoritesService.toggleFavoriteLine(
@@ -1586,66 +1553,22 @@ private struct LineGroupRowSheet: View {
         return .bus
     }
 
-    private func locateBusStops() {
-        if let selectedDetent = selectedDetent {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                selectedDetent.wrappedValue = NavigationCoordinator.collapsedSheetDetent
+    private func showFullLineOnMap(lineType: TransportType) {
+        let lineName = group.label
+        let preferredColor = group.color.isEmpty ? nil : Color(hex: group.color)
+
+        Task {
+            guard let preview = await MapDataService.shared.buildFocusedLinePreview(
+                lineName: lineName,
+                type: lineType,
+                preferredColor: preferredColor
+            ) else {
+                return
             }
-        }
-        
-        let busPlatforms = station.platforms.filter { $0.lineName == group.label && $0.type == .bus }
-        guard !busPlatforms.isEmpty else {
-            print("⚠️ No physical bus stops found for line \(group.label)")
-            return
-        }
-        
-        // Build map of stopPoint ID -> Directions from departures
-        var stopDirections: [String: Set<String>] = [:]
-        for dep in departures {
-            let info = dep.displayInformations
-            let label = info.label ?? info.code ?? ""
-            if label == group.label,
-               let stopPointId = dep.stopDateTime.stopPoint?.id,
-               let direction = info.direction {
-                let cleanId = stopPointId.replacingOccurrences(of: "stop_point:", with: "")
-                stopDirections[cleanId, default: []].insert(direction)
+
+            await MainActor.run {
+                NavigationCoordinator.shared.showLinePreview(preview)
             }
-        }
-        
-        let mapView = SharedMapView.main.mapView
-        let oldAnnotations = mapView.annotations.filter { $0 is BusStopTempAnnotation }
-        mapView.removeAnnotations(oldAnnotations)
-        
-        var annotationsToAdd: [BusStopTempAnnotation] = []
-        for platform in busPlatforms {
-            let cleanPlatformId = platform.id.replacingOccurrences(of: "stop_point:", with: "")
-            let directions = stopDirections[cleanPlatformId] ?? []
-            
-            let subtitleStr: String
-            if !directions.isEmpty {
-                subtitleStr = "Direction: " + directions.joined(separator: " / ")
-            } else {
-                subtitleStr = "Ligne \(group.label)"
-            }
-            
-            let anno = BusStopTempAnnotation(
-                coordinate: platform.coordinate,
-                title: platform.name,
-                subtitle: subtitleStr,
-                lineColor: UIColor(Color(hex: group.color)),
-                lineName: group.label
-            )
-            annotationsToAdd.append(anno)
-        }
-        
-        mapView.addAnnotations(annotationsToAdd)
-        
-        if let first = busPlatforms.first {
-            let region = MKCoordinateRegion(
-                center: first.coordinate,
-                span: MKCoordinateSpan(latitudeDelta: 0.002, longitudeDelta: 0.002)
-            )
-            mapView.setRegion(region, animated: true)
         }
     }
 

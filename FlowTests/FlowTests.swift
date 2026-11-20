@@ -1,4 +1,7 @@
 import Foundation
+import CoreLocation
+import MapKit
+import SwiftUI
 import Testing
 @testable import Flow
 
@@ -366,5 +369,133 @@ struct TrafficParsingTests {
         let tramT3a = try #require(service.lines.first { $0.type == .tram && $0.lineId == "T3a" })
         #expect(tramT3a.trafficInfos.count == 1)
         #expect(tramT3a.trafficInfos.first?.period == .future)
+    }
+}
+
+struct FlowPerformanceAuditTests {
+    @Test("Construction des overlays cartographiques (< 50 ms)")
+    func buildOverlaysPerformance() {
+        var lines: [LineTrace] = []
+        lines.reserveCapacity(40)
+
+        for i in 0..<40 {
+            var coords: [CLLocationCoordinate2D] = []
+            coords.reserveCapacity(25)
+            for p in 0..<25 {
+                coords.append(
+                    CLLocationCoordinate2D(
+                        latitude: 48.80 + Double(i) * 0.002 + Double(p) * 0.0005,
+                        longitude: 2.25 + Double(p) * 0.002
+                    )
+                )
+            }
+            let poly1 = MKPolyline(coordinates: &coords, count: coords.count)
+            let poly2 = MKPolyline(coordinates: &coords, count: coords.count)
+            let type: TransportType = (i % 4 == 0) ? .rer : .metro
+            lines.append(
+                LineTrace(
+                    id: "line_\(i)",
+                    name: "M\(i)",
+                    color: .blue,
+                    polylines: [poly1, poly2],
+                    type: type,
+                    isDashed: false
+                )
+            )
+        }
+
+        let clock = ContinuousClock()
+        var overlays: [ColoredPolyline] = []
+        let elapsed = clock.measure {
+            overlays = MapDataService.buildOverlays(from: lines)
+        }
+
+        // 40 lignes * 2 polylignes * (casing + fill) = 160 overlays
+        #expect(overlays.count == 160)
+        #expect(elapsed < .milliseconds(50))
+    }
+
+    @Test("Classement de recherche StationSuggestionEngine avec cache (< 50 ms)")
+    func stationRankingPerformance() {
+        var stations: [MapStation] = []
+        stations.reserveCapacity(500)
+
+        for i in 0..<500 {
+            let stationName = i == 250 ? "Châtelet - Les Halles" : "Station Étoile Nord-\(i)"
+            stations.append(
+                MapStation(
+                    id: "st_\(i)",
+                    name: stationName,
+                    coordinate: CLLocationCoordinate2D(
+                        latitude: 48.82 + Double(i % 50) * 0.002,
+                        longitude: 2.28 + Double(i / 50) * 0.005
+                    ),
+                    platforms: [],
+                    isHub: i % 10 == 0,
+                    mainType: i % 3 == 0 ? .rer : .metro,
+                    lines: [StationLine(name: "1", type: .metro), StationLine(name: "A", type: .rer)],
+                    city: "Paris"
+                )
+            )
+        }
+
+        let userCoord = CLLocationCoordinate2D(latitude: 48.8566, longitude: 2.3522)
+        // Pré-chauffe le cache de normalisation (simule les frappes précédentes au clavier)
+        _ = StationSuggestionEngine.rank(
+            stations: stations,
+            query: "Chate",
+            userLocation: userCoord,
+            favoriteIds: ["st_250"],
+            recentIds: ["st_10"]
+        )
+
+        let clock = ContinuousClock()
+        var ranked: [MapStation] = []
+        let elapsed = clock.measure {
+            ranked = StationSuggestionEngine.rank(
+                stations: stations,
+                query: "Chatelet",
+                userLocation: userCoord,
+                favoriteIds: ["st_250"],
+                recentIds: ["st_10"]
+            )
+        }
+
+        #expect(ranked.first?.id == "st_250")
+        #expect(elapsed < .milliseconds(50))
+    }
+
+    @Test("Estimation d'affluence en rafale CrowdAffluenceService (< 50 ms)")
+    func crowdAffluenceEstimationPerformance() {
+        let now = Date()
+        let service = CrowdAffluenceService.shared
+        // Pré-chauffe le singleton
+        _ = service.estimateAffluence(
+            lineCode: "1",
+            transportType: .metro,
+            direction: "La Défense",
+            stationName: "Châtelet",
+            date: now
+        )
+
+        let clock = ContinuousClock()
+        var count = 0
+        let elapsed = clock.measure {
+            for i in 0..<200 {
+                let result = service.estimateAffluence(
+                    lineCode: i % 2 == 0 ? "1" : "A",
+                    transportType: i % 2 == 0 ? .metro : .rer,
+                    direction: "La Défense",
+                    stationName: "Châtelet",
+                    date: now
+                )
+                if result.score >= 0 {
+                    count += 1
+                }
+            }
+        }
+
+        #expect(count == 200)
+        #expect(elapsed < .milliseconds(50))
     }
 }

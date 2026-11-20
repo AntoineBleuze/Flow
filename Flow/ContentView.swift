@@ -8,12 +8,11 @@ struct ContentView: View {
     @ObservedObject private var navigationManager = NavigationManager.shared
     @ObservedObject private var routeManager = RouteNavigationManager.shared
     @ObservedObject private var mapData = MapDataService.shared
+    @StateObject private var voiceManager = VoiceDictationManager.shared
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.colorScheme) private var colorScheme
     @State private var searchText = ""
     @State private var showLoading: Bool
-    @State private var isDuoPanelCollapsed: Bool = false
-    @GestureState private var duoOuterDragOffset: CGFloat = 0
 
     init(showLoading: Bool = true) {
         _showLoading = State(initialValue: showLoading)
@@ -25,17 +24,18 @@ struct ContentView: View {
                 horizontalSizeClass: horizontalSizeClass,
                 screenSize: geometry.size
             )
+            let minDim = min(geometry.size.width, geometry.size.height)
+            let maxDim = max(geometry.size.width, geometry.size.height)
+            let isDuoOuterScreen = (posture == .foldedSingleScreen)
+                && (minDim >= 450 && maxDim <= 720 && geometry.size.width < 650)
 
             ZStack {
                 switch posture {
                 case .unfoldedDualScreen:
                     duoDualScreenLayout
                         .environment(\.duoPosture, .unfoldedDualScreen)
-                case .foldedDuoOuterScreen:
-                    duoOuterScreenLayout(in: geometry.size)
-                        .environment(\.duoPosture, .foldedDuoOuterScreen)
                 case .foldedSingleScreen:
-                    classicSingleScreenLayout
+                    classicSingleScreenLayout(isDuoOuterScreen: isDuoOuterScreen)
                         .environment(\.duoPosture, .foldedSingleScreen)
                 }
 
@@ -50,9 +50,9 @@ struct ContentView: View {
         .ignoresSafeArea()
         .environmentObject(coordinator)
         .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
                 if showLoading {
-                    withAnimation(.easeInOut(duration: 0.6)) {
+                    withAnimation(.easeInOut(duration: 0.35)) {
                         showLoading = false
                     }
                 }
@@ -60,272 +60,58 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - iPhone Duo Outer Screen Layout (Écran Extérieur 466×678, Tab Bar latérale sous la caméra)
-    @ViewBuilder
-    private func duoOuterScreenLayout(in size: CGSize) -> some View {
-        let isCollapsed = coordinator.exploreSheetDetent == NavigationCoordinator.collapsedSheetDetent
-        let baseCardHeight: CGFloat = {
-            switch coordinator.exploreSheetDetent {
-            case NavigationCoordinator.collapsedSheetDetent:
-                return 76
-            case .large:
-                return max(372, size.height - 28)
-            default:
-                return min(max(364, size.height * 0.55), 376)
-            }
-        }()
-        let maxCardHeight = max(372, size.height - 28)
-        let currentCardHeight = min(maxCardHeight, max(76, baseCardHeight - duoOuterDragOffset))
+    private var supportsCompactRouteDetent: Bool {
+        routeManager.isRouteActive || coordinator.previewJourney != nil
+    }
 
-        ZStack {
-            // Couche 1 : Carte plein écran
-            AppMapView(showControls: true)
-                .ignoresSafeArea()
-
-            // Couche 2 : Conteneur unifié Liquid Glass (Panneau à gauche + Rail vertical Tab Bar sous la caméra)
-            GlassEffectContainer(spacing: 12) {
-                ZStack {
-                    // Panneau / Feuille spatiale Liquid Glass à gauche du rail latéral
-                    VStack(alignment: .leading, spacing: 8) {
-                        Spacer(minLength: 0)
-
-                        let isShowingExploreInlineRoute = coordinator.selectedTab == "Explore"
-                            && coordinator.selectedStation == nil
-                            && coordinator.previewJourney == nil
-                            && searchText.isEmpty
-                        if isCollapsed && routeManager.isRouteActive
-                            && (!routeManager.isShowingRouteSheet || coordinator.selectedTab != "Explore")
-                            && !isShowingExploreInlineRoute {
-                            ActiveRouteResumePill(routeManager: routeManager)
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
-                        }
-
-                        duoOuterSheetCard(
-                            isCollapsed: isCollapsed,
-                            cardHeight: currentCardHeight
-                        )
-                    }
-                    .padding(.leading, 12)
-                    .padding(.trailing, 86)
-                    .padding(.bottom, 12)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-
-                    // Rail latéral droit positionné sous la caméra et l'indicateur réseau (x ≈ 382..458pt)
-                    duoOuterSideRail
-                }
-            }
-            .animation(.spring(response: 0.36, dampingFraction: 0.82), value: coordinator.exploreSheetDetent)
-            .animation(.spring(response: 0.34, dampingFraction: 0.80), value: coordinator.selectedTab)
-        }
-        .ignoresSafeArea(.container, edges: .bottom)
-        .sheet(isPresented: $coordinator.showAIAssistant) {
-            FlowAssistantView()
-                .environmentObject(coordinator)
-                .presentationDetents([.medium, .large], selection: $coordinator.aiSheetDetent)
-                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
-                .presentationContentInteraction(.scrolls)
-                .presentationDragIndicator(.visible)
-        }
-        .onChange(of: navigationManager.shouldSwitchToMap) { _, shouldSwitch in
-            if shouldSwitch {
-                withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
-                    coordinator.selectedTab = "Explore"
-                    coordinator.exploreSheetDetent = .medium
-                }
-                navigationManager.shouldSwitchToMap = false
-            }
-        }
-        .onChange(of: coordinator.selectedStation?.id) { _, newId in
-            if newId != nil {
-                withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
-                    coordinator.selectedTab = "Explore"
-                    coordinator.exploreSheetDetent = .medium
-                }
-            }
-        }
-        .onChange(of: routeManager.isShowingRouteSheet) { _, isShowing in
-            if isShowing {
-                withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
-                    coordinator.selectedTab = "Explore"
-                    coordinator.exploreSheetDetent = .medium
-                }
-            }
+    private var activeSheetDetents: Set<PresentationDetent> {
+        if supportsCompactRouteDetent {
+            return [
+                NavigationCoordinator.collapsedSheetDetent,
+                NavigationCoordinator.compactRouteSheetDetent,
+                .medium,
+                .large
+            ]
+        } else {
+            return [
+                NavigationCoordinator.collapsedSheetDetent,
+                .medium,
+                .large
+            ]
         }
     }
 
-    private var duoOuterSideRail: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 0)
-
-            DuoVerticalLiquidGlassTabBar(
-                selectedTab: $coordinator.selectedTab,
-                showAIAssistant: coordinator.showAIAssistant,
-                onSelectTab: { tab in
-                    if tab == "AI" {
-                        #if canImport(UIKit)
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        #endif
-                        coordinator.aiSheetDetent = .large
-                        coordinator.showAIAssistant = true
-                        return
-                    }
-                    if tab == "Explore" && coordinator.exploreSheetDetent != NavigationCoordinator.collapsedSheetDetent {
-                        coordinator.selectedStation = nil
-                    }
-                    if coordinator.exploreSheetDetent == NavigationCoordinator.collapsedSheetDetent {
-                        withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
-                            coordinator.exploreSheetDetent = .medium
-                        }
-                    }
-                }
-            )
-
-            Spacer(minLength: 0)
-        }
-        .padding(.top, 178)
-        .padding(.trailing, 14)
-        .padding(.bottom, 20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-    }
-
-    @ViewBuilder
-    private func duoOuterSheetCard(isCollapsed: Bool, cardHeight: CGFloat) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 28, style: .continuous)
-
-        VStack(spacing: 0) {
-            // Poignée de glissement / redimensionnement vertical
-            ZStack {
-                Color.clear
-                    .frame(height: 22)
-                    .contentShape(Rectangle())
-                LiquidGlassSheetGrabber()
-            }
-            .gesture(duoOuterDragGesture)
-            .onTapGesture {
-                withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) {
-                    if coordinator.exploreSheetDetent == NavigationCoordinator.collapsedSheetDetent {
-                        coordinator.exploreSheetDetent = .medium
-                    } else if coordinator.exploreSheetDetent == .medium {
-                        coordinator.exploreSheetDetent = .large
-                    } else {
-                        coordinator.exploreSheetDetent = .medium
-                    }
-                }
-            }
-
-            if isCollapsed {
-                duoOuterCollapsedContent
-            } else {
-                duoSheetActiveTabContent
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .clipped()
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: cardHeight, alignment: .top)
-        .clipShape(shape)
-        .glassEffect(.regular, in: shape)
-    }
-
-    @ViewBuilder
-    private var duoOuterCollapsedContent: some View {
-        Button {
-            withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) {
-                coordinator.exploreSheetDetent = .medium
-            }
-        } label: {
-            HStack(spacing: 10) {
-                if routeManager.isRouteActive && routeManager.isShowingRouteSheet {
-                    Image(systemName: "location.north.fill")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(.blue)
-                    Text(routeManager.pillHeadline)
-                        .font(.system(.subheadline, design: .rounded))
-                        .fontWeight(.bold)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                } else if let station = coordinator.selectedStation {
-                    Image(systemName: "tram.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.blue)
-                    Text(station.name)
-                        .font(.system(.subheadline, design: .rounded))
-                        .fontWeight(.bold)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                } else {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.blue)
-                    Text("Rechercher station, ligne...")
-                        .font(.system(.subheadline, design: .rounded))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 4)
-
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 10)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var duoOuterDragGesture: some Gesture {
-        DragGesture(minimumDistance: 6)
-            .updating($duoOuterDragOffset) { value, state, _ in
-                state = value.translation.height
-            }
-            .onEnded { value in
-                let deltaY = value.translation.height
-                let velocity = value.predictedEndTranslation.height - deltaY
-                let isExpanding = (deltaY + velocity * 0.25) < -36
-                let isCollapsing = (deltaY + velocity * 0.25) > 36
-
-                withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) {
-                    if isExpanding {
-                        if coordinator.exploreSheetDetent == NavigationCoordinator.collapsedSheetDetent {
-                            coordinator.exploreSheetDetent = .medium
-                        } else if coordinator.exploreSheetDetent == .medium {
-                            coordinator.exploreSheetDetent = .large
-                        }
-                    } else if isCollapsing {
-                        if coordinator.exploreSheetDetent == .large {
-                            coordinator.exploreSheetDetent = .medium
-                        } else {
-                            coordinator.exploreSheetDetent = NavigationCoordinator.collapsedSheetDetent
-                        }
-                    }
-                }
-            }
-    }
-
-    // MARK: - iPhone Duo Dual-Screen Layout (Écran Intérieur Déplié 951×669, Liquid Glass Natif Apple)
+    // MARK: - iPhone Duo Dual-Screen Layout (Design de main)
     private var duoDualScreenLayout: some View {
         DuoSplitView {
-            GlassEffectContainer(spacing: 12) {
-                VStack(spacing: 0) {
-                    if isDuoPanelCollapsed {
-                        duoCollapsedHeaderPill
-                            .padding(.top, 20)
-                            .padding(.leading, 20)
-                            .padding(.trailing, 12)
-                            .transition(.move(edge: .top).combined(with: .opacity))
-
-                        Spacer(minLength: 0)
-                    } else {
-                        duoFloatingMainPanel
-                            .padding(.top, 20)
-                            .padding(.leading, 20)
-                            .padding(.trailing, 12)
-                            .transition(.scale(scale: 0.96, anchor: .bottom).combined(with: .opacity))
-                    }
+            VStack(spacing: 0) {
+                if let journey = navigationManager.currentJourney, navigationManager.isNavigating {
+                    DuoNavigationPanel(journey: journey)
+                        .flowAdaptiveBackground()
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                } else if let selectedStation = coordinator.selectedStation {
+                    StationDetailSheet(
+                        station: selectedStation,
+                        onDismiss: {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                coordinator.selectedStation = nil
+                                coordinator.previewJourney = nil
+                            }
+                        }
+                    )
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+                } else if let previewJourney = coordinator.previewJourney {
+                    DuoJourneyPreviewPanel(journey: previewJourney)
+                        .flowAdaptiveBackground()
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                } else {
+                    duoTabContent
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background {
+                            TransparentHostingView()
+                                .ignoresSafeArea()
+                        }
+                        .transition(.opacity)
 
                     duoBottomDock
                 }
@@ -342,144 +128,15 @@ struct ContentView: View {
                 .presentationContentInteraction(.scrolls)
                 .presentationDragIndicator(.visible)
         }
-        .onAppear {
-            if coordinator.exploreSheetDetent == NavigationCoordinator.collapsedSheetDetent {
-                coordinator.exploreSheetDetent = .medium
-            }
-        }
-        .onChange(of: navigationManager.shouldSwitchToMap) { _, shouldSwitch in
-            if shouldSwitch {
-                withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
-                    coordinator.selectedTab = "Explore"
-                    isDuoPanelCollapsed = false
-                }
-                navigationManager.shouldSwitchToMap = false
-            }
-        }
-        .onChange(of: coordinator.selectedStation?.id) { _, newId in
-            if newId != nil {
-                withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
-                    coordinator.selectedTab = "Explore"
-                    isDuoPanelCollapsed = false
-                }
-            }
-        }
-        .onChange(of: routeManager.isShowingRouteSheet) { _, isShowing in
-            if isShowing {
-                withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
-                    coordinator.selectedTab = "Explore"
-                    isDuoPanelCollapsed = false
-                }
-            }
-        }
-        .onChange(of: coordinator.previewJourney?.id) { _, newId in
-            if newId != nil && isDuoPanelCollapsed {
-                withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
-                    isDuoPanelCollapsed = false
-                }
-            }
-        }
-    }
-
-    private var duoCollapsedHeaderPill: some View {
-        Button {
-            withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) {
-                isDuoPanelCollapsed = false
-            }
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: duoActiveTabIcon)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.blue)
-
-                Text(duoCollapsedPillTitle)
-                    .font(.system(.subheadline, design: .rounded))
-                    .fontWeight(.bold)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-
-                Spacer()
-
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .glassEffect(.regular.interactive(), in: Capsule())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var duoActiveTabIcon: String {
-        switch coordinator.selectedTab {
-        case "Nearby": return "location.circle.fill"
-        case "Favorites": return "star.fill"
-        case "Trafic": return "tram.fill"
-        default: return "map.fill"
-        }
-    }
-
-    private var duoCollapsedPillTitle: String {
-        if routeManager.isRouteActive && routeManager.isShowingRouteSheet && coordinator.selectedTab == "Explore" {
-            return routeManager.pillHeadline
-        }
-        if let station = coordinator.selectedStation, coordinator.selectedTab == "Explore" {
-            return station.name
-        }
-        switch coordinator.selectedTab {
-        case "Nearby": return "Stations à proximité"
-        case "Favorites": return "Lignes favorites"
-        case "Trafic": return "État du trafic"
-        default: return "Afficher le panneau Flow"
-        }
-    }
-
-    private var duoFloatingMainPanel: some View {
-        let shape = RoundedRectangle(cornerRadius: 36, style: .continuous)
-
-        return VStack(spacing: 0) {
-            // Barre supérieure discrète avec poignée et bouton de réduction rapide pour voir la carte plein écran
-            HStack(spacing: 8) {
-                Capsule()
-                    .fill(Color.primary.opacity(0.22))
-                    .frame(width: 36, height: 4)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.leading, 32)
-
-                Button {
-                    withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) {
-                        isDuoPanelCollapsed = true
-                    }
-                } label: {
-                    Image(systemName: "arrow.down.right.and.arrow.up.left")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                        .background(Color.primary.opacity(0.08), in: Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Réduire le panneau")
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 10)
-            .padding(.bottom, 2)
-
-            duoSheetActiveTabContent
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .clipShape(shape)
-        .glassEffect(.regular, in: shape)
     }
 
     @ViewBuilder
-    private var duoSheetActiveTabContent: some View {
+    private var duoTabContent: some View {
         switch coordinator.selectedTab {
         case "Explore":
-            exploreSheetTabContent
+            DuoExplorePanelView(searchText: $searchText)
         case "Nearby":
-            NearbyStationsView(embeddedInSheet: true)
+            NearbyStationsView()
         case "Favorites":
             FavoritesView()
         case "Trafic":
@@ -487,25 +144,20 @@ struct ContentView: View {
                 TrafficViewContent()
             }
             .toolbarBackground(.hidden, for: .navigationBar)
-            .liquidGlassBackground()
         default:
-            exploreSheetTabContent
+            DuoExplorePanelView(searchText: $searchText)
         }
     }
 
-    // MARK: - Duo Bottom Floating Dock (Tab Bar Concentric with Inner 55pt Chassis)
+    // MARK: - Duo Bottom Floating Dock (Search Bar + Native Tab Bar Concentric with Chassis)
     private var duoBottomDock: some View {
         VStack(spacing: 8) {
-            let isShowingExploreInlineRoute = coordinator.selectedTab == "Explore"
-                && coordinator.selectedStation == nil
-                && coordinator.previewJourney == nil
-                && searchText.isEmpty
-            if routeManager.isRouteActive
-                && (!routeManager.isShowingRouteSheet || coordinator.selectedTab != "Explore")
-                && !isShowingExploreInlineRoute {
+            if routeManager.isRouteActive && (!routeManager.isShowingRouteSheet || coordinator.selectedTab != "Explore") {
                 ActiveRouteResumePill(routeManager: routeManager)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+
+            duoSearchBar
 
             LiquidGlassFloatingTabBar(
                 selectedTab: $coordinator.selectedTab,
@@ -516,26 +168,74 @@ struct ContentView: View {
                         #if canImport(UIKit)
                         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                         #endif
-                        coordinator.aiSheetDetent = .large
+                        coordinator.aiSheetDetent = .medium
                         coordinator.showAIAssistant = true
                         return
                     }
-                    if tab == "Explore" {
-                        coordinator.selectedStation = nil
-                    }
-                    if isDuoPanelCollapsed {
-                        withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) {
-                            isDuoPanelCollapsed = false
-                        }
-                    }
+                    coordinator.selectedStation = nil
                 }
             )
             .padding(.horizontal, -10)
         }
-        .padding(.leading, 20)
-        .padding(.trailing, 12)
-        .padding(.bottom, 16)
-        .padding(.top, 8)
+        .padding(.leading, 24)
+        .padding(.trailing, 16)
+        .padding(.bottom, 24)
+        .padding(.top, 4)
+    }
+
+    private var duoSearchBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(.secondary)
+                .font(.system(size: 15, weight: .medium))
+
+            TextField("Rechercher station, ligne...", text: $searchText)
+                .font(.system(.subheadline, design: .rounded))
+                .submitLabel(.search)
+                .onSubmit {
+                    if !searchText.isEmpty {
+                        coordinator.selectedTab = "Explore"
+                    }
+                }
+                .onChange(of: searchText) { _, newValue in
+                    if !newValue.isEmpty && coordinator.selectedTab != "Explore" {
+                        coordinator.selectedTab = "Explore"
+                    }
+                }
+
+            if !searchText.isEmpty {
+                Button(action: {
+                    searchText = ""
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
+                        .font(.system(size: 15))
+                }
+                .buttonStyle(.plain)
+            }
+
+            Button(action: {
+                voiceManager.toggleRecording(
+                    onUpdate: { transcript in
+                        searchText = transcript
+                    },
+                    onFinished: { finalTranscript in
+                        searchText = finalTranscript
+                        if !finalTranscript.isEmpty {
+                            coordinator.selectedTab = "Explore"
+                        }
+                    }
+                )
+            }) {
+                Image(systemName: voiceManager.isRecording ? "waveform.circle.fill" : "mic.fill")
+                    .foregroundColor(voiceManager.isRecording ? .red : .secondary)
+                    .font(.system(size: 15, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .glassEffect(.regular.interactive(), in: Capsule())
     }
 
     // MARK: - Architecture Spatiale Localiser (Find My) iOS 26+
@@ -543,7 +243,7 @@ struct ContentView: View {
     // Couche 2 : Feuille modale persistante native iOS 26 (sans .presentationBackground)
     // Couche 3 : Barre d'onglets Liquid Glass intégrée dans la sheet via .safeAreaInset(edge: .bottom),
     //            se morphant continûment (taille, marges, rayon de courbure et .glassEffect) entre .height(84) et .medium/.large
-    private var classicSingleScreenLayout: some View {
+    private func classicSingleScreenLayout(isDuoOuterScreen: Bool) -> some View {
         ZStack(alignment: .topTrailing) {
             AppMapView(showControls: true)
                 .ignoresSafeArea()
@@ -557,9 +257,14 @@ struct ContentView: View {
                 set: { _ in }
             )
         ) {
-            flowSheetContainerView
+            flowSheetContainerView(isDuoOuterScreen: isDuoOuterScreen)
+                .background {
+                    if isDuoOuterScreen {
+                        DuoOuterSheetSizingHelper(targetWidth: 406)
+                    }
+                }
                 .presentationDetents(
-                    [NavigationCoordinator.collapsedSheetDetent, .medium, .large],
+                    activeSheetDetents,
                     selection: $coordinator.exploreSheetDetent
                 )
                 .presentationBackgroundInteraction(
@@ -569,6 +274,13 @@ struct ContentView: View {
                 .presentationDragIndicator(.visible)
                 .interactiveDismissDisabled(true)
                 .environmentObject(coordinator)
+        }
+        .onChange(of: supportsCompactRouteDetent) { _, supported in
+            if !supported && coordinator.exploreSheetDetent == NavigationCoordinator.compactRouteSheetDetent {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                    coordinator.exploreSheetDetent = .medium
+                }
+            }
         }
         .onChange(of: navigationManager.shouldSwitchToMap) { _, shouldSwitch in
             if shouldSwitch {
@@ -602,7 +314,7 @@ struct ContentView: View {
     // s'estompe et se réduit doucement pendant que la Tab Bar se fond dans le verre de la sheet (.identity).
     // Lorsqu'elle s'étend vers .medium / .large, la Tab Bar se détache en capsule Liquid Glass flottante.
     @ViewBuilder
-    private var flowSheetContainerView: some View {
+    private func flowSheetContainerView(isDuoOuterScreen: Bool) -> some View {
         GeometryReader { sheetGeo in
             let isCollapsedDetent = (coordinator.exploreSheetDetent == NavigationCoordinator.collapsedSheetDetent)
             let rawProgress = (sheetGeo.size.height - 116.0) / 64.0
@@ -660,7 +372,7 @@ struct ContentView: View {
                                 #if canImport(UIKit)
                                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                                 #endif
-                                coordinator.aiSheetDetent = .large
+                                coordinator.aiSheetDetent = .medium
                                 coordinator.showAIAssistant = true
                                 return
                             }
@@ -677,6 +389,10 @@ struct ContentView: View {
                             withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
                                 if isUpward {
                                     if coordinator.exploreSheetDetent == NavigationCoordinator.collapsedSheetDetent {
+                                        coordinator.exploreSheetDetent = supportsCompactRouteDetent
+                                            ? NavigationCoordinator.compactRouteSheetDetent
+                                            : .medium
+                                    } else if coordinator.exploreSheetDetent == NavigationCoordinator.compactRouteSheetDetent {
                                         coordinator.exploreSheetDetent = .medium
                                     } else if coordinator.exploreSheetDetent == .medium {
                                         coordinator.exploreSheetDetent = .large
@@ -685,14 +401,18 @@ struct ContentView: View {
                                     if coordinator.exploreSheetDetent == .large {
                                         coordinator.exploreSheetDetent = .medium
                                     } else if coordinator.exploreSheetDetent == .medium {
+                                        coordinator.exploreSheetDetent = supportsCompactRouteDetent
+                                            ? NavigationCoordinator.compactRouteSheetDetent
+                                            : NavigationCoordinator.collapsedSheetDetent
+                                    } else if coordinator.exploreSheetDetent == NavigationCoordinator.compactRouteSheetDetent {
                                         coordinator.exploreSheetDetent = NavigationCoordinator.collapsedSheetDetent
                                     }
                                 }
                             }
                         }
                     )
-                    .padding(.horizontal, -8 + (2 * expandProgress))
-                    .padding(.bottom, 8 + (4 * expandProgress))
+                    .padding(.horizontal, isDuoOuterScreen ? 6 : (-8 + (2 * expandProgress)))
+                    .padding(.bottom, (isDuoOuterScreen ? 10 : 8) + (4 * expandProgress))
                 }
                 .animation(.spring(response: 0.32, dampingFraction: 0.84), value: shouldMergePlatter)
             }
@@ -702,16 +422,16 @@ struct ContentView: View {
                     coordinator.isSheetMergedWithTabBar = newValue
                 }
             }
-            .onChange(of: expandProgress) { _, newProgress in
-                if abs(coordinator.sheetExpandProgress - newProgress) > 0.01 {
-                    coordinator.sheetExpandProgress = newProgress
+            .onChange(of: sheetGeo.size.height) { _, newHeight in
+                if abs(coordinator.sheetHeight - newHeight) > 16.0 {
+                    coordinator.sheetHeight = newHeight
                 }
             }
             .onAppear {
                 if coordinator.isSheetMergedWithTabBar != shouldMergePlatter {
                     coordinator.isSheetMergedWithTabBar = shouldMergePlatter
                 }
-                coordinator.sheetExpandProgress = expandProgress
+                coordinator.sheetHeight = sheetGeo.size.height
             }
         }
         .ignoresSafeArea(.container, edges: .bottom)
@@ -723,6 +443,11 @@ struct ContentView: View {
                 coordinator.isSheetMergedWithTabBar = collapsed
             }
             if collapsed {
+                if coordinator.selectedStation != nil {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        coordinator.selectedStation = nil
+                    }
+                }
                 #if canImport(UIKit)
                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 #endif
@@ -1091,66 +816,50 @@ struct TrafficLineCell: View {
     }
 }
 
-// MARK: - Barre d'onglets verticale Liquid Glass pour l'écran extérieur de l'iPhone Duo
-private struct DuoVerticalLiquidGlassTabBar: View {
-    @Binding var selectedTab: String
-    var showAIAssistant: Bool
-    var onSelectTab: (String) -> Void
+#if canImport(UIKit)
+private struct DuoOuterSheetSizingHelper: UIViewControllerRepresentable {
+    let targetWidth: CGFloat
 
-    @Namespace private var tabSelectionNamespace
+    func makeUIViewController(context: Context) -> HelperVC {
+        let vc = HelperVC()
+        vc.targetWidth = targetWidth
+        return vc
+    }
 
-    var body: some View {
-        VStack(spacing: 6) {
-            ForEach(LiquidGlassTabItem.unifiedTabs) { tab in
-                let isSelected = (tab.id != "AI" && selectedTab == tab.id)
-                    || (tab.id == "AI" && showAIAssistant)
+    func updateUIViewController(_ uiViewController: HelperVC, context: Context) {
+        uiViewController.targetWidth = targetWidth
+        uiViewController.applySizing()
+    }
 
-                Button {
-                    #if canImport(UIKit)
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    #endif
-                    withAnimation(.spring(response: 0.34, dampingFraction: 0.78)) {
-                        if tab.id != "AI" {
-                            selectedTab = tab.id
-                        }
-                        onSelectTab(tab.id)
-                    }
-                } label: {
-                    VStack(spacing: 2) {
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(
-                                tab.id == "AI"
-                                ? AnyShapeStyle(LinearGradient(colors: [.purple, .blue], startPoint: .topLeading, endPoint: .bottomTrailing))
-                                : AnyShapeStyle(isSelected ? Color.blue : Color.primary.opacity(0.80))
-                            )
+    final class HelperVC: UIViewController {
+        var targetWidth: CGFloat = 406
 
-                        Text(tab.label)
-                            .font(.system(size: 8.5, weight: isSelected ? .bold : .medium, design: .rounded))
-                            .foregroundStyle(isSelected ? Color.blue : Color.secondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
-                    }
-                    .frame(width: 50, height: 50)
-                    .background {
-                        if isSelected {
-                            Circle()
-                                .fill(tab.id == "AI" ? Color.purple.opacity(0.18) : Color.blue.opacity(0.16))
-                                .glassEffect(.regular.interactive(), in: Circle())
-                                .glassEffectID("duoOuterActiveTabPill", in: tabSelectionNamespace)
-                        }
-                    }
-                    .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(tab.label)
+        override func viewWillAppear(_ animated: Bool) {
+            super.viewWillAppear(animated)
+            applySizing()
+        }
+
+        override func viewDidLayoutSubviews() {
+            super.viewDidLayoutSubviews()
+            applySizing()
+        }
+
+        func applySizing() {
+            guard let presentingHost = parent ?? self.presentingViewController?.presentedViewController else { return }
+            presentingHost.preferredContentSize = CGSize(width: targetWidth, height: 0)
+            if let sheet = presentingHost.sheetPresentationController {
+                sheet.prefersPageSizing = false
+                sheet.widthFollowsPreferredContentSizeWhenEdgeAttached = true
             }
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 6)
-        .glassEffect(.regular.interactive(), in: Capsule())
     }
 }
+#else
+private struct DuoOuterSheetSizingHelper: View {
+    let targetWidth: CGFloat
+    var body: some View { Color.clear }
+}
+#endif
 
 #Preview {
     ContentView(showLoading: false)

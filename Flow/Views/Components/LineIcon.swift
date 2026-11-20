@@ -174,7 +174,7 @@ struct LineIcon: View {
 
     private var resolvedAssetName: String? {
         let primary = self.assetName
-        if UIImage(named: primary) != nil {
+        if AssetPresenceCache.exists(primary) {
             return primary
         }
         
@@ -187,7 +187,7 @@ struct LineIcon: View {
             clean
         ]
         for candidate in candidates {
-            if UIImage(named: candidate) != nil {
+            if AssetPresenceCache.exists(candidate) {
                 return candidate
             }
         }

@@ -34,6 +34,17 @@ enum TransportType: String, CaseIterable, Identifiable, Codable {
         }
     }
 
+    /// Ordre d'affichage des modes : Tram -> Métro -> RER / Transilien -> Câble -> Bus
+    nonisolated var displayOrderRank: Int {
+        switch self {
+        case .tram: return 0
+        case .metro: return 1
+        case .rer, .transilien, .train: return 2
+        case .cable: return 3
+        case .bus: return 4
+        }
+    }
+
     static func getAssetName(mode: String?, label: String) -> String {
         guard let mode = mode else { return "" }
         let normalizedMode = mode.lowercased().folding(

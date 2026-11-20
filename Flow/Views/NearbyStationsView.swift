@@ -400,9 +400,7 @@ struct NearbyStationRow: View {
 
     private func formatDepartureTime(_ departure: Departure) -> String {
         let isoDate = departure.stopDateTime.departureDateTime
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd'T'HHmmss"
-        if let date = formatter.date(from: isoDate) {
+        if let date = DateFormat.navitia.date(from: isoDate) {
             let diff = Int(date.timeIntervalSinceNow / 60)
             if diff <= 0 { return "0 min" }
             return "\(diff) min"

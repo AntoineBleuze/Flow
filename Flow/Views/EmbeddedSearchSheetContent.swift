@@ -28,6 +28,7 @@ struct EmbeddedSearchSheetContent: View {
     @Environment(\.modelContext) private var context
     @State private var cancellables = Set<AnyCancellable>()
     @State private var currentSearch: MKLocalSearch? = nil
+    @State private var searchTask: Task<Void, Never>? = nil
 
     private var nearbyStations: [MapStation] {
         let nearby = StationSuggestionEngine.nearbySuggestions(
@@ -544,6 +545,7 @@ struct EmbeddedSearchSheetContent: View {
 
     private func performSearch(query: String) {
         currentSearch?.cancel()
+        searchTask?.cancel()
 
         guard !query.isEmpty else {
             searchResults = []
@@ -560,108 +562,66 @@ struct EmbeddedSearchSheetContent: View {
             return
         }
 
+        let userLocation = locationManager.userLocation
+        let favoriteIds = favoritesService.favoriteStationIds
+        let recentIds = Set(historyManager.recentStations.map { $0.id })
+
+        // 1. Filtrage immédiat en mémoire (latence 0 ms) sur les stations ferrées
         let matchingRailStations = MapDataService.shared.allStations.filter { station in
             StationSuggestionEngine.matchesQuery(text: station.name, tokens: tokens)
                 || (station.city != nil && StationSuggestionEngine.matchesQuery(text: station.city!, tokens: tokens))
         }
+        let immediateRanked = StationSuggestionEngine.rank(
+            stations: matchingRailStations,
+            query: query,
+            userLocation: userLocation,
+            favoriteIds: favoriteIds,
+            recentIds: recentIds
+        )
+        searchResults = immediateRanked
 
         let tokenVariants = StationSuggestionEngine.accentVariants(for: tokens[0])
-        var busResults: [StopPointModel] = []
-        for variant in tokenVariants.prefix(6) {
-            var descriptor = FetchDescriptor<StopPointModel>(
-                predicate: #Predicate<StopPointModel> { stop in
-                    stop.type == "Bus" && stop.name.contains(variant)
-                },
-                sortBy: [SortDescriptor(\.name, order: .forward)]
-            )
-            descriptor.fetchLimit = 80
-            if let results = try? context.fetch(descriptor) {
-                for r in results {
-                    if !busResults.contains(where: { $0.id == r.id }) {
-                        busResults.append(r)
-                    }
-                }
-            }
-        }
-
-        let filteredBus = busResults.filter { stop in
-            StationSuggestionEngine.matchesQuery(text: stop.name, tokens: tokens)
-                || StationSuggestionEngine.matchesQuery(text: stop.city, tokens: tokens)
-        }
-
-        let groupedBus = Dictionary(grouping: filteredBus) { "\($0.name)_\($0.city)" }
-
-        let busStations: [MapStation] = groupedBus.compactMap { (_, stops) -> MapStation? in
-            guard let first = stops.first else { return nil }
-            let name = first.name
-
-            let totalLat = stops.reduce(0.0) { $0 + $1.latitude }
-            let totalLon = stops.reduce(0.0) { $0 + $1.longitude }
-            let count = Double(stops.count)
-            let center = CLLocationCoordinate2D(
-                latitude: totalLat / count, longitude: totalLon / count)
-
-            let platforms = stops.map { entity -> StopPoint in
-                let coordinate = CLLocationCoordinate2D(
-                    latitude: entity.latitude, longitude: entity.longitude)
-                let type = mapType(entity.type)
-
-                return StopPoint(
-                    id: entity.id,
-                    stopAreaId: entity.stopAreaId,
-                    name: name,
-                    coordinate: coordinate,
-                    type: type,
-                    lineName: entity.lineName
-                )
-            }
-
-            let stationId: String = first.stopAreaId.isEmpty ? first.id : first.stopAreaId
-
-            let uniqueLines = Set(stops.map { entity in
-                StationLine(name: entity.lineName, type: mapType(entity.type))
-            })
-            let sortedLines = Array(uniqueLines).sorted { $0.name < $1.name }
-
-            return MapStation(
-                id: stationId,
-                name: name,
-                coordinate: center,
-                platforms: platforms,
-                isHub: false,
-                mainType: .bus,
-                lines: sortedLines,
-                city: first.city.isEmpty ? "Paris" : first.city
-            )
-        }
-
-        let allResults = matchingRailStations + busStations
-        let ranked = StationSuggestionEngine.rank(
-            stations: allResults,
-            query: query,
-            userLocation: locationManager.userLocation,
-            favoriteIds: favoritesService.favoriteStationIds,
-            recentIds: Set(historyManager.recentStations.map { $0.id })
-        )
-        searchResults = ranked
-
-        let searchRequest = MKLocalSearch.Request()
-        searchRequest.naturalLanguageQuery = query
         let parisCenter = CLLocationCoordinate2D(latitude: 48.8566, longitude: 2.3522)
-        let searchCenter = locationManager.userLocation ?? parisCenter
-        searchRequest.region = MKCoordinateRegion(
-            center: searchCenter,
-            latitudinalMeters: 30000,
-            longitudinalMeters: 30000
-        )
+        let searchCenter = userLocation ?? parisCenter
+        let container = SwiftDataStack.shared.container
 
-        let search = MKLocalSearch(request: searchRequest)
-        currentSearch = search
+        // 2. Recherche asynchrone débouclée hors @MainActor (SwiftData bus + MapKit)
+        searchTask = Task {
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
 
-        search.start { response, error in
-            guard let response = response, error == nil else {
-                return
-            }
+            let importer = TransportDataImporter(modelContainer: container)
+            let busStops = (try? await importer.searchBusStops(variants: tokenVariants, busOnly: true, fetchLimit: 80)) ?? []
+            guard !Task.isCancelled else { return }
+
+            let busStations = StationSuggestionEngine.buildStations(
+                from: busStops,
+                tokens: tokens,
+                includePlatformsAndLines: true
+            )
+            let localRanked = StationSuggestionEngine.rank(
+                stations: matchingRailStations + busStations,
+                query: query,
+                userLocation: userLocation,
+                favoriteIds: favoriteIds,
+                recentIds: recentIds
+            )
+            self.searchResults = localRanked
+
+            try? await Task.sleep(for: .milliseconds(130))
+            guard !Task.isCancelled else { return }
+
+            let searchRequest = MKLocalSearch.Request()
+            searchRequest.naturalLanguageQuery = query
+            searchRequest.region = MKCoordinateRegion(
+                center: searchCenter,
+                latitudinalMeters: 30000,
+                longitudinalMeters: 30000
+            )
+
+            let search = MKLocalSearch(request: searchRequest)
+            self.currentSearch = search
+            guard let response = try? await search.start(), !Task.isCancelled else { return }
 
             let addressStations: [MapStation] = response.mapItems.map { item in
                 let coordinate = item.location.coordinate
@@ -680,21 +640,19 @@ struct EmbeddedSearchSheetContent: View {
                 )
             }
 
-            DispatchQueue.main.async {
-                var merged = ranked
-                for addr in addressStations {
-                    if !merged.contains(where: { $0.id == addr.id }) {
-                        merged.append(addr)
-                    }
+            var merged = localRanked
+            for addr in addressStations {
+                if !merged.contains(where: { $0.id == addr.id }) {
+                    merged.append(addr)
                 }
-                self.searchResults = StationSuggestionEngine.rank(
-                    stations: merged,
-                    query: query,
-                    userLocation: self.locationManager.userLocation,
-                    favoriteIds: self.favoritesService.favoriteStationIds,
-                    recentIds: Set(self.historyManager.recentStations.map { $0.id })
-                )
             }
+            self.searchResults = StationSuggestionEngine.rank(
+                stations: merged,
+                query: query,
+                userLocation: self.locationManager.userLocation,
+                favoriteIds: self.favoritesService.favoriteStationIds,
+                recentIds: Set(self.historyManager.recentStations.map { $0.id })
+            )
         }
     }
 

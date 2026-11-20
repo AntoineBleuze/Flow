@@ -597,8 +597,22 @@ public struct FlowAssistantView: View {
     public init() {}
 
     public var body: some View {
+        let isExtended = coordinator.aiSheetDetent == .large
+
         ZStack {
-            // Fond MeshGradient fluide respectant la transparence Liquid Glass native de la sheet
+            // Fond opaque/givré uniquement lorsque la sheet est étendue à .large pour une lisibilité parfaite
+            Group {
+                Rectangle()
+                    .fill(.regularMaterial)
+                Rectangle()
+                    .fill(Color(.systemBackground).opacity(colorScheme == .dark ? 0.72 : 0.78))
+            }
+            .opacity(isExtended ? 1.0 : 0.0)
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .animation(.easeInOut(duration: 0.28), value: isExtended)
+
+            // Fond MeshGradient fluide animé
             AnimatedAIMeshBackground(isGenerating: aiService.isGenerating)
 
             VStack(spacing: 0) {
@@ -607,7 +621,7 @@ public struct FlowAssistantView: View {
                 floatingInputBar
             }
         }
-        .liquidGlassBackground()
+        .scrollContentBackground(.hidden)
         .onAppear {
             LocationManager.shared.requestLocation()
         }
@@ -615,6 +629,13 @@ public struct FlowAssistantView: View {
             hapticController.stopLoop(playCompletion: false)
             if voiceManager.isRecording {
                 voiceManager.stopRecording()
+            }
+        }
+        .onChange(of: aiService.isStreamingText) { _, streaming in
+            if streaming && coordinator.aiSheetDetent != .large {
+                withAnimation(.spring(response: 0.42, dampingFraction: 0.84)) {
+                    coordinator.aiSheetDetent = .large
+                }
             }
         }
         .onChange(of: aiService.isGenerating) { _, generating in
@@ -627,6 +648,11 @@ public struct FlowAssistantView: View {
                     playCompletion: true,
                     isError: aiService.lastError != nil
                 )
+                if messages.count > 1 && coordinator.aiSheetDetent != .large {
+                    withAnimation(.spring(response: 0.42, dampingFraction: 0.84)) {
+                        coordinator.aiSheetDetent = .large
+                    }
+                }
             }
         }
         .onChange(of: aiService.latestGeneratedJourneys.map(\.id)) { _, _ in

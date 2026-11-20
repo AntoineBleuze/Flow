@@ -19,7 +19,7 @@ class FlowServerService: ObservableObject {
     // MARK: - Configuration
 
     private let primaryHost = "apiflow.hd.free.fr"
-    private let fallbackIP = "192.168.1.190"
+    private let fallbackIP = "192.168.1.197"
     private let fallbackPort = "3001"
 
     /// URL de base du serveur FlowServer (REST)
@@ -528,9 +528,7 @@ class FlowServerService: ObservableObject {
         let fromCoord = "\(from.longitude);\(from.latitude)"
         let toCoord = "\(to.longitude);\(to.latitude)"
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd'T'HHmmss"
-        let dateStr = formatter.string(from: date)
+        let dateStr = DateFormat.navitia.string(from: date)
 
         var components = URLComponents(string: "\(baseURL)/api/itinerary")!
         var queryItems = [
