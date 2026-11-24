@@ -64,6 +64,8 @@ struct AppMapView: View {
                     journey: navigationManager.isNavigating ? navigationManager.currentJourney : (coordinator.previewJourney ?? selectedJourney),
                     focusedLinePreview: coordinator.focusedLinePreview,
                     focusedSectionId: coordinator.focusedSectionId,
+                    sheetHeight: coordinator.sheetHeight,
+                    sheetDetent: coordinator.exploreSheetDetent,
                     useMainMap: showControls,
                     showAnnotations: showControls
                 )

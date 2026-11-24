@@ -181,9 +181,10 @@ struct MiniLinePlanView: View {
         if data.allStations.isEmpty {
             MiniFallbackPlanView(line: line, info: info)
         } else {
-            let sections = data.schematicSections
-            let hasBranches = !sections.topBranches.isEmpty || !sections.branches.isEmpty
+            let layout = data.schematicLayout
+            let hasGridBranches = layout.rowCount > 1
             let resolvedLineColor = resolveLineColor(line.lineId, type: line.type)
+            let normalOpacity = affectedStations.isEmpty ? 1.0 : 0.45
             
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
@@ -210,28 +211,36 @@ struct MiniLinePlanView: View {
                     .buttonStyle(.plain)
                 }
                 
-                if hasBranches {
-                    ScrollView([.horizontal, .vertical], showsIndicators: true) {
-                        BranchedHorizontalTimelineView(
-                            sections: sections,
-                            affectedStations: affectedStations,
-                            lineColor: resolvedLineColor,
-                            severityColor: info.severity.color,
-                            severityIcon: info.severity.icon,
-                            normalOpacity: 0.4
-                        )
-                        .padding(.top, 24)
-                        .padding(.leading, 16)
-                        .padding(.trailing, 75)
-                        .padding(.bottom, 16)
-                    }
-                    .frame(minHeight: 220, maxHeight: 380)
-                    .background(Color.primary.opacity(0.04))
-                    .cornerRadius(14)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                if hasGridBranches {
+                    let focusCol = SchematicGridPlanView.recommendedFocusCol(
+                        layout: layout,
+                        affectedStations: affectedStations
                     )
+                    let containerHeight: CGFloat = layout.rowCount == 2 ? 236 : 310
+                    ScrollViewReader { proxy in
+                        ScrollView([.horizontal, .vertical], showsIndicators: true) {
+                            SchematicGridPlanView(
+                                layout: layout,
+                                affectedStations: affectedStations,
+                                lineColor: resolvedLineColor,
+                                severityColor: info.severity.color,
+                                severityIcon: info.severity.icon,
+                                showTransfers: false
+                            )
+                        }
+                        .frame(minHeight: 220, maxHeight: containerHeight)
+                        .background(Color.primary.opacity(0.04))
+                        .cornerRadius(14)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                        )
+                        .onAppear {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                proxy.scrollTo("grid_col_\(focusCol)", anchor: .center)
+                            }
+                        }
+                    }
                 } else {
                     let timelineItems = buildTimeline(data: data)
                     ScrollView(.horizontal, showsIndicators: true) {
@@ -261,7 +270,7 @@ struct MiniLinePlanView: View {
                                     isLineAfterAffected: isLineAfterAffected,
                                     isLineBeforeDashed: isLineBeforeDashed,
                                     isLineAfterDashed: isLineAfterDashed,
-                                    normalOpacity: 0.4,
+                                    normalOpacity: normalOpacity,
                                     isTerminus: isFirst || isLast
                                 )
                             }
@@ -282,19 +291,25 @@ struct MiniLinePlanView: View {
             }
             .sheet(isPresented: $showFullPlan) {
                 NavigationStack {
-                    LineSchematicPlanView(
-                        line: line,
-                        affectedStations: affectedStations,
-                        severityColor: info.severity.color,
-                        severityIcon: info.severity.icon
-                    )
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Fermer") {
-                                showFullPlan = false
-                            }
+                    VStack(spacing: 0) {
+                        AccountSheetHeader(
+                            title: "Plan de la ligne",
+                            fontSize: 22,
+                            buttonIcon: "xmark",
+                            accessibilityLabel: "Fermer"
+                        ) {
+                            showFullPlan = false
                         }
+
+                        LineSchematicPlanView(
+                            line: line,
+                            affectedStations: affectedStations,
+                            severityColor: info.severity.color,
+                            severityIcon: info.severity.icon
+                        )
                     }
+                    .liquidGlassBackground()
+                    .toolbar(.hidden, for: .navigationBar)
                 }
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
@@ -794,7 +809,7 @@ struct FlowLayout: Layout {
         var maxRowWidth: CGFloat = 0
         
         for size in sizes {
-            if currentX + size.width > width {
+            if currentX > 0 && currentX + size.width > width + 0.5 {
                 maxRowWidth = max(maxRowWidth, currentX - spacing)
                 currentX = 0
                 currentY += rowHeight + spacing
@@ -805,7 +820,8 @@ struct FlowLayout: Layout {
         }
         maxRowWidth = max(maxRowWidth, currentX - spacing)
         
-        return CGSize(width: maxRowWidth, height: currentY + rowHeight)
+        let finalWidth = proposal.width ?? maxRowWidth
+        return CGSize(width: finalWidth, height: currentY + rowHeight)
     }
     
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
@@ -818,7 +834,7 @@ struct FlowLayout: Layout {
         
         for index in subviews.indices {
             let size = sizes[index]
-            if currentX + size.width > bounds.minX + width {
+            if currentX > bounds.minX && currentX + size.width > bounds.minX + width + 0.5 {
                 currentX = bounds.minX
                 currentY += rowHeight + spacing
                 rowHeight = 0
@@ -830,69 +846,204 @@ struct FlowLayout: Layout {
     }
 }
 
+struct SchematicGridPlanView: View {
+    let layout: LocalLineData.SchematicLayout
+    let affectedStations: Set<String>
+    let lineColor: Color
+    let severityColor: Color
+    let severityIcon: String
+    var showTransfers: Bool = false
+
+    private var colSpacing: CGFloat { showTransfers ? 54 : 40 }
+    private var rowSpacing: CGFloat { showTransfers ? 136 : 104 }
+    private var topPadding: CGFloat { showTransfers ? 110 : 98 }
+    private var leftPadding: CGFloat { showTransfers ? 34 : 28 }
+    private var rightPadding: CGFloat { showTransfers ? 115 : 95 }
+    private var bottomPadding: CGFloat { showTransfers ? 48 : 26 }
+
+    static func recommendedFocusCol(
+        layout: LocalLineData.SchematicLayout,
+        affectedStations: Set<String>
+    ) -> Int {
+        if !affectedStations.isEmpty,
+           let affectedNode = layout.nodes.first(where: { affectedStations.contains($0.station.nom) }) {
+            return affectedNode.col
+        }
+        if let junctionNode = layout.nodes.first(where: \.isJunction) {
+            return junctionNode.col
+        }
+        if let branchNode = layout.nodes.first(where: { $0.row > 0 }) {
+            return branchNode.col
+        }
+        return max(0, layout.colCount / 2)
+    }
+
+    var body: some View {
+        let maxCol = max(0, layout.colCount - 1)
+        let effectiveRowCount = max(1, layout.rowCount)
+        let totalWidth = leftPadding + CGFloat(maxCol) * colSpacing + rightPadding
+        let totalHeight = topPadding + CGFloat(effectiveRowCount - 1) * rowSpacing + bottomPadding
+
+        let normalOpacity: Double = affectedStations.isEmpty ? 1.0 : 0.55
+        let baseLineColor = lineColor.opacity(normalOpacity)
+        let normalDotColor = affectedStations.isEmpty ? lineColor : lineColor.opacity(0.75)
+
+        let positions: [CGPoint] = layout.nodes.map { node in
+            CGPoint(
+                x: leftPadding + CGFloat(node.col) * colSpacing,
+                y: topPadding + CGFloat(node.row) * rowSpacing
+            )
+        }
+
+        ZStack(alignment: .topLeading) {
+            // Column anchor strip for ScrollViewReader
+            HStack(spacing: 0) {
+                ForEach(0...maxCol, id: \.self) { col in
+                    Color.clear
+                        .frame(width: colSpacing, height: 1)
+                        .id("grid_col_\(col)")
+                }
+            }
+            .padding(.leading, max(0, leftPadding - colSpacing / 2))
+
+            // Edges & IDFM rounded double-elbow junction connectors
+            Canvas { context, _ in
+                let isEdgeAffected: (LocalLineData.SchematicEdge) -> Bool = { edge in
+                    let u = layout.nodes[edge.fromIndex].station.nom
+                    let v = layout.nodes[edge.toIndex].station.nom
+                    return affectedStations.contains(u) && affectedStations.contains(v)
+                }
+
+                let orderedEdges = layout.edges.filter { !isEdgeAffected($0) } + layout.edges.filter { isEdgeAffected($0) }
+                let strokeWidth: CGFloat = showTransfers ? 6 : 5
+
+                for edge in orderedEdges {
+                    let p1 = positions[edge.fromIndex]
+                    let p2 = positions[edge.toIndex]
+
+                    var path = Path()
+                    if abs(p1.y - p2.y) < 0.5 {
+                        path.move(to: p1)
+                        path.addLine(to: p2)
+                    } else {
+                        let midX = (p1.x + p2.x) / 2
+                        let r = min(14, abs(p2.x - p1.x) / 2, abs(p2.y - p1.y) / 2)
+                        path.move(to: p1)
+                        path.addArc(
+                            tangent1End: CGPoint(x: midX, y: p1.y),
+                            tangent2End: CGPoint(x: midX, y: p2.y),
+                            radius: r
+                        )
+                        path.addArc(
+                            tangent1End: CGPoint(x: midX, y: p2.y),
+                            tangent2End: p2,
+                            radius: r
+                        )
+                        path.addLine(to: p2)
+                    }
+
+                    let affected = isEdgeAffected(edge)
+                    let strokeColor = affected ? severityColor : baseLineColor
+                    let style = edge.isDashed
+                        ? StrokeStyle(lineWidth: strokeWidth, lineCap: .round, lineJoin: .round, dash: [4, 4])
+                        : StrokeStyle(lineWidth: strokeWidth, lineCap: .round, lineJoin: .round)
+
+                    context.stroke(path, with: .color(strokeColor), style: style)
+                }
+            }
+            .frame(width: totalWidth, height: totalHeight)
+
+            // Station dots, rotated labels, and optional transfer icons
+            ForEach(Array(layout.nodes.enumerated()), id: \.element.id) { idx, node in
+                let pos = positions[idx]
+                let isAffected = affectedStations.contains(node.station.nom)
+                let dotSize: CGFloat = node.isTerminus ? (showTransfers ? 18 : 15) : (showTransfers ? 13 : 11)
+
+                ZStack {
+                    if isAffected {
+                        Circle()
+                            .fill(severityColor.opacity(0.22))
+                            .frame(width: dotSize + 8, height: dotSize + 8)
+                        Circle()
+                            .fill(severityColor)
+                            .frame(width: dotSize, height: dotSize)
+                        Circle()
+                            .fill(Color.white)
+                            .frame(width: showTransfers ? 6 : 4.5, height: showTransfers ? 6 : 4.5)
+                    } else if node.station.isUnderConstruction {
+                        Circle()
+                            .fill(Color(uiColor: .systemBackground))
+                            .frame(width: dotSize + 2, height: dotSize + 2)
+                        Circle()
+                            .strokeBorder(normalDotColor, style: StrokeStyle(lineWidth: 2, dash: [2.5, 2]))
+                            .frame(width: dotSize, height: dotSize)
+                    } else if node.isTerminus {
+                        Circle()
+                            .fill(Color(uiColor: .systemBackground))
+                            .frame(width: dotSize + 2, height: dotSize + 2)
+                        Circle()
+                            .stroke(normalDotColor, lineWidth: showTransfers ? 3.5 : 3)
+                            .frame(width: dotSize, height: dotSize)
+                    } else {
+                        Circle()
+                            .fill(Color(uiColor: .systemBackground))
+                            .frame(width: dotSize + 2, height: dotSize + 2)
+                        Circle()
+                            .stroke(normalDotColor, lineWidth: showTransfers ? 2.5 : 2.2)
+                            .frame(width: dotSize, height: dotSize)
+                    }
+                }
+                .frame(width: 24, height: 24)
+                .offset(x: pos.x - 12, y: pos.y - 12)
+
+                HStack(spacing: 3) {
+                    Text(node.station.nom)
+                        .font(.system(size: showTransfers ? 11.5 : 10.5, weight: (isAffected || node.isTerminus || node.isJunction) ? .bold : .medium, design: .rounded))
+                        .foregroundColor(isAffected ? severityColor : (node.station.isUnderConstruction ? .secondary : .primary))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                    if isAffected {
+                        Image(systemName: severityIcon)
+                            .font(.system(size: showTransfers ? 10 : 9, weight: .bold))
+                            .foregroundColor(severityColor)
+                    }
+                }
+                .frame(width: showTransfers ? 128 : 114, height: 16, alignment: .bottomLeading)
+                .rotationEffect(.degrees(-40), anchor: .bottomLeading)
+                .offset(x: pos.x - 3, y: pos.y - 25)
+
+                if showTransfers && !node.station.correspondances.isEmpty {
+                    HStack(spacing: 2) {
+                        ForEach(node.station.correspondances.prefix(3), id: \.self) { transfer in
+                            TransferIcon(transferCode: transfer)
+                                .scaleEffect(0.78)
+                                .frame(width: 14, height: 14)
+                        }
+                    }
+                    .frame(width: colSpacing - 4, alignment: .center)
+                    .offset(x: pos.x - (colSpacing - 4) / 2, y: pos.y + 13)
+                }
+            }
+        }
+        .frame(width: totalWidth, height: totalHeight, alignment: .topLeading)
+    }
+}
+
 struct LineGraph {
     var adjList: [String: Set<String>] = [:]
     
     init(lineData: LocalLineData) {
-        let sections = lineData.schematicSections
+        let layout = lineData.schematicLayout
         
         func addEdge(_ u: String, _ v: String) {
             adjList[u, default: []].insert(v)
             adjList[v, default: []].insert(u)
         }
         
-        if !sections.leadIn.isEmpty {
-            for i in 0..<(sections.leadIn.count - 1) {
-                addEdge(sections.leadIn[i].nom, sections.leadIn[i+1].nom)
-            }
-        }
-        
-        if !sections.trunk.isEmpty {
-            for i in 0..<(sections.trunk.count - 1) {
-                addEdge(sections.trunk[i].nom, sections.trunk[i+1].nom)
-            }
-        }
-        
-        if !sections.leadOut.isEmpty {
-            for i in 0..<(sections.leadOut.count - 1) {
-                addEdge(sections.leadOut[i].nom, sections.leadOut[i+1].nom)
-            }
-        }
-        
-        if let lastLeadIn = sections.leadIn.last?.nom, let firstTrunk = sections.trunk.first?.nom {
-            addEdge(lastLeadIn, firstTrunk)
-        }
-        
-        if let lastTrunk = sections.trunk.last?.nom, let firstLeadOut = sections.leadOut.first?.nom {
-            addEdge(lastTrunk, firstLeadOut)
-        }
-        
-        if !sections.topBranches.isEmpty {
-            let mergeTarget = sections.leadIn.first?.nom ?? sections.trunk.first?.nom
-            for branch in sections.topBranches {
-                if !branch.stations.isEmpty {
-                    for i in 0..<(branch.stations.count - 1) {
-                        addEdge(branch.stations[i].nom, branch.stations[i+1].nom)
-                    }
-                    if let lastBranchStation = branch.stations.last?.nom, let target = mergeTarget {
-                        addEdge(lastBranchStation, target)
-                    }
-                }
-            }
-        }
-        
-        if !sections.branches.isEmpty {
-            let forkSource = sections.trunk.last?.nom ?? sections.leadIn.last?.nom
-            for branch in sections.branches {
-                if !branch.stations.isEmpty {
-                    for i in 0..<(branch.stations.count - 1) {
-                        addEdge(branch.stations[i].nom, branch.stations[i+1].nom)
-                    }
-                    if let firstBranchStation = branch.stations.first?.nom, let source = forkSource {
-                        addEdge(source, firstBranchStation)
-                    }
-                }
-            }
+        for edge in layout.edges {
+            let u = layout.nodes[edge.fromIndex].station.nom
+            let v = layout.nodes[edge.toIndex].station.nom
+            addEdge(u, v)
         }
     }
     

@@ -39,6 +39,7 @@ class NavigationCoordinator: ObservableObject {
     @Published var isAIPreviewActive: Bool = false
     @Published var showAIAssistant: Bool = false
     @Published var aiSheetDetent: PresentationDetent = .large
+    @Published var showAccountSheet: Bool = false
     @Published var focusedSectionId: String? = nil
     
     func recenterMap() {

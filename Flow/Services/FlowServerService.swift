@@ -54,6 +54,9 @@ class FlowServerService: ObservableObject {
     private var isAppInBackground = false
 
     private init() {
+        if let savedEnabled = UserDefaults(suiteName: "group.AntoineBleuze.Flow")?.object(forKey: "pref_useFlowServer") as? Bool {
+            self.isEnabled = savedEnabled
+        }
         determineBestURL()
         
         #if os(iOS)

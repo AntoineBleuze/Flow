@@ -23,22 +23,13 @@ struct EmbeddedSearchSheetContent: View {
     @ObservedObject var locationManager = LocationManager.shared
     @ObservedObject var routeManager = RouteNavigationManager.shared
     @ObservedObject var navigationManager = NavigationManager.shared
+    @ObservedObject var preferences = UserPreferencesManager.shared
     @StateObject private var voiceManager = VoiceDictationManager.shared
 
     @Environment(\.modelContext) private var context
     @State private var cancellables = Set<AnyCancellable>()
     @State private var currentSearch: MKLocalSearch? = nil
     @State private var searchTask: Task<Void, Never>? = nil
-
-    private var nearbyStations: [MapStation] {
-        let nearby = StationSuggestionEngine.nearbySuggestions(
-            from: mapData.allStations,
-            userLocation: locationManager.userLocation,
-            maxResults: 5
-        )
-        let recentIds = Set(historyManager.recentStations.map { $0.id })
-        return nearby.filter { !recentIds.contains($0.id) }
-    }
 
     init(
         searchText: Binding<String>,
@@ -55,26 +46,37 @@ struct EmbeddedSearchSheetContent: View {
     var body: some View {
         VStack(spacing: 10) {
             if showsSearchBar {
-                standaloneSearchBar
-                    .padding(.horizontal, 16)
-                    .padding(.top, 14)
+                HStack(spacing: 10) {
+                    standaloneSearchBar
+
+                    if !isFieldFocused && searchText.isEmpty {
+                        AccountAvatarButton(size: 38)
+                            .transition(.scale.combined(with: .opacity))
+                    }
+                }
+                .animation(.spring(response: 0.28, dampingFraction: 0.8), value: isFieldFocused || !searchText.isEmpty)
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
             }
 
             ScrollView {
                 LazyVStack(spacing: 18) {
                     if searchText.isEmpty {
                         let activeJourney = routeManager.isRouteActive ? (routeManager.activeJourney ?? navigationManager.currentJourney) : nil
-                        if historyManager.recentStations.isEmpty && favoritesService.favoriteStationIds.isEmpty && nearbyStations.isEmpty && activeJourney == nil {
+                        let hasSavedPlaces = preferences.homePlace != nil || preferences.workPlace != nil
+                        if historyManager.recentStations.isEmpty && favoritesService.favoriteStationIds.isEmpty && activeJourney == nil && !hasSavedPlaces {
                             emptyHistoryView
                         } else {
+                            if hasSavedPlaces {
+                                savedPlacesSection
+                            }
+
                             if !historyManager.recentStations.isEmpty {
                                 recentSearchesSection
                             }
 
                             if let journey = activeJourney {
                                 activeRouteSection(journey: journey)
-                            } else if !nearbyStations.isEmpty {
-                                nearbyStationsSection
                             }
 
                             if !favoritesService.favoriteStationIds.isEmpty {
@@ -202,6 +204,65 @@ struct EmbeddedSearchSheetContent: View {
     }
 
     // MARK: - Sections
+    private var savedPlacesSection: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                if let home = preferences.homePlace {
+                    savedPlaceChip(icon: "house.fill", color: .blue, label: "Domicile", place: home)
+                }
+                if let work = preferences.workPlace {
+                    savedPlaceChip(icon: "briefcase.fill", color: .indigo, label: "Travail", place: work)
+                }
+            }
+            .padding(.horizontal, 2)
+        }
+    }
+
+    @ViewBuilder
+    private func savedPlaceChip(icon: String, color: Color, label: String, place: SavedPlace) -> some View {
+        Button {
+            preferences.triggerHapticImpact()
+            let station = place.toMapStation()
+            MapDataService.shared.selectStation(station)
+            if let onSelectStation {
+                onSelectStation(station)
+            } else {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                    coordinator.selectedStation = station
+                    selectedDetent = .medium
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                ZStack {
+                    Circle()
+                        .fill(color.opacity(0.18))
+                        .frame(width: 28, height: 28)
+                    Image(systemName: icon)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(color)
+                }
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(label)
+                        .font(.system(.caption, design: .rounded).weight(.bold))
+                        .foregroundStyle(.primary)
+                    Text(place.name)
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                Capsule()
+                    .fill(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.05))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
     private var recentSearchesSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -424,37 +485,6 @@ struct EmbeddedSearchSheetContent: View {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 9, weight: .bold))
                         .foregroundColor(.secondary.opacity(0.7))
-                }
-            }
-        }
-    }
-
-    private var nearbyStationsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label("À proximité", systemImage: "location.fill")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundColor(.secondary)
-                    .textCase(.uppercase)
-
-                Spacer()
-            }
-            .padding(.horizontal, 4)
-
-            sheetSectionGroup {
-                ForEach(nearbyStations) { station in
-                    Button(action: {
-                        selectStation(station)
-                    }) {
-                        StationRow(station: station)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.horizontal, 16)
-
-                    if station.id != nearbyStations.last?.id {
-                        Divider()
-                            .padding(.leading, 16)
-                    }
                 }
             }
         }

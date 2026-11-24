@@ -71,6 +71,8 @@ struct DuoExplorePanelView: View {
             }
 
             Spacer()
+
+            AccountAvatarButton(size: 36)
         }
     }
 

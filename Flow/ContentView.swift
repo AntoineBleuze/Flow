@@ -15,7 +15,8 @@ struct ContentView: View {
     @State private var showLoading: Bool
 
     init(showLoading: Bool = true) {
-        _showLoading = State(initialValue: showLoading)
+        let shouldShowLoading = showLoading && !UserPreferencesManager.shared.skipLoadingAnimation
+        _showLoading = State(initialValue: shouldShowLoading)
     }
 
     var body: some View {
@@ -90,16 +91,29 @@ struct ContentView: View {
                         .flowAdaptiveBackground()
                         .transition(.move(edge: .leading).combined(with: .opacity))
                 } else if let selectedStation = coordinator.selectedStation {
-                    StationDetailSheet(
-                        station: selectedStation,
-                        onDismiss: {
-                            withAnimation(.easeInOut(duration: 0.25)) {
-                                coordinator.selectedStation = nil
-                                coordinator.previewJourney = nil
+                    if selectedStation.isAddress {
+                        AddressDetailSheet(
+                            address: selectedStation,
+                            onDismiss: {
+                                withAnimation(.easeInOut(duration: 0.25)) {
+                                    coordinator.selectedStation = nil
+                                    coordinator.previewJourney = nil
+                                }
                             }
-                        }
-                    )
-                    .transition(.move(edge: .leading).combined(with: .opacity))
+                        )
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                    } else {
+                        StationDetailSheet(
+                            station: selectedStation,
+                            onDismiss: {
+                                withAnimation(.easeInOut(duration: 0.25)) {
+                                    coordinator.selectedStation = nil
+                                    coordinator.previewJourney = nil
+                                }
+                            }
+                        )
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                    }
                 } else if let previewJourney = coordinator.previewJourney {
                     DuoJourneyPreviewPanel(journey: previewJourney)
                         .flowAdaptiveBackground()
@@ -125,6 +139,13 @@ struct ContentView: View {
                 .environmentObject(coordinator)
                 .presentationDetents([.medium, .large], selection: $coordinator.aiSheetDetent)
                 .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+                .presentationContentInteraction(.scrolls)
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $coordinator.showAccountSheet) {
+            AccountView()
+                .environmentObject(coordinator)
+                .presentationDetents([.medium, .large])
                 .presentationContentInteraction(.scrolls)
                 .presentationDragIndicator(.visible)
         }
@@ -337,7 +358,6 @@ struct ContentView: View {
                         NavigationStack {
                             TrafficViewContent()
                         }
-                        .liquidGlassBackground()
                     default:
                         exploreSheetTabContent
                     }
@@ -423,7 +443,7 @@ struct ContentView: View {
                 }
             }
             .onChange(of: sheetGeo.size.height) { _, newHeight in
-                if abs(coordinator.sheetHeight - newHeight) > 16.0 {
+                if abs(coordinator.sheetHeight - newHeight) > 4.0 {
                     coordinator.sheetHeight = newHeight
                 }
             }
@@ -461,6 +481,13 @@ struct ContentView: View {
                 .presentationContentInteraction(.scrolls)
                 .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $coordinator.showAccountSheet) {
+            AccountView()
+                .environmentObject(coordinator)
+                .presentationDetents([.medium, .large])
+                .presentationContentInteraction(.scrolls)
+                .presentationDragIndicator(.visible)
+        }
     }
 
     @ViewBuilder
@@ -473,15 +500,26 @@ struct ContentView: View {
                 isFloating: false
             )
         } else if let station = coordinator.selectedStation {
-            StationDetailSheet(
-                station: station,
-                onDismiss: {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                        coordinator.selectedStation = nil
+            if station.isAddress {
+                AddressDetailSheet(
+                    address: station,
+                    onDismiss: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                            coordinator.selectedStation = nil
+                        }
                     }
-                },
-                selectedDetent: $coordinator.exploreSheetDetent
-            )
+                )
+            } else {
+                StationDetailSheet(
+                    station: station,
+                    onDismiss: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                            coordinator.selectedStation = nil
+                        }
+                    },
+                    selectedDetent: $coordinator.exploreSheetDetent
+                )
+            }
         } else if let previewJourney = coordinator.previewJourney {
             DuoJourneyPreviewPanel(journey: previewJourney)
         } else {
@@ -503,6 +541,7 @@ struct ContentView: View {
 // MARK: - TrafficViewContent
 struct TrafficViewContent: View {
     @ObservedObject var service = TrafficService.shared
+    @ObservedObject private var watchlistService = TrafficWatchlistService.shared
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.duoPosture) private var duoPosture
@@ -642,6 +681,33 @@ struct TrafficViewContent: View {
     @ViewBuilder
     private var defaultSectionsView: some View {
         let isIPad = horizontalSizeClass == .regular
+        let watched = watchlistService.watchedLines(from: service.lines)
+
+        if !watched.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
+                    Image(systemName: "bell.fill")
+                        .font(.caption2.weight(.bold))
+                        .foregroundColor(.blue)
+                    Text("LISTE D'ÉCOUTE")
+                        .font(.system(.caption, design: .rounded))
+                        .fontWeight(.bold)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.leading, 20)
+
+                LazyVGrid(
+                    columns: [
+                        GridItem(.adaptive(minimum: isIPad ? 96 : 74, maximum: isIPad ? 120 : 92), spacing: isIPad ? 16 : 12)
+                    ], spacing: isIPad ? 16 : 12
+                ) {
+                    ForEach(watched) { line in
+                        TrafficLineCell(line: line, isIPad: isIPad)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+        }
 
         // Réseaux structurants (Métro, RER, Tram, Transilien, Train, Câble)
         ForEach(defaultTransportTypes, id: \.self) { type in
@@ -776,10 +842,15 @@ struct TrafficLineCell: View {
     var isIPad: Bool = false
 
     @ObservedObject var favoritesService = FavoritesService.shared
+    @ObservedObject var watchlistService = TrafficWatchlistService.shared
     @Environment(\.colorScheme) private var colorScheme
 
     var isFav: Bool {
         favoritesService.isFavoriteLine(lineId: line.lineId, type: line.type)
+    }
+
+    var isWatched: Bool {
+        watchlistService.isWatched(line)
     }
 
     var body: some View {
@@ -800,10 +871,30 @@ struct TrafficLineCell: View {
                         .shadow(color: .black.opacity(0.25), radius: 2, x: 0, y: 1)
                         .padding(6)
                 }
+
+                if isWatched {
+                    HStack {
+                        Spacer()
+                        Image(systemName: "bell.fill")
+                            .foregroundColor(.blue)
+                            .font(.system(size: isIPad ? 14 : 12))
+                            .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
+                            .padding(6)
+                    }
+                }
             }
         }
         .buttonStyle(.plain)
         .contextMenu {
+            Button {
+                watchlistService.toggleWatch(for: line)
+            } label: {
+                Label(
+                    isWatched ? "Retirer de la liste d'écoute" : "Ajouter à la liste d'écoute",
+                    systemImage: isWatched ? "bell.slash" : "bell"
+                )
+            }
+
             Button {
                 favoritesService.toggleFavoriteLine(lineId: line.lineId, type: line.type)
             } label: {

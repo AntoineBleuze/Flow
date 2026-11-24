@@ -1,6 +1,9 @@
 mod elevators;
 mod itinerary;
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use axum::{
     body::Bytes,
     extract::{
@@ -36,7 +39,7 @@ use tokio::sync::{broadcast, mpsc, Mutex, Notify, RwLock, Semaphore};
 use tower_http::cors::CorsLayer;
 
 const NAVITIA_BASE: &str = "https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia";
-const TRAFFIC_REFRESH_INTERVAL_SECS: u64 = 5 * 60;
+const TRAFFIC_REFRESH_INTERVAL_SECS: u64 = 30;
 const ACTIVE_REFRESH_INTERVAL_SECS: u64 = 20;
 const GLOBAL_RAIL_INTERVAL_SECS: u64 = 30;
 const ELEVATORS_REFRESH_INTERVAL_SECS: u64 = 8 * 60 * 60;
@@ -107,7 +110,10 @@ impl AppState {
 // ============================================================
 // Navitia Client avec Semaphore + Backoff exponentiel 429
 // ============================================================
-async fn navitia_fetch(state: &Arc<AppState>, url: &str) -> Result<Value, String> {
+async fn navitia_fetch_typed<T: serde::de::DeserializeOwned>(
+    state: &Arc<AppState>,
+    url: &str,
+) -> Result<T, String> {
     let mut retries = 0u32;
     loop {
         let permit = state
@@ -149,11 +155,15 @@ async fn navitia_fetch(state: &Arc<AppState>, url: &str) -> Result<Value, String
                     let text = resp.text().await.unwrap_or_default();
                     return Err(format!("Navitia {}: {}", status.as_u16(), text));
                 }
-                return resp.json::<Value>().await.map_err(|e| e.to_string());
+                return resp.json::<T>().await.map_err(|e| e.to_string());
             }
             Err(e) => return Err(e.to_string()),
         }
     }
+}
+
+async fn navitia_fetch(state: &Arc<AppState>, url: &str) -> Result<Value, String> {
+    navitia_fetch_typed::<Value>(state, url).await
 }
 
 async fn fetch_all_pages(
@@ -383,42 +393,87 @@ async fn auto_refresh(state: Arc<AppState>) {
 }
 
 // ============================================================
-// Cache départs + Slimming + Coalescing
+// Cache départs + Typed Deserialization + Coalescing
 // ============================================================
-fn slim_departure(dep: &Value) -> Value {
+#[derive(Deserialize)]
+struct NavitiaDeparturesResponse {
+    #[serde(default)]
+    departures: Vec<RawDeparture>,
+}
+
+#[derive(Deserialize)]
+struct RawDeparture {
+    display_informations: Option<RawDisplayInformations>,
+    stop_date_time: Option<RawStopDateTime>,
+    stop_point: Option<RawStopPoint>,
+}
+
+#[derive(Deserialize)]
+struct RawDisplayInformations {
+    direction: Option<String>,
+    label: Option<String>,
+    code: Option<String>,
+    color: Option<String>,
+    commercial_mode: Option<String>,
+    network: Option<String>,
+    text_color: Option<String>,
+    name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RawStopDateTime {
+    departure_date_time: Option<String>,
+    stop_point: Option<RawStopPointRef>,
+}
+
+#[derive(Deserialize)]
+struct RawStopPointRef {
+    id: Option<String>,
+    name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RawStopPoint {
+    id: Option<String>,
+    name: Option<String>,
+    stop_area: Option<RawStopAreaRef>,
+}
+
+#[derive(Deserialize)]
+struct RawStopAreaRef {
+    id: Option<String>,
+}
+
+fn raw_to_slim_value(dep: RawDeparture) -> Value {
     let slim_di = dep
-        .get("display_informations")
-        .filter(|v| !v.is_null())
+        .display_informations
         .map(|info| {
             json!({
-                "direction": info.get("direction").cloned().unwrap_or(Value::Null),
-                "label": info.get("label").cloned().unwrap_or(Value::Null),
-                "code": info.get("code").cloned().unwrap_or(Value::Null),
-                "color": info.get("color").cloned().unwrap_or(Value::Null),
-                "commercial_mode": info.get("commercial_mode").cloned().unwrap_or(Value::Null),
-                "network": info.get("network").cloned().unwrap_or(Value::Null),
-                "text_color": info.get("text_color").cloned().unwrap_or(Value::Null),
-                "name": info.get("name").cloned().unwrap_or(Value::Null),
+                "direction": info.direction,
+                "label": info.label,
+                "code": info.code,
+                "color": info.color,
+                "commercial_mode": info.commercial_mode,
+                "network": info.network,
+                "text_color": info.text_color,
+                "name": info.name,
             })
         })
         .unwrap_or(Value::Null);
 
     let slim_sdt = dep
-        .get("stop_date_time")
-        .filter(|v| !v.is_null())
+        .stop_date_time
         .map(|s| {
             let mut obj = serde_json::Map::new();
-            if let Some(dt) = s.get("departure_date_time") {
-                obj.insert("departure_date_time".to_string(), dt.clone());
+            if let Some(dt) = s.departure_date_time {
+                obj.insert("departure_date_time".to_string(), Value::String(dt));
             }
-            if let Some(sp) = s.get("stop_point").filter(|v| {
-                v.get("id").and_then(|id| id.as_str()).is_some()
-            }) {
+            if let Some(sp) = s.stop_point.filter(|p| p.id.is_some()) {
                 obj.insert(
                     "stop_point".to_string(),
                     json!({
-                        "id": sp.get("id").cloned().unwrap_or(Value::Null),
-                        "name": sp.get("name").cloned().unwrap_or(Value::Null),
+                        "id": sp.id,
+                        "name": sp.name,
                     }),
                 );
             }
@@ -430,15 +485,15 @@ fn slim_departure(dep: &Value) -> Value {
     root.insert("display_informations".to_string(), slim_di);
     root.insert("stop_date_time".to_string(), slim_sdt);
 
-    if let Some(sp) = dep.get("stop_point").filter(|v| !v.is_null()) {
+    if let Some(sp) = dep.stop_point {
         let mut sp_obj = serde_json::Map::new();
-        if let Some(id) = sp.get("id") {
-            sp_obj.insert("id".to_string(), id.clone());
+        if let Some(id) = sp.id {
+            sp_obj.insert("id".to_string(), Value::String(id));
         }
-        if let Some(name) = sp.get("name") {
-            sp_obj.insert("name".to_string(), name.clone());
+        if let Some(name) = sp.name {
+            sp_obj.insert("name".to_string(), Value::String(name));
         }
-        if let Some(sa_id) = sp.pointer("/stop_area/id") {
+        if let Some(sa_id) = sp.stop_area.and_then(|sa| sa.id) {
             sp_obj.insert("stop_area".to_string(), json!({ "id": sa_id }));
         }
         root.insert("stop_point".to_string(), Value::Object(sp_obj));
@@ -522,13 +577,14 @@ async fn refresh_stop(state: &Arc<AppState>, stop_id: &str) {
         NAVITIA_BASE, endpoint, stop_id
     );
 
-    match navitia_fetch(state, &url).await {
+    match navitia_fetch_typed::<NavitiaDeparturesResponse>(state, &url).await {
         Ok(data) => {
-            if let Some(deps) = data.get("departures").and_then(|v| v.as_array()) {
-                let arc_deps: Vec<Arc<Value>> =
-                    deps.iter().map(|d| Arc::new(slim_departure(d))).collect();
-                update_cache(state, stop_id, arc_deps).await;
-            }
+            let arc_deps: Vec<Arc<Value>> = data
+                .departures
+                .into_iter()
+                .map(|d| Arc::new(raw_to_slim_value(d)))
+                .collect();
+            update_cache(state, stop_id, arc_deps).await;
         }
         Err(err) => {
             let mut handled = false;
@@ -553,13 +609,16 @@ async fn refresh_stop(state: &Arc<AppState>, stop_id: &str) {
                 };
 
                 if let Some(r_url) = retry_url {
-                    if let Ok(data) = navitia_fetch(state, &r_url).await {
-                        if let Some(deps) = data.get("departures").and_then(|v| v.as_array()) {
-                            let arc_deps: Vec<Arc<Value>> =
-                                deps.iter().map(|d| Arc::new(slim_departure(d))).collect();
-                            update_cache(state, stop_id, arc_deps).await;
-                            handled = true;
-                        }
+                    if let Ok(data) =
+                        navitia_fetch_typed::<NavitiaDeparturesResponse>(state, &r_url).await
+                    {
+                        let arc_deps: Vec<Arc<Value>> = data
+                            .departures
+                            .into_iter()
+                            .map(|d| Arc::new(raw_to_slim_value(d)))
+                            .collect();
+                        update_cache(state, stop_id, arc_deps).await;
+                        handled = true;
                     }
                 }
             }
@@ -576,7 +635,7 @@ async fn refresh_stop(state: &Arc<AppState>, stop_id: &str) {
     notify.notify_waiters();
 }
 
-async fn ingest_global_departures(state: &Arc<AppState>, departures: Vec<Value>) {
+async fn ingest_global_departures(state: &Arc<AppState>, departures: Vec<RawDeparture>) {
     if departures.is_empty() {
         return;
     }
@@ -585,7 +644,7 @@ async fn ingest_global_departures(state: &Arc<AppState>, departures: Vec<Value>)
     let total = departures.len();
 
     for dep in departures {
-        let arc_dep = Arc::new(slim_departure(&dep));
+        let arc_dep = Arc::new(raw_to_slim_value(dep));
         let sp_id = arc_dep
             .pointer("/stop_point/id")
             .and_then(|v| v.as_str())
@@ -667,11 +726,9 @@ async fn refresh_all_global_rail_departures(state: Arc<AppState>) {
             NAVITIA_BASE, mode, count
         );
         async move {
-            match navitia_fetch(&state, &url).await {
+            match navitia_fetch_typed::<NavitiaDeparturesResponse>(&state, &url).await {
                 Ok(data) => {
-                    if let Some(deps) = data.get("departures").and_then(|v| v.as_array()) {
-                        ingest_global_departures(&state, deps.clone()).await;
-                    }
+                    ingest_global_departures(&state, data.departures).await;
                 }
                 Err(e) => {
                     state

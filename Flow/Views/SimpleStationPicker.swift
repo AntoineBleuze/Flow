@@ -18,10 +18,18 @@ struct SimpleStationPicker: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 8) {
+                AccountSheetHeader(
+                    title: "Sélectionner une station",
+                    fontSize: 20,
+                    buttonIcon: "xmark",
+                    accessibilityLabel: "Fermer"
+                ) {
+                    dismiss()
+                }
+
                 // Search Bar
                 LiquidGlassSearchBar(text: $searchText, placeholder: "Rechercher une station...")
                     .padding(.horizontal)
-                    .padding(.top, 8)
                     .onChange(of: searchText) { _, newValue in
                         performSearch(query: newValue)
                     }
@@ -114,17 +122,7 @@ struct SimpleStationPicker: View {
                 .scrollContentBackground(.hidden)
             }
             .liquidGlassBackground()
-            .navigationTitle("Sélectionner une station")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Annuler") {
-                        dismiss()
-                    }
-                    .font(.system(.body, design: .rounded))
-                    .fontWeight(.medium)
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
         }
         .liquidGlassSheet()
     }

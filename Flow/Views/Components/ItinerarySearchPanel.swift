@@ -37,6 +37,7 @@ struct ItinerarySearchPanel: View {
     // Animation properties
     @Namespace private var animation
     @Environment(\.colorScheme) var colorScheme
+    @ObservedObject private var preferences = UserPreferencesManager.shared
     
     var body: some View {
         GlassEffectContainer {
@@ -144,24 +145,25 @@ struct ItinerarySearchPanel: View {
     var expandedView: some View {
         VStack(spacing: 20) {
             // Title
+            let closeButton = LiquidGlassCircleButton(icon: "xmark", size: 36, iconSize: 14, iconWeight: .bold) {
+                preferences.triggerHapticImpact()
+                withAnimation(.spring()) {
+                    panelState = .compact
+                }
+            }
+            .accessibilityLabel("Fermer")
+
             HStack {
+                if !preferences.handedness.isBackButtonTrailing {
+                    closeButton
+                }
                 Text("Itinéraire")
                     .font(.title2)
                     .fontWeight(.bold)
                 Spacer()
-                
-                Button(action: {
-                    withAnimation(.spring()) {
-                        panelState = .compact
-                    }
-                }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(.primary)
-                        .frame(width: 44, height: 44)
+                if preferences.handedness.isBackButtonTrailing {
+                    closeButton
                 }
-                .buttonStyle(.plain)
-                .glassEffect(.regular.interactive(), in: .circle)
             }
             .padding(.horizontal)
             

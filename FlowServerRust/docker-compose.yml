@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
     container_name: flow-server
     restart: always
+    mem_limit: 512m
     ports:
       - "3001:3001"
     expose:

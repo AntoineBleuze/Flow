@@ -75,11 +75,14 @@ struct MapViewControllerBridge: UIViewRepresentable {
     var recenterTrigger: Bool
     
     @Environment(\.duoPosture) var duoPosture
+    @Environment(\.horizontalSizeClass) var horizontalSizeClass
     @ObservedObject var locationManager = LocationManager.shared
     @ObservedObject var navigationManager = NavigationManager.shared
     var journey: Journey?  // Optional journey to display
     var focusedLinePreview: FocusedLinePreview? = nil  // Optional full line + stops preview
     var focusedSectionId: String? = nil  // Optional section to focus on
+    var sheetHeight: CGFloat = 0
+    var sheetDetent: PresentationDetent = .medium
     var useMainMap: Bool = false  // Default to background map if not specified
     var showAnnotations: Bool = true  // If false, skip annotations and overlays (for background mode)
 
@@ -91,6 +94,8 @@ struct MapViewControllerBridge: UIViewRepresentable {
         journey: Journey? = nil,
         focusedLinePreview: FocusedLinePreview? = nil,
         focusedSectionId: String? = nil,
+        sheetHeight: CGFloat = 0,
+        sheetDetent: PresentationDetent = .medium,
         useMainMap: Bool = false,
         showAnnotations: Bool = true
     ) {
@@ -101,6 +106,8 @@ struct MapViewControllerBridge: UIViewRepresentable {
         self.journey = journey
         self.focusedLinePreview = focusedLinePreview
         self.focusedSectionId = focusedSectionId
+        self.sheetHeight = sheetHeight
+        self.sheetDetent = sheetDetent
         self.useMainMap = useMainMap
         self.showAnnotations = showAnnotations
     }
@@ -138,28 +145,88 @@ struct MapViewControllerBridge: UIViewRepresentable {
         return mapView
     }
 
+    #if canImport(UIKit)
+    private func effectiveLayoutMargins(for mapView: MKMapView) -> UIEdgeInsets {
+        switch duoPosture {
+        case .unfoldedDualScreen:
+            return UIEdgeInsets(top: 0, left: 484, bottom: 0, right: 0)
+        case .foldedSingleScreen:
+            if horizontalSizeClass == .compact {
+                let fallbackHeight: CGFloat = {
+                    switch sheetDetent {
+                    case NavigationCoordinator.collapsedSheetDetent:
+                        return 84
+                    case NavigationCoordinator.compactRouteSheetDetent:
+                        return 216
+                    case .large:
+                        return mapView.bounds.height > 0 ? mapView.bounds.height * 0.85 : 700
+                    default:
+                        return mapView.bounds.height > 0 ? mapView.bounds.height * 0.48 : 420
+                    }
+                }()
+                let rawBottom = sheetHeight > 0 ? sheetHeight : fallbackHeight
+                let cappedBottom = mapView.bounds.height > 0 ? min(rawBottom, mapView.bounds.height * 0.60) : rawBottom
+                return UIEdgeInsets(top: 0, left: 0, bottom: max(0, cappedBottom), right: 0)
+            } else if UIDevice.current.userInterfaceIdiom == .pad && selectedStation != nil {
+                return UIEdgeInsets(top: 0, left: 396, bottom: 0, right: 0)
+            }
+            return .zero
+        }
+    }
+
+    private func routeEdgePadding(for mapView: MKMapView, bottomMargin: CGFloat) -> UIEdgeInsets {
+        // mapView.layoutMargins already accounts for safeAreaInsets.top, the bottom sheet, and Duo/iPad side panels.
+        // Only add clean breathing room around the route bounding box.
+        return UIEdgeInsets(top: 28, left: 36, bottom: 32, right: 36)
+    }
+
+    private func recenterMapOnUser(_ mapView: MKMapView, coordinate: CLLocationCoordinate2D, coordinator: Coordinator, animated: Bool) {
+        if locationManager.isSimulating {
+            mapView.setCenter(coordinate, animated: animated)
+        } else if userTrackingMode != .none {
+            coordinator.isProgrammaticTrackingUpdate = true
+            mapView.setCenter(coordinate, animated: animated)
+            if mapView.userTrackingMode != userTrackingMode {
+                mapView.setUserTrackingMode(userTrackingMode, animated: false)
+            }
+            DispatchQueue.main.async {
+                coordinator.isProgrammaticTrackingUpdate = false
+            }
+        } else {
+            mapView.setCenter(coordinate, animated: animated)
+        }
+    }
+    #endif
+
     private func updateMapView(_ mapView: MKMapView, context: Context) {
         context.coordinator.parent = self
 
         #if canImport(UIKit)
-        let targetMargins: UIEdgeInsets = {
-            switch duoPosture {
-            case .unfoldedDualScreen:
-                return UIEdgeInsets(top: 0, left: 484, bottom: 0, right: 0)
-            case .foldedSingleScreen:
-                return .zero
-            }
-        }()
+        let targetMargins = effectiveLayoutMargins(for: mapView)
         if mapView.layoutMargins != targetMargins {
             mapView.layoutMargins = targetMargins
         }
+        let bottomMarginChanged = abs(targetMargins.bottom - context.coordinator.lastBottomMargin) > 8.0
+            && mapView.bounds.height > 0
+            && sheetDetent != .large
+        if mapView.bounds.height > 0 {
+            context.coordinator.lastBottomMargin = targetMargins.bottom
+        }
+        #else
+        let bottomMarginChanged = false
+        let targetMargins = NSEdgeInsetsZero
         #endif
 
         // Handle Recenter Trigger (forced recenter)
         if context.coordinator.lastRecenterTrigger != recenterTrigger {
             context.coordinator.lastRecenterTrigger = recenterTrigger
+            context.coordinator.userPannedDuringNavigation = false
             if let userCoord = locationManager.userLocation, isValidCoordinate(userCoord) {
+                #if canImport(UIKit)
+                recenterMapOnUser(mapView, coordinate: userCoord, coordinator: context.coordinator, animated: true)
+                #else
                 mapView.setCenter(userCoord, animated: true)
+                #endif
             }
             #if canImport(UIKit)
             if !locationManager.isSimulating {
@@ -168,21 +235,23 @@ struct MapViewControllerBridge: UIViewRepresentable {
             #endif
         }
 
-        // Handle Tracking Mode
+        // Handle Tracking Mode (only when no station is selected, so tracking never fights station centering)
         #if canImport(UIKit)
-        if !locationManager.isSimulating {
-            if mapView.userTrackingMode != userTrackingMode {
-                mapView.setUserTrackingMode(userTrackingMode, animated: true)
-                if userTrackingMode != .none, let userCoord = locationManager.userLocation, isValidCoordinate(userCoord) {
-                    mapView.setCenter(userCoord, animated: true)
+        if selectedStation == nil {
+            if !locationManager.isSimulating {
+                if mapView.userTrackingMode != userTrackingMode {
+                    mapView.setUserTrackingMode(userTrackingMode, animated: true)
+                    if userTrackingMode != .none, let userCoord = locationManager.userLocation, isValidCoordinate(userCoord) {
+                        recenterMapOnUser(mapView, coordinate: userCoord, coordinator: context.coordinator, animated: true)
+                    }
                 }
-            }
-        } else {
-            // In simulation, if userTrackingMode changes, we force-center immediately
-            if context.coordinator.lastSimulatedTrackingMode != userTrackingMode {
-                context.coordinator.lastSimulatedTrackingMode = userTrackingMode
-                if userTrackingMode != .none, let userCoord = locationManager.userLocation, isValidCoordinate(userCoord) {
-                    mapView.setCenter(userCoord, animated: true)
+            } else {
+                // In simulation, if userTrackingMode changes, we force-center immediately
+                if context.coordinator.lastSimulatedTrackingMode != userTrackingMode {
+                    context.coordinator.lastSimulatedTrackingMode = userTrackingMode
+                    if userTrackingMode != .none, let userCoord = locationManager.userLocation, isValidCoordinate(userCoord) {
+                        mapView.setCenter(userCoord, animated: true)
+                    }
                 }
             }
         }
@@ -202,40 +271,115 @@ struct MapViewControllerBridge: UIViewRepresentable {
             context.coordinator.hasInstalledStandardOverlays = false
             if context.coordinator.lastDrawnJourneyId != journey.id.uuidString {
                 context.coordinator.lastDrawnJourneyId = journey.id.uuidString
+                context.coordinator.lastNavJourneyId = journey.id.uuidString
+                context.coordinator.userPannedDuringNavigation = false
+                context.coordinator.navStartUserLocation = locationManager.userLocation
                 mapView.removeOverlays(mapView.overlays)
                 mapView.removeAnnotations(mapView.annotations.filter { !($0 is MKUserLocation || $0 is SimulatedUserAnnotation) })
 
                 drawJourney(journey, on: mapView)
             }
 
-            // Zoom/pan to focused section or entire journey (only if not simulating to avoid fight with centering)
+            // Zoom/pan to focused section or entire journey (only if not simulating and not actively tracking user)
             if !locationManager.isSimulating {
-                if let focusedSectionId = focusedSectionId {
-                    if context.coordinator.lastZoomedSectionId != focusedSectionId {
-                        context.coordinator.lastZoomedSectionId = focusedSectionId
-                        if let sections = journey.sections,
-                           let section = sections.first(where: { $0.id == focusedSectionId }) {
-                            zoomToSection(section, on: mapView)
+                let applyRouteZoom: (() -> Void)? = {
+                    if let focusedSectionId = focusedSectionId {
+                        if context.coordinator.lastZoomedSectionId != focusedSectionId || (bottomMarginChanged && userTrackingMode == .none) {
+                            context.coordinator.lastZoomedSectionId = focusedSectionId
+                            if let sections = journey.sections,
+                               let section = sections.first(where: { $0.id == focusedSectionId }) {
+                                return { self.zoomToSection(section, on: mapView, bottomMargin: targetMargins.bottom) }
+                            }
+                        }
+                    } else if context.coordinator.lastZoomedJourneyId != journey.id.uuidString || (bottomMarginChanged && userTrackingMode == .none) {
+                        context.coordinator.lastZoomedJourneyId = journey.id.uuidString
+                        context.coordinator.lastZoomedSectionId = nil
+                        return { self.zoomToJourney(journey, on: mapView, bottomMargin: targetMargins.bottom) }
+                    }
+                    return nil
+                }()
+
+                if let applyRouteZoom = applyRouteZoom {
+                    var wasTracking = false
+                    if userTrackingMode != .none {
+                        wasTracking = true
+                        DispatchQueue.main.async {
+                            self.userTrackingMode = .none
                         }
                     }
-                } else if context.coordinator.lastZoomedJourneyId != journey.id.uuidString {
-                    context.coordinator.lastZoomedJourneyId = journey.id.uuidString
-                    context.coordinator.lastZoomedSectionId = nil
-                    zoomToJourney(journey, on: mapView)
+                    #if canImport(UIKit)
+                    if mapView.userTrackingMode != .none {
+                        wasTracking = true
+                        context.coordinator.isProgrammaticTrackingUpdate = true
+                        mapView.setUserTrackingMode(.none, animated: false)
+                        DispatchQueue.main.async {
+                            context.coordinator.isProgrammaticTrackingUpdate = false
+                        }
+                    }
+                    #endif
+                    if wasTracking {
+                        DispatchQueue.main.async(execute: applyRouteZoom)
+                    } else {
+                        applyRouteZoom()
+                    }
+                }
+
+                // Auto-follow user during real navigation once they start moving (>25m) if they haven't manually panned
+                if navigationManager.isNavigating,
+                   !context.coordinator.userPannedDuringNavigation,
+                   userTrackingMode == .none,
+                   let startLoc = context.coordinator.navStartUserLocation,
+                   let currentLoc = locationManager.userLocation,
+                   isValidCoordinate(startLoc),
+                   isValidCoordinate(currentLoc) {
+                    let movedMeters = CLLocation(latitude: startLoc.latitude, longitude: startLoc.longitude)
+                        .distance(from: CLLocation(latitude: currentLoc.latitude, longitude: currentLoc.longitude))
+                    if movedMeters > 25.0 {
+                        DispatchQueue.main.async {
+                            self.userTrackingMode = .follow
+                        }
+                    }
                 }
             }
         } else if let linePreview = focusedLinePreview {
             context.coordinator.lastDrawnJourneyId = nil
             context.coordinator.lastZoomedJourneyId = nil
             context.coordinator.lastZoomedSectionId = nil
+            context.coordinator.lastNavJourneyId = nil
             context.coordinator.hasInstalledStandardOverlays = false
 
-            if context.coordinator.lastFocusedLineId != linePreview.id {
+            let isNewFocusedLine = context.coordinator.lastFocusedLineId != linePreview.id
+            if isNewFocusedLine || bottomMarginChanged {
                 context.coordinator.lastFocusedLineId = linePreview.id
-                mapView.removeOverlays(mapView.overlays)
-                mapView.removeAnnotations(mapView.annotations.filter { !($0 is MKUserLocation || $0 is SimulatedUserAnnotation) })
-                drawFocusedLinePreview(linePreview, on: mapView)
-                zoomToFocusedLinePreview(linePreview, on: mapView)
+                if isNewFocusedLine || mapView.overlays.isEmpty {
+                    mapView.removeOverlays(mapView.overlays)
+                    mapView.removeAnnotations(mapView.annotations.filter { !($0 is MKUserLocation || $0 is SimulatedUserAnnotation) })
+                    drawFocusedLinePreview(linePreview, on: mapView)
+                }
+                var wasTracking = false
+                if isNewFocusedLine && userTrackingMode != .none {
+                    wasTracking = true
+                    DispatchQueue.main.async {
+                        self.userTrackingMode = .none
+                    }
+                }
+                #if canImport(UIKit)
+                if isNewFocusedLine && !locationManager.isSimulating && mapView.userTrackingMode != .none {
+                    wasTracking = true
+                    context.coordinator.isProgrammaticTrackingUpdate = true
+                    mapView.setUserTrackingMode(.none, animated: false)
+                    DispatchQueue.main.async {
+                        context.coordinator.isProgrammaticTrackingUpdate = false
+                    }
+                }
+                #endif
+                if wasTracking {
+                    DispatchQueue.main.async {
+                        self.zoomToFocusedLinePreview(linePreview, on: mapView, bottomMargin: targetMargins.bottom)
+                    }
+                } else {
+                    zoomToFocusedLinePreview(linePreview, on: mapView, bottomMargin: targetMargins.bottom)
+                }
             }
         } else {
             let hadJourney = context.coordinator.lastZoomedJourneyId != nil || context.coordinator.lastDrawnJourneyId != nil
@@ -243,10 +387,16 @@ struct MapViewControllerBridge: UIViewRepresentable {
             if hadJourney || hadFocusedLine {
                 context.coordinator.hasInstalledStandardOverlays = false
             }
+            let arrowsToRemove = mapView.annotations.filter { $0 is LineDirectionArrowAnnotation }
+            if !arrowsToRemove.isEmpty {
+                mapView.removeAnnotations(arrowsToRemove)
+            }
             context.coordinator.lastDrawnJourneyId = nil
             context.coordinator.lastZoomedJourneyId = nil
             context.coordinator.lastZoomedSectionId = nil
             context.coordinator.lastFocusedLineId = nil
+            context.coordinator.lastNavJourneyId = nil
+            context.coordinator.userPannedDuringNavigation = false
             // Standard behavior: Show all lines
             updateStandardOverlays(mapView, data: data, coordinator: context.coordinator)
             if hadJourney || hadFocusedLine {
@@ -255,10 +405,15 @@ struct MapViewControllerBridge: UIViewRepresentable {
         }
 
         // Center on user at startup
-        if !data.hasCenteredOnUser, let userCoord = locationManager.userLocation, isValidCoordinate(userCoord) {
+        if !data.hasCenteredOnUser,
+           selectedStation == nil,
+           journey == nil,
+           focusedLinePreview == nil,
+           let userCoord = locationManager.userLocation,
+           isValidCoordinate(userCoord) {
             let region = MKCoordinateRegion(center: userCoord, span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05))
             mapView.setRegion(region, animated: true)
-            
+
             // Set tracking mode to follow and mark as centered on main thread
             DispatchQueue.main.async {
                 data.hasCenteredOnUser = true
@@ -266,27 +421,45 @@ struct MapViewControllerBridge: UIViewRepresentable {
             }
         }
 
-        // 3D Camera Pitch implementation
-        if let station = selectedStation {
-            if context.coordinator.lastSelectedStationId != station.id {
+        // 3D Camera Pitch implementation for selected station
+        if let station = selectedStation, isValidCoordinate(station.coordinate) {
+            let isNewStation = context.coordinator.lastSelectedStationId != station.id
+            if isNewStation || bottomMarginChanged {
                 context.coordinator.lastSelectedStationId = station.id
                 context.coordinator.lastSelectedStationCoordinate = station.coordinate
-                context.coordinator.syncExplorationExits(for: station, on: mapView)
-                #if canImport(UIKit)
-                let isIPad = UIDevice.current.userInterfaceIdiom == .pad
-                #else
-                let isIPad = false
-                #endif
-                let targetCenter = isIPad ? station.coordinate : coordinate(from: station.coordinate, distance: 250, bearing: mapView.camera.heading + 180)
-                let camera = MKMapCamera(lookingAtCenter: targetCenter, fromDistance: 1200, pitch: 45, heading: mapView.camera.heading)
-                mapView.setCamera(camera, animated: true)
-            }
-        } else if let journey = journey {
-            if context.coordinator.lastSelectedStationId != journey.id.uuidString {
-                context.coordinator.lastSelectedStationId = journey.id.uuidString
-                let camera = mapView.camera
-                camera.pitch = 45
-                mapView.setCamera(camera, animated: true)
+                var wasTracking = false
+                if isNewStation {
+                    context.coordinator.syncExplorationExits(for: station, on: mapView)
+                    if userTrackingMode != .none {
+                        wasTracking = true
+                        DispatchQueue.main.async {
+                            self.userTrackingMode = .none
+                        }
+                    }
+                    #if canImport(UIKit)
+                    if !locationManager.isSimulating && mapView.userTrackingMode != .none {
+                        wasTracking = true
+                        context.coordinator.isProgrammaticTrackingUpdate = true
+                        mapView.setUserTrackingMode(.none, animated: false)
+                        DispatchQueue.main.async {
+                            context.coordinator.isProgrammaticTrackingUpdate = false
+                        }
+                    }
+                    #endif
+                }
+                let distance = isNewStation ? 1200 : max(600, mapView.camera.centerCoordinateDistance)
+                let pitch = isNewStation ? 45 : mapView.camera.pitch
+                let targetCoord = station.coordinate
+                let heading = mapView.camera.heading
+                let applyCamera = {
+                    let camera = MKMapCamera(lookingAtCenter: targetCoord, fromDistance: distance, pitch: pitch, heading: heading)
+                    mapView.setCamera(camera, animated: true)
+                }
+                if wasTracking {
+                    DispatchQueue.main.async(execute: applyCamera)
+                } else {
+                    applyCamera()
+                }
             }
         } else {
             if context.coordinator.lastSelectedStationId != nil {
@@ -294,20 +467,35 @@ struct MapViewControllerBridge: UIViewRepresentable {
                 context.coordinator.lastSelectedStationId = nil
                 context.coordinator.lastSelectedStationCoordinate = nil
                 context.coordinator.syncExplorationExits(for: nil, on: mapView)
-                
-                if let lastCoord = lastCoord {
-                    let camera = MKMapCamera(lookingAtCenter: lastCoord, fromDistance: 1500, pitch: 0, heading: mapView.camera.heading)
-                    mapView.setCamera(camera, animated: true)
-                } else {
-                    let camera = mapView.camera
-                    camera.pitch = 0
-                    mapView.setCamera(camera, animated: true)
+
+                if journey == nil && focusedLinePreview == nil {
+                    if let lastCoord = lastCoord, isValidCoordinate(lastCoord) {
+                        let camera = MKMapCamera(lookingAtCenter: lastCoord, fromDistance: 1500, pitch: 0, heading: mapView.camera.heading)
+                        mapView.setCamera(camera, animated: true)
+                    } else {
+                        let camera = mapView.camera
+                        camera.pitch = 0
+                        mapView.setCamera(camera, animated: true)
+                    }
                 }
             }
+
+            // Re-center on user when sheet size changes while tracking user
+            #if canImport(UIKit)
+            if bottomMarginChanged,
+               focusedLinePreview == nil,
+               userTrackingMode != .none,
+               let userCoord = locationManager.userLocation,
+               isValidCoordinate(userCoord) {
+                recenterMapOnUser(mapView, coordinate: userCoord, coordinator: context.coordinator, animated: true)
+            }
+            #endif
         }
 
         // Handle simulation location tracking and centering
         if locationManager.isSimulating, let userCoord = locationManager.userLocation, isValidCoordinate(userCoord) {
+            let justStartedSim = !context.coordinator.wasSimulating
+            context.coordinator.wasSimulating = true
             mapView.showsUserLocation = false
             if let existing = mapView.annotations.first(where: { $0 is SimulatedUserAnnotation }) as? SimulatedUserAnnotation {
                 existing.coordinate = userCoord
@@ -316,9 +504,15 @@ struct MapViewControllerBridge: UIViewRepresentable {
                 mapView.addAnnotation(simUser)
             }
             if userTrackingMode != .none {
-                mapView.setCenter(userCoord, animated: true)
+                if justStartedSim && mapView.camera.centerCoordinateDistance > 2500 {
+                    let camera = MKMapCamera(lookingAtCenter: userCoord, fromDistance: 1200, pitch: 45, heading: mapView.camera.heading)
+                    mapView.setCamera(camera, animated: true)
+                } else {
+                    mapView.setCenter(userCoord, animated: true)
+                }
             }
         } else {
+            context.coordinator.wasSimulating = false
             mapView.showsUserLocation = true
             let simAnnotations = mapView.annotations.filter { $0 is SimulatedUserAnnotation }
             if !simAnnotations.isEmpty {
@@ -570,7 +764,8 @@ struct MapViewControllerBridge: UIViewRepresentable {
                 coordinate: stop.coordinate,
                 focusedLine: focusedLine,
                 showStationName: true,
-                zoomLevel: .medium
+                zoomLevel: .medium,
+                isFocusedLineStop: true
             )
         }
         if !stopAnnotations.isEmpty {
@@ -578,18 +773,26 @@ struct MapViewControllerBridge: UIViewRepresentable {
         }
 
         if preview.showDirectionArrows {
-            var arrowAnnotations: [LineDirectionArrowAnnotation] = []
-            for polyline in preview.polylines {
-                let count = polyline.pointCount
-                guard count >= 2 else { continue }
-                let pts = polyline.points()
+            struct RawArrowCandidate {
+                let coordinate: CLLocationCoordinate2D
+                let bearing: CLLocationDirection
+                let polylineIndex: Int
+            }
+
+            // Extraire les segments de chaque polyline pour détecter les tronçons bidirectionnels
+            let polylineCoords: [[CLLocationCoordinate2D]] = preview.polylines.map { poly in
+                let pts = poly.points()
+                return (0..<poly.pointCount).map { pts[$0].coordinate }
+            }
+
+            var candidates: [RawArrowCandidate] = []
+            for (polyIndex, coords) in polylineCoords.enumerated() {
+                guard coords.count >= 2 else { continue }
 
                 var totalLength: CLLocationDistance = 0
-                for i in 0..<(count - 1) {
-                    let c1 = pts[i].coordinate
-                    let c2 = pts[i + 1].coordinate
-                    totalLength += CLLocation(latitude: c1.latitude, longitude: c1.longitude)
-                        .distance(from: CLLocation(latitude: c2.latitude, longitude: c2.longitude))
+                for i in 0..<(coords.count - 1) {
+                    totalLength += CLLocation(latitude: coords[i].latitude, longitude: coords[i].longitude)
+                        .distance(from: CLLocation(latitude: coords[i + 1].latitude, longitude: coords[i + 1].longitude))
                 }
                 guard totalLength >= 140.0 else { continue }
 
@@ -597,9 +800,9 @@ struct MapViewControllerBridge: UIViewRepresentable {
                 var nextArrowDist: CLLocationDistance = min(180.0, totalLength * 0.5)
                 var accumulated: CLLocationDistance = 0
 
-                for i in 0..<(count - 1) {
-                    let c1 = pts[i].coordinate
-                    let c2 = pts[i + 1].coordinate
+                for i in 0..<(coords.count - 1) {
+                    let c1 = coords[i]
+                    let c2 = coords[i + 1]
                     let segLen = CLLocation(latitude: c1.latitude, longitude: c1.longitude)
                         .distance(from: CLLocation(latitude: c2.latitude, longitude: c2.longitude))
                     guard segLen > 1.0 else { continue }
@@ -609,11 +812,11 @@ struct MapViewControllerBridge: UIViewRepresentable {
                         let lat = c1.latitude + (c2.latitude - c1.latitude) * t
                         let lon = c1.longitude + (c2.longitude - c1.longitude) * t
                         let bearing = calculateBearing(from: c1, to: c2)
-                        arrowAnnotations.append(
-                            LineDirectionArrowAnnotation(
+                        candidates.append(
+                            RawArrowCandidate(
                                 coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon),
-                                bearingDegrees: bearing,
-                                color: lineColor
+                                bearing: bearing,
+                                polylineIndex: polyIndex
                             )
                         )
                         nextArrowDist += spacing
@@ -621,13 +824,61 @@ struct MapViewControllerBridge: UIViewRepresentable {
                     accumulated += segLen
                 }
             }
+
+            var arrowAnnotations: [LineDirectionArrowAnnotation] = []
+            for cand in candidates {
+                let candLoc = CLLocation(latitude: cand.coordinate.latitude, longitude: cand.coordinate.longitude)
+                var hasOppositeDirection = false
+
+                for (otherIdx, otherCoords) in polylineCoords.enumerated() where otherIdx != cand.polylineIndex && otherCoords.count >= 2 {
+                    for i in 0..<(otherCoords.count - 1) {
+                        let a = otherCoords[i]
+                        let b = otherCoords[i + 1]
+                        let mid = CLLocation(
+                            latitude: (a.latitude + b.latitude) * 0.5,
+                            longitude: (a.longitude + b.longitude) * 0.5
+                        )
+                        let distA = candLoc.distance(from: CLLocation(latitude: a.latitude, longitude: a.longitude))
+                        let distB = candLoc.distance(from: CLLocation(latitude: b.latitude, longitude: b.longitude))
+                        let distMid = candLoc.distance(from: mid)
+                        if min(distA, distB, distMid) <= 40.0 {
+                            let otherBearing = calculateBearing(from: a, to: b)
+                            let cosDiff = cos((cand.bearing - otherBearing) * .pi / 180.0)
+                            if cosDiff < -0.65 {
+                                hasOppositeDirection = true
+                                break
+                            }
+                        }
+                    }
+                    if hasOppositeDirection { break }
+                }
+
+                // Éviter de dupliquer une flèche bidirectionnelle sur la même route
+                if hasOppositeDirection {
+                    let alreadyNearby = arrowAnnotations.contains { existing in
+                        existing.isBidirectional &&
+                        candLoc.distance(from: CLLocation(latitude: existing.coordinate.latitude, longitude: existing.coordinate.longitude)) < 160.0
+                    }
+                    if alreadyNearby { continue }
+                }
+
+                arrowAnnotations.append(
+                    LineDirectionArrowAnnotation(
+                        coordinate: cand.coordinate,
+                        bearingDegrees: cand.bearing,
+                        color: lineColor,
+                        isBidirectional: hasOppositeDirection
+                    )
+                )
+            }
+
             if !arrowAnnotations.isEmpty {
                 mapView.addAnnotations(arrowAnnotations)
             }
         }
     }
 
-    private func zoomToFocusedLinePreview(_ preview: FocusedLinePreview, on mapView: MKMapView) {
+    private func zoomToFocusedLinePreview(_ preview: FocusedLinePreview, on mapView: MKMapView, bottomMargin: CGFloat = 130) {
         var allCoordinates: [CLLocationCoordinate2D] = []
         for polyline in preview.polylines {
             let pts = polyline.points()
@@ -644,11 +895,15 @@ struct MapViewControllerBridge: UIViewRepresentable {
 
         guard !allCoordinates.isEmpty else { return }
         let boundingRect = MKMapRect(coordinates: allCoordinates)
-        let padding = UIEdgeInsets(top: 100, left: 40, bottom: 130, right: 40)
+        #if canImport(UIKit)
+        let padding = routeEdgePadding(for: mapView, bottomMargin: bottomMargin)
+        #else
+        let padding = NSEdgeInsets(top: 100, left: 40, bottom: 130, right: 40)
+        #endif
         mapView.setVisibleMapRect(boundingRect, edgePadding: padding, animated: true)
     }
 
-    private func zoomToJourney(_ journey: Journey, on mapView: MKMapView) {
+    private func zoomToJourney(_ journey: Journey, on mapView: MKMapView, bottomMargin: CGFloat = 350) {
         guard let sections = journey.sections else { return }
         var allCoordinates: [CLLocationCoordinate2D] = []
 
@@ -671,13 +926,16 @@ struct MapViewControllerBridge: UIViewRepresentable {
 
         if !allCoordinates.isEmpty {
             let boundingRect = MKMapRect(coordinates: allCoordinates)
-            // Apply bottom padding (350pt) to keep the route in the top portion above the bottom panel
-            let padding = UIEdgeInsets(top: 80, left: 40, bottom: 350, right: 40)
+            #if canImport(UIKit)
+            let padding = routeEdgePadding(for: mapView, bottomMargin: bottomMargin)
+            #else
+            let padding = NSEdgeInsets(top: 80, left: 40, bottom: 350, right: 40)
+            #endif
             mapView.setVisibleMapRect(boundingRect, edgePadding: padding, animated: true)
         }
     }
 
-    private func zoomToSection(_ section: ItinerarySection, on mapView: MKMapView) {
+    private func zoomToSection(_ section: ItinerarySection, on mapView: MKMapView, bottomMargin: CGFloat = 350) {
         var sectionCoordinates: [CLLocationCoordinate2D] = []
 
         if let geojson = section.geojson, let coordinates = geojson.coordinates {
@@ -697,8 +955,11 @@ struct MapViewControllerBridge: UIViewRepresentable {
 
         if !sectionCoordinates.isEmpty {
             let boundingRect = MKMapRect(coordinates: sectionCoordinates)
-            // Apply bottom padding (350pt) to keep the focused section visible above the bottom panel
-            let padding = UIEdgeInsets(top: 100, left: 60, bottom: 350, right: 60)
+            #if canImport(UIKit)
+            let padding = routeEdgePadding(for: mapView, bottomMargin: bottomMargin)
+            #else
+            let padding = NSEdgeInsets(top: 100, left: 60, bottom: 350, right: 60)
+            #endif
             mapView.setVisibleMapRect(boundingRect, edgePadding: padding, animated: true)
         }
     }
@@ -727,12 +988,10 @@ struct MapViewControllerBridge: UIViewRepresentable {
             let activeOverlays = data.cachedOverlays.filter { overlay in
                 isLineEnabledOrFavorite(overlay.lineName, type: overlay.type)
             }
-            
-            let currentOverlays = mapView.overlays.compactMap { $0 as? ColoredPolyline }
-            if Set(currentOverlays) != Set(activeOverlays) {
+            if !mapView.overlays.isEmpty {
                 mapView.removeOverlays(mapView.overlays)
-                mapView.addOverlays(activeOverlays, level: .aboveRoads)
             }
+            mapView.addOverlays(activeOverlays, level: .aboveRoads)
             coordinator.lastCachedOverlaysCount = data.cachedOverlays.count
             coordinator.lastOverlayCategories = data.activeCategories
             coordinator.lastOverlayFavoritesCount = currentFavCount
@@ -935,6 +1194,12 @@ struct MapViewControllerBridge: UIViewRepresentable {
         var lastOverlayFavorites: Set<String> = []
         var lastCachedOverlaysCount: Int = -1
         var hasInstalledStandardOverlays: Bool = false
+        var lastBottomMargin: CGFloat = 0
+        var isProgrammaticTrackingUpdate: Bool = false
+        var wasSimulating: Bool = false
+        var lastNavJourneyId: String?
+        var navStartUserLocation: CLLocationCoordinate2D?
+        var userPannedDuringNavigation: Bool = false
 
         init(_ parent: MapViewControllerBridge) {
             self.parent = parent
@@ -1108,6 +1373,9 @@ struct MapViewControllerBridge: UIViewRepresentable {
                     }
                 }
                 if parent.selectedStation?.id != prioritized.id || parent.selectedStation?.prioritizedLine?.id != prioritized.prioritizedLine?.id {
+                    if parent.userTrackingMode != .none {
+                        parent.userTrackingMode = .none
+                    }
                     parent.selectedStation = prioritized
                 }
             }
@@ -1184,7 +1452,7 @@ struct MapViewControllerBridge: UIViewRepresentable {
 
         
         func mapView(_ mapView: MKMapView, didChange mode: MKUserTrackingMode, animated: Bool) {
-            guard !parent.locationManager.isSimulating else { return }
+            guard !isProgrammaticTrackingUpdate && !parent.locationManager.isSimulating else { return }
             DispatchQueue.main.async {
                 self.parent.userTrackingMode = mode
             }
@@ -1618,6 +1886,7 @@ struct MapViewControllerBridge: UIViewRepresentable {
         
         @objc func handlePanGesture(_ gesture: UIPanGestureRecognizer) {
             if gesture.state == .began {
+                userPannedDuringNavigation = true
                 DispatchQueue.main.async {
                     self.parent.userTrackingMode = .none
                 }
@@ -1634,11 +1903,18 @@ class LineDirectionArrowAnnotation: NSObject, MKAnnotation {
     let coordinate: CLLocationCoordinate2D
     let bearingDegrees: CLLocationDirection
     let color: UIColor
+    let isBidirectional: Bool
 
-    init(coordinate: CLLocationCoordinate2D, bearingDegrees: CLLocationDirection, color: UIColor) {
+    init(
+        coordinate: CLLocationCoordinate2D,
+        bearingDegrees: CLLocationDirection,
+        color: UIColor,
+        isBidirectional: Bool = false
+    ) {
         self.coordinate = coordinate
         self.bearingDegrees = bearingDegrees
         self.color = color
+        self.isBidirectional = isBidirectional
     }
 }
 
@@ -1657,9 +1933,9 @@ class LineDirectionArrowAnnotationView: MKAnnotationView {
 
         #if canImport(UIKit)
         backgroundColor = .clear
-        frame = CGRect(x: 0, y: 0, width: 16, height: 16)
+        frame = CGRect(x: 0, y: 0, width: 18, height: 18)
         badgeView.frame = bounds
-        badgeView.layer.cornerRadius = 8
+        badgeView.layer.cornerRadius = 9
         badgeView.layer.borderWidth = 1.2
         badgeView.layer.borderColor = UIColor.white.withAlphaComponent(0.92).cgColor
         badgeView.layer.shadowColor = UIColor.black.cgColor
@@ -1668,11 +1944,9 @@ class LineDirectionArrowAnnotationView: MKAnnotationView {
         badgeView.layer.shadowOffset = CGSize(width: 0, height: 1)
         addSubview(badgeView)
 
-        let config = UIImage.SymbolConfiguration(pointSize: 8.5, weight: .black)
-        arrowImageView.image = UIImage(systemName: "arrow.up", withConfiguration: config)
         arrowImageView.tintColor = .white
         arrowImageView.contentMode = .scaleAspectFit
-        arrowImageView.frame = CGRect(x: 3, y: 3, width: 10, height: 10)
+        arrowImageView.frame = CGRect(x: 3.5, y: 3.5, width: 11, height: 11)
         badgeView.addSubview(arrowImageView)
         #endif
     }
@@ -1684,6 +1958,9 @@ class LineDirectionArrowAnnotationView: MKAnnotationView {
     func configure(with arrow: LineDirectionArrowAnnotation, mapHeading: CLLocationDirection) {
         #if canImport(UIKit)
         badgeView.backgroundColor = arrow.color
+        let symbolName = arrow.isBidirectional ? "arrow.up.and.down" : "arrow.up"
+        let config = UIImage.SymbolConfiguration(pointSize: arrow.isBidirectional ? 8.5 : 9.0, weight: .black)
+        arrowImageView.image = UIImage(systemName: symbolName, withConfiguration: config)
         updateRotation(bearingDegrees: arrow.bearingDegrees, mapHeading: mapHeading)
         #endif
     }
@@ -1725,6 +2002,7 @@ nonisolated class StationAnnotation: NSObject, MKAnnotation {
     var zoomLevel: StationMapZoomLevel
     let isUnifiedHub: Bool
     let isMajorHub: Bool
+    let isFocusedLineStop: Bool
 
     nonisolated init(
         station: MapStation,
@@ -1734,6 +2012,7 @@ nonisolated class StationAnnotation: NSObject, MKAnnotation {
         zoomLevel: StationMapZoomLevel = .detailed,
         isUnifiedHub: Bool = false,
         isMajorHub: Bool = false,
+        isFocusedLineStop: Bool = false,
         annotationIdOverride: String? = nil
     ) {
         self.station = station
@@ -1745,6 +2024,7 @@ nonisolated class StationAnnotation: NSObject, MKAnnotation {
         self.zoomLevel = zoomLevel
         self.isUnifiedHub = isUnifiedHub
         self.isMajorHub = isMajorHub
+        self.isFocusedLineStop = isFocusedLineStop
         if let override = annotationIdOverride {
             self.annotationId = override
         } else if isUnifiedHub {
@@ -1854,7 +2134,7 @@ class StationSwiftUIAnnotationView: MKAnnotationView {
         let station = stationAnnotation.station
 
         let activeCategoriesHash = MapDataService.shared.activeCategories.hashValue
-        let renderKey = "\(stationAnnotation.annotationId)|z\(stationAnnotation.zoomLevel.rawValue)|s\(stationAnnotation.isSelected ? 1 : 0)|n\(stationAnnotation.showStationName ? 1 : 0)|u\(stationAnnotation.isUnifiedHub ? 1 : 0)|m\(stationAnnotation.isMajorHub ? 1 : 0)|c\(activeCategoriesHash)"
+        let renderKey = "\(stationAnnotation.annotationId)|z\(stationAnnotation.zoomLevel.rawValue)|s\(stationAnnotation.isSelected ? 1 : 0)|n\(stationAnnotation.showStationName ? 1 : 0)|u\(stationAnnotation.isUnifiedHub ? 1 : 0)|m\(stationAnnotation.isMajorHub ? 1 : 0)|f\(stationAnnotation.isFocusedLineStop ? 1 : 0)|c\(activeCategoriesHash)"
         if lastRenderedKey == renderKey, hostingController != nil {
             return
         }
@@ -1867,7 +2147,8 @@ class StationSwiftUIAnnotationView: MKAnnotationView {
             focusedLine: stationAnnotation.focusedLine,
             showStationName: stationAnnotation.showStationName,
             isUnifiedHub: stationAnnotation.isUnifiedHub,
-            isMajorHub: stationAnnotation.isMajorHub
+            isMajorHub: stationAnnotation.isMajorHub,
+            isFocusedLineStop: stationAnnotation.isFocusedLineStop
         )
 
         let hc: UIHostingController<StationBadgeView>
@@ -1923,8 +2204,19 @@ class StationSwiftUIAnnotationView: MKAnnotationView {
             x: (size.width / 2.0) - anchor.x,
             y: (size.height / 2.0) - anchor.y
         )
+        let hasPriorityMode = station.lines.contains { line in
+            line.type == .metro || line.type == .rer || line.type == .tram || line.type == .transilien
+        } || station.mainType == .metro || station.mainType == .rer || station.mainType == .tram || station.mainType == .transilien
+
         self.selectedZPriority = .max
-        self.collisionMode = (stationAnnotation.isSelected || stationAnnotation.zoomLevel != .minimal) ? .rectangle : .circle
+        if stationAnnotation.isSelected {
+            self.collisionMode = .rectangle
+        } else if !hasPriorityMode {
+            // Pour les arrêts de bus, collision compacte en cercle afin de ne pas masquer les arrêts voisins par la largeur du texte
+            self.collisionMode = .circle
+        } else {
+            self.collisionMode = (stationAnnotation.zoomLevel != .minimal) ? .rectangle : .circle
+        }
         
         // Set display priority
         if stationAnnotation.isSelected {
@@ -1936,18 +2228,21 @@ class StationSwiftUIAnnotationView: MKAnnotationView {
         } else if stationAnnotation.isUnifiedHub {
             self.displayPriority = .defaultHigh
             self.zPriority = MKAnnotationViewZPriority(rawValue: 620)
+        } else if stationAnnotation.isFocusedLineStop {
+            self.displayPriority = .defaultHigh
+            self.zPriority = MKAnnotationViewZPriority(rawValue: 500)
+        } else if hasPriorityMode {
+            self.displayPriority = .defaultHigh
+            self.zPriority = MKAnnotationViewZPriority(rawValue: 500)
+        } else if stationAnnotation.zoomLevel == .closeUp {
+            self.displayPriority = .required
+            self.zPriority = MKAnnotationViewZPriority(rawValue: 350)
+        } else if stationAnnotation.zoomLevel == .detailed {
+            self.displayPriority = .required
+            self.zPriority = MKAnnotationViewZPriority(rawValue: 200)
         } else {
-            let hasPriorityMode = station.lines.contains { line in
-                line.type == .metro || line.type == .rer || line.type == .tram || line.type == .transilien
-            } || station.mainType == .metro || station.mainType == .rer || station.mainType == .tram || station.mainType == .transilien
-            
-            if hasPriorityMode {
-                self.displayPriority = .defaultHigh
-                self.zPriority = MKAnnotationViewZPriority(rawValue: 500)
-            } else {
-                self.displayPriority = .defaultLow
-                self.zPriority = MKAnnotationViewZPriority(rawValue: 100)
-            }
+            self.displayPriority = .defaultHigh
+            self.zPriority = MKAnnotationViewZPriority(rawValue: 200)
         }
     }
 

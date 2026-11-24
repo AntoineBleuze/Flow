@@ -584,6 +584,7 @@ public struct FlowAssistantView: View {
     @StateObject private var aiService = FlowAIService.shared
     @StateObject private var voiceManager = VoiceDictationManager.shared
     @StateObject private var hapticController = AIThinkingHapticController()
+    @ObservedObject private var preferences = UserPreferencesManager.shared
 
     @FocusState private var isInputFocused: Bool
     @State private var inputText: String = ""
@@ -662,8 +663,51 @@ public struct FlowAssistantView: View {
 
     // MARK: - Header (Style LiquidGlassSheetHeader)
 
+    private var resetConversationButton: some View {
+        Button {
+            preferences.triggerHapticImpact()
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                aiService.resetConversation()
+                messages = [
+                    AssistantChatMessage(
+                        isUser: false,
+                        text: "Conversation réinitialisée. Où souhaitez-vous aller ?"
+                    )
+                ]
+            }
+        } label: {
+            Image(systemName: "arrow.counterclockwise")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 36, height: 36)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: Circle())
+        .disabled(aiService.isGenerating)
+        .accessibilityLabel("Réinitialiser la conversation")
+    }
+
+    private var closeAssistantButton: some View {
+        Button {
+            preferences.triggerHapticImpact()
+            dismiss()
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(.primary)
+                .frame(width: 36, height: 36)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: Circle())
+        .accessibilityLabel("Fermer Flow IA")
+    }
+
     private var headerBar: some View {
         HStack(alignment: .center, spacing: 12) {
+            if !preferences.handedness.isBackButtonTrailing {
+                closeAssistantButton
+            }
+
             AnimatedAIMeshOrb(size: 40, isActive: aiService.isGenerating)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -683,47 +727,15 @@ public struct FlowAssistantView: View {
 
             Spacer(minLength: 8)
 
-            GlassEffectContainer(spacing: 10) {
-                HStack(spacing: 10) {
-                    Button {
-                        #if canImport(UIKit)
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        #endif
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                            aiService.resetConversation()
-                            messages = [
-                                AssistantChatMessage(
-                                    isUser: false,
-                                    text: "Conversation réinitialisée. Où souhaitez-vous aller ?"
-                                )
-                            ]
-                        }
-                    } label: {
-                        Image(systemName: "arrow.counterclockwise")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .frame(width: 36, height: 36)
+            if preferences.handedness.isBackButtonTrailing {
+                GlassEffectContainer(spacing: 10) {
+                    HStack(spacing: 10) {
+                        resetConversationButton
+                        closeAssistantButton
                     }
-                    .buttonStyle(.plain)
-                    .glassEffect(.regular.interactive(), in: Circle())
-                    .disabled(aiService.isGenerating)
-                    .accessibilityLabel("Réinitialiser la conversation")
-
-                    Button {
-                        #if canImport(UIKit)
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        #endif
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.primary)
-                            .frame(width: 36, height: 36)
-                    }
-                    .buttonStyle(.plain)
-                    .glassEffect(.regular.interactive(), in: Circle())
-                    .accessibilityLabel("Fermer Flow IA")
                 }
+            } else {
+                resetConversationButton
             }
         }
         .padding(.horizontal, 20)

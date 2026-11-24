@@ -34,14 +34,16 @@ nonisolated struct LineTrace: Identifiable, @unchecked Sendable {
     let polylines: [MKPolyline]  // Utilisation directe de MKPolyline
     let type: TransportType
     let isDashed: Bool
+    let openingDate: String?
 
-    nonisolated init(id: String, name: String, color: Color, polylines: [MKPolyline], type: TransportType, isDashed: Bool = false) {
+    nonisolated init(id: String, name: String, color: Color, polylines: [MKPolyline], type: TransportType, isDashed: Bool = false, openingDate: String? = nil) {
         self.id = id
         self.name = name
         self.color = color
         self.polylines = polylines
         self.type = type
         self.isDashed = isDashed
+        self.openingDate = openingDate
     }
 }
 
@@ -160,6 +162,10 @@ struct StopPoint: Identifiable, Codable, Sendable {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     }
 
+    nonisolated var isAddress: Bool {
+        id.hasPrefix("address:")
+    }
+
     nonisolated init(id: String, stopAreaId: String, name: String, coordinate: CLLocationCoordinate2D, type: TransportType, lineName: String) {
         self.id = id
         self.stopAreaId = stopAreaId
@@ -186,6 +192,10 @@ struct MapStation: Identifiable, Equatable, Codable, Sendable {
 
     nonisolated var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+
+    nonisolated var isAddress: Bool {
+        id.hasPrefix("address:")
     }
 
     nonisolated init(
@@ -244,6 +254,7 @@ nonisolated struct MegaPoleRule: Sendable {
 @MainActor
 class MapDataService: ObservableObject {
     static let shared = MapDataService()
+    private var remoteLinePolylinesCache: [String: [MKPolyline]] = [:]
 
     nonisolated static let megaPoleRules: [MegaPoleRule] = [
         MegaPoleRule(
@@ -434,7 +445,7 @@ class MapDataService: ObservableObject {
 
     nonisolated private var stationsCacheURL: URL {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("stationsCache_SwiftData_v4.json")
+            .appendingPathComponent("stationsCache_SwiftData_v5.json")
     }
 
     nonisolated private var colorsCacheURL: URL {
@@ -731,6 +742,10 @@ class MapDataService: ObservableObject {
             let data = try Data(contentsOf: cacheURL)
             let cached = try JSONDecoder().decode([CacheableLineTrace].self, from: data)
             let traces = cached.map { $0.toLineTrace() }
+            guard traces.count >= 25 && traces.contains(where: { $0.id == "GPE_T1" }) else {
+                print("🔄 Cache obsolète ou incomplet (\(traces.count) lignes), rechargement...")
+                return false
+            }
             let overlays = Self.buildOverlays(from: traces)
             print("✅ Loaded \(traces.count) lines and \(overlays.count) overlays directly from cache")
             
@@ -768,6 +783,7 @@ class MapDataService: ObservableObject {
     }
 
     func loadPreviewMockData() {
+        guard ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" else { return }
         let metro1Color = Color(hex: "FFCD00")
         let metro4Color = Color(hex: "CF009E")
         let metro14Color = Color(hex: "662583")
@@ -1013,7 +1029,7 @@ class MapDataService: ObservableObject {
         
         let appVersion = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
         let cachedVersion = UserDefaults.standard.string(forKey: "cached_data_version")
-        let tracesVersion = "v8_precomputed_offsets_snaps"
+        let tracesVersion = "v11_extensions_clean"
         let cachedTracesVersion = UserDefaults.standard.string(forKey: "cached_traces_version")
         if cachedVersion != appVersion || cachedTracesVersion != tracesVersion {
             print("🔄 Nouvelle version de l'application ou des tracés détectée (\(cachedVersion ?? "aucune") -> \(appVersion), \(cachedTracesVersion ?? "aucune") -> \(tracesVersion)). Purge du cache...")
@@ -1047,13 +1063,24 @@ class MapDataService: ObservableObject {
             try? FileManager.default.removeItem(at: self.cacheURL)
             try? FileManager.default.removeItem(at: self.stationsCacheURL)
             
-            self.loadTracesCold()
+            let baseTraces = self.loadTracesCold()
             DispatchQueue.main.async {
                 MapDataService.shared.loadingProgress = 0.2
             }
-            self.loadAdditionalTracesCold()  // Chargement du Câble 1 depuis le CSV
-            DispatchQueue.main.async {
+            let additionalTraces = self.loadAdditionalTracesCold()  // Chargement du Câble 1 depuis le CSV
+            let allBaseLines = baseTraces + additionalTraces
+            DispatchQueue.main.sync {
+                self.lines = allBaseLines
+                for line in allBaseLines {
+                    self.lineColorCache[line.name] = line.color
+                }
+                for (name, hex) in self.hardcodedColors {
+                    if self.lineColorCache[name] == nil {
+                        self.lineColorCache[name] = Color(hex: hex)
+                    }
+                }
                 MapDataService.shared.loadingProgress = 0.3
+                print("✅ \(allBaseLines.count) lignes de base engagées sur le MainActor.")
             }
             self.loadStopsCold(container: container)
         }
@@ -1069,7 +1096,7 @@ class MapDataService: ObservableObject {
         "14": "62259D", "15": "A50034", "16": "FF82B4", "17": "D2D200", "18": "00A092",
     ]
 
-    nonisolated private func loadTracesCold() {
+    nonisolated private func loadTracesCold() -> [LineTrace] {
         // Cache miss - parse from GeoJSON
         struct Feature: Codable {
             let geometry: Geometry
@@ -1097,7 +1124,7 @@ class MapDataService: ObservableObject {
                 forResource: "traces-du-reseau-ferre-idf", withExtension: "geojson")
         else {
             print("⚠️ Fichier traces-du-reseau-ferre-idf.geojson non trouvé")
-            return
+            return []
         }
 
         do {
@@ -1195,27 +1222,14 @@ class MapDataService: ObservableObject {
                 }
             }
 
-            DispatchQueue.main.async {
-                self.lines = newLines
-                // Remplissage du cache
-                for line in newLines {
-                    self.lineColorCache[line.name] = line.color
-                }
-
-                // Injecter les couleurs hardcodées manquantes
-                for (name, hex) in self.hardcodedColors {
-                    if self.lineColorCache[name] == nil {
-                        self.lineColorCache[name] = Color(hex: hex)
-                    }
-                }
-
-                print(
-                    "✅ \(newLines.count) lignes chargées avec tracés réels détaillés (courbes du réseau ferré)"
-                )
-            }
+            print(
+                "✅ \(newLines.count) lignes chargées avec tracés réels détaillés (courbes du réseau ferré)"
+            )
+            return newLines
 
         } catch {
             print("❌ Erreur parsing réseau ferré: \(error)")
+            return []
         }
     }
 
@@ -1231,7 +1245,7 @@ class MapDataService: ObservableObject {
         
         do {
             try await importer.importBusStops(csvUrl: url)
-            UserDefaults.standard.set(true, forKey: "didImportBusStops_SwiftData_v2")
+            UserDefaults.standard.set(true, forKey: "didImportBusStops_SwiftData_v3")
             print("✅ [Bus Import] Importation via ModelActor terminée avec succès !")
         } catch {
             print("❌ [Bus Import] Erreur lors de l'import via ModelActor: \(error)")
@@ -1242,7 +1256,7 @@ class MapDataService: ObservableObject {
         let context = ModelContext(container)
 
         // Import des bus en arrière-plan si pas encore fait
-        let didImportBus = UserDefaults.standard.bool(forKey: "didImportBusStops_SwiftData_v2")
+        let didImportBus = UserDefaults.standard.bool(forKey: "didImportBusStops_SwiftData_v3")
         if !didImportBus {
             Task {
                 await self.importBusStopsViaActor()
@@ -1250,11 +1264,11 @@ class MapDataService: ObservableObject {
         }
 
         // Migration de l'ancien CSV vers le nouveau JSON
-        let didMigrate = UserDefaults.standard.bool(forKey: "didMigrateToJSONStations_SwiftData_v1")
+        let didMigrate = UserDefaults.standard.bool(forKey: "didMigrateToJSONStations_SwiftData_v2")
         if !didMigrate {
             print("🔄 Première exécution avec JSON : purge de la base locale...")
             self.clearStopPoints(in: context)
-            UserDefaults.standard.set(true, forKey: "didMigrateToJSONStations_SwiftData_v1")
+            UserDefaults.standard.set(true, forKey: "didMigrateToJSONStations_SwiftData_v2")
         }
 
         do {
@@ -2108,14 +2122,14 @@ class MapDataService: ObservableObject {
     }
 
     // Chargement des tracés supplémentaires (ex: Câble 1) depuis le CSV
-    nonisolated private func loadAdditionalTracesCold() {
+    nonisolated private func loadAdditionalTracesCold() -> [LineTrace] {
         guard
             let url = Bundle.main.url(
                 forResource: "traces-des-lignes-de-transport-en-commun-idfm-2", withExtension: "csv"
             )
         else {
             print("⚠️ Fichier traces-des-lignes-de-transport-en-commun-idfm-2.csv non trouvé")
-            return
+            return []
         }
 
         do {
@@ -2161,15 +2175,11 @@ class MapDataService: ObservableObject {
                 }
             }
 
-            DispatchQueue.main.async {
-                self.lines.append(contentsOf: newLines)
-                for line in newLines {
-                    self.lineColorCache[line.name] = line.color
-                }
-            }
+            return newLines
 
         } catch {
             print("❌ Erreur chargement traces CSV supplémentaires: \(error)")
+            return []
         }
     }
 
@@ -2179,56 +2189,42 @@ class MapDataService: ObservableObject {
         
         do {
             let entities = try await importer.fetchBusStops(minLat: minLat, maxLat: maxLat, minLon: minLon, maxLon: maxLon)
-            var grouped: [String: [StopPoint]] = [:]
-            for entity in entities {
-                let id = entity.id
-                let name = entity.name
-                let lineName = entity.lineName
-                let city = entity.city
-                
-                let coordinate = CLLocationCoordinate2D(latitude: entity.latitude, longitude: entity.longitude)
-                let stop = StopPoint(
-                    id: id,
-                    stopAreaId: entity.stopAreaId,
-                    name: name,
-                    coordinate: coordinate,
-                    type: .bus,
-                    lineName: lineName
-                )
-                
-                let key = "\(name)_\(city)"
-                grouped[key, default: []].append(stop)
-            }
-            
+            let groupedByStopId = Dictionary(grouping: entities) { $0.physicalStopId }
+
             var busStations: [MapStation] = []
-            for (_, stops) in grouped {
-                let clusters = MapDataService.clusterStops(stops, maxDistance: 20.0)
-                for (clusterIndex, clusterStops) in clusters.enumerated() {
-                    guard let first = clusterStops.first else { continue }
-                    let totalLat = clusterStops.reduce(0.0) { $0 + $1.coordinate.latitude }
-                    let totalLon = clusterStops.reduce(0.0) { $0 + $1.coordinate.longitude }
-                    let center = CLLocationCoordinate2D(
-                        latitude: totalLat / Double(clusterStops.count),
-                        longitude: totalLon / Double(clusterStops.count)
+            busStations.reserveCapacity(groupedByStopId.count)
+
+            for (stopId, stopEntities) in groupedByStopId {
+                guard let first = stopEntities.first else { continue }
+                let exactCoordinate = CLLocationCoordinate2D(latitude: first.latitude, longitude: first.longitude)
+
+                let platforms: [StopPoint] = stopEntities.map { entity in
+                    StopPoint(
+                        id: entity.physicalStopId,
+                        stopAreaId: entity.stopAreaId,
+                        name: entity.name,
+                        coordinate: CLLocationCoordinate2D(latitude: entity.latitude, longitude: entity.longitude),
+                        type: .bus,
+                        lineName: entity.lineName
                     )
-                    
-                    let uniqueLines = Set(clusterStops.map { StationLine(name: $0.lineName, type: .bus) })
-                    let sortedLines = Array(uniqueLines).sorted { $0.name < $1.name }
-                    
-                    let baseId = first.stopAreaId.isEmpty ? first.id : first.stopAreaId
-                    let stationId = clusters.count > 1 ? "\(baseId)_\(clusterIndex)" : baseId
-                    
-                    let station = MapStation(
-                        id: stationId,
-                        name: first.name,
-                        coordinate: center,
-                        platforms: clusterStops,
-                        isHub: false,
-                        mainType: .bus,
-                        lines: sortedLines
-                    )
-                    busStations.append(station)
                 }
+
+                let uniqueLines = Set(stopEntities.map { StationLine(name: $0.lineName, type: .bus) })
+                let sortedLines = Array(uniqueLines).sorted {
+                    $0.name.localizedStandardCompare($1.name) == .orderedAscending
+                }
+
+                let station = MapStation(
+                    id: "bus__\(stopId)",
+                    name: first.name,
+                    coordinate: exactCoordinate,
+                    platforms: platforms,
+                    isHub: false,
+                    mainType: .bus,
+                    lines: sortedLines,
+                    city: first.city.isEmpty ? nil : first.city
+                )
+                busStations.append(station)
             }
             return busStations
         } catch {
@@ -2250,155 +2246,271 @@ class MapDataService: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    nonisolated private static func traceDirectionalStops(
-        start: MapStation,
-        target: MapStation,
-        pool: [MapStation],
-        avoidDuplicateNames: Bool
-    ) -> [MapStation] {
-        var path: [MapStation] = [start]
-        var usedIds = Set<String>([start.id])
-        var usedNames = Set<String>([normalizedStopGroupName(start.name)])
-        var prevVec: (dx: Double, dy: Double)? = nil
-
-        while true {
-            guard let curr = path.last else { break }
-            let currLoc = CLLocation(latitude: curr.coordinate.latitude, longitude: curr.coordinate.longitude)
-            let targetLoc = CLLocation(latitude: target.coordinate.latitude, longitude: target.coordinate.longitude)
-
-            if curr.id == target.id { break }
-            if path.count >= 3 && currLoc.distance(from: targetLoc) < 220.0 {
-                break
-            }
-
-            let candidates = pool.filter { cand in
-                guard !usedIds.contains(cand.id) else { return false }
-                if avoidDuplicateNames && cand.id != target.id {
-                    return !usedNames.contains(normalizedStopGroupName(cand.name))
-                }
-                return true
-            }
-            guard !candidates.isEmpty else { break }
-
-            let goalDx = target.coordinate.longitude - curr.coordinate.longitude
-            let goalDy = target.coordinate.latitude - curr.coordinate.latitude
-            let goalLen = hypot(goalDx, goalDy)
-            let goalUnit = goalLen > 0 ? (dx: goalDx / goalLen, dy: goalDy / goalLen) : (dx: 0.0, dy: 0.0)
-
-            var bestCandidate: MapStation?
-            var bestScore = Double.greatestFiniteMagnitude
-            var bestRawDist = Double.greatestFiniteMagnitude
-            var bestStepUnit: (dx: Double, dy: Double)?
-
-            for cand in candidates {
-                let candLoc = CLLocation(latitude: cand.coordinate.latitude, longitude: cand.coordinate.longitude)
-                let dist = currLoc.distance(from: candLoc)
-                let dx = cand.coordinate.longitude - curr.coordinate.longitude
-                let dy = cand.coordinate.latitude - curr.coordinate.latitude
-                let len = hypot(dx, dy)
-                let stepUnit = len > 0 ? (dx: dx / len, dy: dy / len) : (dx: 0.0, dy: 0.0)
-
-                let goalAlign = stepUnit.dx * goalUnit.dx + stepUnit.dy * goalUnit.dy
-                let headingAlign = prevVec.map { stepUnit.dx * $0.dx + stepUnit.dy * $0.dy } ?? goalAlign
-                let score = dist * (1.0 - 0.28 * headingAlign - 0.16 * goalAlign)
-
-                if score < bestScore {
-                    bestScore = score
-                    bestRawDist = dist
-                    bestCandidate = cand
-                    bestStepUnit = stepUnit
-                }
-            }
-
-            guard let chosen = bestCandidate else { break }
-            if bestRawDist > 2500.0 && currLoc.distance(from: targetLoc) < 1200.0 {
-                break
-            }
-
-            path.append(chosen)
-            usedIds.insert(chosen.id)
-            usedNames.insert(normalizedStopGroupName(chosen.name))
-            if let unit = bestStepUnit, bestRawDist > 20.0 {
-                prevVec = unit
-            }
-            if chosen.id == target.id {
-                break
-            }
-        }
-
-        return path
-    }
-
     nonisolated private static func buildOrderedLinePolylines(from stops: [MapStation]) -> [MKPolyline] {
         guard stops.count >= 2 else { return [] }
 
-        let avgLat = stops.reduce(0.0) { $0 + $1.coordinate.latitude } / Double(stops.count)
-        let avgLon = stops.reduce(0.0) { $0 + $1.coordinate.longitude } / Double(stops.count)
-        let centroid = CLLocation(latitude: avgLat, longitude: avgLon)
-
-        // Trouver les deux extrémités globales de la ligne (diamètre approximatif)
-        let p0 = stops.max { a, b in
-            let locA = CLLocation(latitude: a.coordinate.latitude, longitude: a.coordinate.longitude)
-            let locB = CLLocation(latitude: b.coordinate.latitude, longitude: b.coordinate.longitude)
-            return locA.distance(from: centroid) < locB.distance(from: centroid)
-        } ?? stops[0]
-
-        let p0Loc = CLLocation(latitude: p0.coordinate.latitude, longitude: p0.coordinate.longitude)
-        let endB = stops.max { a, b in
-            let locA = CLLocation(latitude: a.coordinate.latitude, longitude: a.coordinate.longitude)
-            let locB = CLLocation(latitude: b.coordinate.latitude, longitude: b.coordinate.longitude)
-            return locA.distance(from: p0Loc) < locB.distance(from: p0Loc)
-        } ?? stops[stops.count - 1]
-
-        let endBLoc = CLLocation(latitude: endB.coordinate.latitude, longitude: endB.coordinate.longitude)
-        let startA = stops.max { a, b in
-            let locA = CLLocation(latitude: a.coordinate.latitude, longitude: a.coordinate.longitude)
-            let locB = CLLocation(latitude: b.coordinate.latitude, longitude: b.coordinate.longitude)
-            return locA.distance(from: endBLoc) < locB.distance(from: endBLoc)
-        } ?? p0
-
-        // Aller : startA -> endB (en évitant de passer deux fois par un arrêt de même nom sur sens opposés)
-        let path1 = traceDirectionalStops(start: startA, target: endB, pool: stops, avoidDuplicateNames: true)
-        let usedIds1 = Set(path1.map { $0.id })
-
-        // Retour : arrêts restants de endB -> startA (séparant les rues à sens unique)
-        let remaining = stops.filter { !usedIds1.contains($0.id) }
-        var rawPaths: [[CLLocationCoordinate2D]] = []
-        if path1.count >= 2 {
-            rawPaths.append(path1.map { $0.coordinate })
+        // 1. Regrouper les arrêts opposés (même nom normalisé et < 150 m) en nœuds canoniques
+        var groupedByName: [String: [CLLocationCoordinate2D]] = [:]
+        for stop in stops {
+            let key = normalizedStopGroupName(stop.name)
+            groupedByName[key, default: []].append(stop.coordinate)
         }
 
-        if remaining.count >= 2 {
-            let returnStart = remaining.min { a, b in
-                let locA = CLLocation(latitude: a.coordinate.latitude, longitude: a.coordinate.longitude)
-                let locB = CLLocation(latitude: b.coordinate.latitude, longitude: b.coordinate.longitude)
-                return locA.distance(from: endBLoc) < locB.distance(from: endBLoc)
-            } ?? remaining[0]
+        var canonicalNodes: [CLLocationCoordinate2D] = []
+        for (_, coords) in groupedByName {
+            var remaining = coords
+            while !remaining.isEmpty {
+                let seed = remaining.removeFirst()
+                let seedLoc = CLLocation(latitude: seed.latitude, longitude: seed.longitude)
+                var cluster = [seed]
+                var nextRemaining: [CLLocationCoordinate2D] = []
+                for pt in remaining {
+                    let ptLoc = CLLocation(latitude: pt.latitude, longitude: pt.longitude)
+                    if seedLoc.distance(from: ptLoc) <= 150.0 {
+                        cluster.append(pt)
+                    } else {
+                        nextRemaining.append(pt)
+                    }
+                }
+                remaining = nextRemaining
 
-            var returnPool = remaining
-            let returnStartLoc = CLLocation(latitude: returnStart.coordinate.latitude, longitude: returnStart.coordinate.longitude)
-            let returnStartCoordPrefix: [CLLocationCoordinate2D] =
-                (endBLoc.distance(from: returnStartLoc) > 40.0 && endBLoc.distance(from: returnStartLoc) < 600.0)
-                ? [endB.coordinate]
-                : []
+                let avgLat = cluster.reduce(0.0) { $0 + $1.latitude } / Double(cluster.count)
+                let avgLon = cluster.reduce(0.0) { $0 + $1.longitude } / Double(cluster.count)
+                canonicalNodes.append(CLLocationCoordinate2D(latitude: avgLat, longitude: avgLon))
+            }
+        }
 
-            if !returnPool.contains(where: { $0.id == startA.id }) {
-                let startALoc = CLLocation(latitude: startA.coordinate.latitude, longitude: startA.coordinate.longitude)
-                if remaining.contains(where: { CLLocation(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude).distance(from: startALoc) < 700.0 }) {
-                    returnPool.append(startA)
+        let n = canonicalNodes.count
+        guard n >= 2 else { return [] }
+
+        // 2. Arbre couvrant minimal (Prim) sur les nœuds canoniques
+        let locations = canonicalNodes.map { CLLocation(latitude: $0.latitude, longitude: $0.longitude) }
+        var inTree = [Bool](repeating: false, count: n)
+        var minDist = [Double](repeating: Double.greatestFiniteMagnitude, count: n)
+        var parent = [Int](repeating: -1, count: n)
+        minDist[0] = 0.0
+
+        for _ in 0..<n {
+            var u = -1
+            var best = Double.greatestFiniteMagnitude
+            for i in 0..<n where !inTree[i] && minDist[i] < best {
+                best = minDist[i]
+                u = i
+            }
+            guard u != -1 else { break }
+            inTree[u] = true
+
+            for v in 0..<n where !inTree[v] {
+                let d = locations[u].distance(from: locations[v])
+                if d < minDist[v] {
+                    minDist[v] = d
+                    parent[v] = u
+                }
+            }
+        }
+
+        // Ignorer les arêtes > 3000 m pour éviter les sauts aberrants
+        var adj = [[(node: Int, dist: Double)]](repeating: [], count: n)
+        for v in 1..<n {
+            let u = parent[v]
+            guard u >= 0 else { continue }
+            let d = locations[u].distance(from: locations[v])
+            if d <= 3000.0 {
+                adj[u].append((v, d))
+                adj[v].append((u, d))
+            }
+        }
+
+        // Helper BFS pondéré dans un arbre pour trouver le nœud le plus éloigné et le chemin
+        func farthestNode(from start: Int, blocked: Set<Int> = []) -> (node: Int, dist: Double, path: [Int], visitedCount: Int) {
+            var dist = [Int: Double]()
+            var prev = [Int: Int]()
+            var queue: [Int] = [start]
+            dist[start] = 0.0
+            var idx = 0
+            var farNode = start
+            var farDist = 0.0
+
+            while idx < queue.count {
+                let curr = queue[idx]
+                idx += 1
+                let currD = dist[curr] ?? 0.0
+                if currD > farDist {
+                    farDist = currD
+                    farNode = curr
+                }
+                for edge in adj[curr] where !blocked.contains(edge.node) && dist[edge.node] == nil {
+                    dist[edge.node] = currD + edge.dist
+                    prev[edge.node] = curr
+                    queue.append(edge.node)
                 }
             }
 
-            let path2 = traceDirectionalStops(start: returnStart, target: startA, pool: returnPool, avoidDuplicateNames: true)
-            if path2.count >= 2 {
-                rawPaths.append(returnStartCoordPrefix + path2.map { $0.coordinate })
+            var path: [Int] = []
+            var cur: Int? = farNode
+            while let c = cur {
+                path.append(c)
+                cur = prev[c]
+            }
+            path.reverse()
+            return (farNode, farDist, path, queue.count)
+        }
+
+        // 3. Extraire le diamètre de chaque composante connexe et ses branches significatives
+        var visitedComp = [Bool](repeating: false, count: n)
+        var rawPaths: [[CLLocationCoordinate2D]] = []
+
+        for root in 0..<n where !visitedComp[root] {
+            let pass1 = farthestNode(from: root)
+            let pass2 = farthestNode(from: pass1.node)
+
+            // Marquer toute la composante comme visitée
+            var markQueue = [root]
+            visitedComp[root] = true
+            var mIdx = 0
+            while mIdx < markQueue.count {
+                let c = markQueue[mIdx]
+                mIdx += 1
+                for edge in adj[c] where !visitedComp[edge.node] {
+                    visitedComp[edge.node] = true
+                    markQueue.append(edge.node)
+                }
+            }
+
+            let trunk = pass2.path
+            guard trunk.count >= 2 else { continue }
+            rawPaths.append(trunk.map { canonicalNodes[$0] })
+
+            // 4. Extraire les branches significatives (>= 2 nœuds hors tronc ou > 150 m)
+            let onTrunk = Set(trunk)
+            for junction in trunk {
+                for edge in adj[junction] where !onTrunk.contains(edge.node) {
+                    let sub = farthestNode(from: edge.node, blocked: onTrunk)
+                    let distFromJunction = edge.dist + sub.dist
+                    if sub.visitedCount >= 2 || distFromJunction > 150.0 {
+                        let branch = [junction] + sub.path
+                        if branch.count >= 2 {
+                            rawPaths.append(branch.map { canonicalNodes[$0] })
+                        }
+                    }
+                }
             }
         }
 
+        // 5. Lissage léger pour rester fidèle aux points d'arrêt
         return rawPaths.compactMap { coords in
-            let smoothed = Self.smoothCoordinates(coords, passes: 1, maxCornerOffsetMeters: 10.0)
+            let smoothed = Self.smoothCoordinates(coords, passes: 2, maxCornerOffsetMeters: 20.0)
             guard smoothed.count >= 2 else { return nil }
             return MKPolyline(coordinates: smoothed, count: smoothed.count)
+        }
+    }
+
+    private struct IDFMTraceAPIResponse: Decodable {
+        let results: [IDFMTraceRecord]
+    }
+
+    private struct IDFMTraceRecord: Decodable {
+        let route_id: String?
+        let route_short_name: String?
+        let route_type: String?
+        let shape: IDFMTraceShape?
+    }
+
+    private struct IDFMTraceShape: Decodable {
+        let geometry: IDFMTraceGeometry?
+    }
+
+    private struct IDFMTraceGeometry: Decodable {
+        let type: String?
+        let lineArrays: [[[Double]]]
+
+        enum CodingKeys: String, CodingKey {
+            case type
+            case coordinates
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.type = try container.decodeIfPresent(String.self, forKey: .type)
+            if let multi = try? container.decode([[[Double]]].self, forKey: .coordinates) {
+                self.lineArrays = multi
+            } else if let single = try? container.decode([[Double]].self, forKey: .coordinates) {
+                self.lineArrays = [single]
+            } else {
+                self.lineArrays = []
+            }
+        }
+    }
+
+    private func fetchOfficialBusPolylines(lineName: String, stops: [MapStation]) async -> [MKPolyline] {
+        let cacheKey = Self.lineLookupKey(lineName, type: .bus)
+        if let cached = remoteLinePolylinesCache[cacheKey], !cached.isEmpty {
+            return cached
+        }
+
+        let escapedLine = lineName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        var components = URLComponents(string: "https://data.iledefrance-mobilites.fr/api/explore/v2.1/catalog/datasets/traces-des-lignes-de-transport-en-commun-idfm/records")
+        components?.queryItems = [
+            URLQueryItem(name: "where", value: "route_short_name=\"\(escapedLine)\" AND route_type=\"Bus\""),
+            URLQueryItem(name: "limit", value: "20")
+        ]
+        guard let url = components?.url else { return [] }
+
+        do {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 8.0
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                return []
+            }
+
+            let decoded = try JSONDecoder().decode(IDFMTraceAPIResponse.self, from: data)
+            let candidates = decoded.results.filter { record in
+                !(record.shape?.geometry?.lineArrays.isEmpty ?? true)
+            }
+            guard !candidates.isEmpty else { return [] }
+
+            let chosenRecord: IDFMTraceRecord
+            if candidates.count > 1, !stops.isEmpty {
+                let avgLat = stops.reduce(0.0) { $0 + $1.coordinate.latitude } / Double(stops.count)
+                let avgLon = stops.reduce(0.0) { $0 + $1.coordinate.longitude } / Double(stops.count)
+                let stopsCentroid = CLLocation(latitude: avgLat, longitude: avgLon)
+
+                chosenRecord = candidates.min { a, b in
+                    func centroidLocation(for rec: IDFMTraceRecord) -> CLLocation? {
+                        let pts = (rec.shape?.geometry?.lineArrays ?? []).flatMap { $0 }.filter { $0.count >= 2 }
+                        guard !pts.isEmpty else { return nil }
+                        let lat = pts.reduce(0.0) { $0 + $1[1] } / Double(pts.count)
+                        let lon = pts.reduce(0.0) { $0 + $1[0] } / Double(pts.count)
+                        return CLLocation(latitude: lat, longitude: lon)
+                    }
+                    let dA = centroidLocation(for: a)?.distance(from: stopsCentroid) ?? Double.greatestFiniteMagnitude
+                    let dB = centroidLocation(for: b)?.distance(from: stopsCentroid) ?? Double.greatestFiniteMagnitude
+                    return dA < dB
+                } ?? candidates[0]
+            } else {
+                chosenRecord = candidates[0]
+            }
+
+            let polylines: [MKPolyline] = (chosenRecord.shape?.geometry?.lineArrays ?? []).compactMap { segment in
+                let coords = segment.compactMap { pt -> CLLocationCoordinate2D? in
+                    guard pt.count >= 2 else { return nil }
+                    return CLLocationCoordinate2D(latitude: pt[1], longitude: pt[0])
+                }
+                guard coords.count >= 2 else { return nil }
+                return MKPolyline(coordinates: coords, count: coords.count)
+            }
+
+            if !polylines.isEmpty {
+                remoteLinePolylinesCache[cacheKey] = polylines
+            }
+            return polylines
+        } catch {
+            print("⚠️ [Line Preview] Error fetching official bus trace for \(lineName): \(error)")
+            return []
         }
     }
 
@@ -2490,6 +2602,15 @@ class MapDataService: ObservableObject {
         if let tracePolylines = matchingTrace?.polylines, !tracePolylines.isEmpty {
             polylines = tracePolylines
             showDirectionArrows = false
+        } else if type == .bus {
+            let officialBusPolylines = await fetchOfficialBusPolylines(lineName: lineName, stops: stops)
+            if !officialBusPolylines.isEmpty {
+                polylines = officialBusPolylines
+                showDirectionArrows = true
+            } else {
+                polylines = Self.buildOrderedLinePolylines(from: stops)
+                showDirectionArrows = !polylines.isEmpty
+            }
         } else {
             polylines = Self.buildOrderedLinePolylines(from: stops)
             showDirectionArrows = !polylines.isEmpty
@@ -2608,6 +2729,7 @@ class MapDataService: ObservableObject {
                 return railLoc.distance(from: busLoc) < 250.0
             }) {
                 let rail = result[idx]
+                let railNonBusCount = rail.lines.filter { $0.type != .bus }.count
                 let mergedPlatforms = rail.platforms + busStation.platforms
                 let mergedLines = Array(Set(rail.lines + busStation.lines)).sorted { $0.name < $1.name }
                 result[idx] = MapStation(
@@ -2615,12 +2737,14 @@ class MapDataService: ObservableObject {
                     name: rail.name,
                     coordinate: rail.coordinate,
                     platforms: mergedPlatforms,
-                    isHub: true,
+                    isHub: railNonBusCount >= 2 ? true : rail.isHub,
                     mainType: rail.mainType,
                     lines: mergedLines,
                     city: rail.city ?? busStation.city,
                     prioritizedLine: rail.prioritizedLine
                 )
+                // Toujours conserver les marqueurs physiques de bus sur la carte, même autour des grands pôles multimodaux
+                unmergedBuses.append(busStation)
             } else {
                 unmergedBuses.append(busStation)
             }
@@ -2703,7 +2827,7 @@ class MapDataService: ObservableObject {
                 platformLookup: lookup
             )
 
-            if shouldPersistCache {
+            if shouldPersistCache && offsetLines.count >= 25 && !snappedAllStations.isEmpty {
                 let cacheableTraces = offsetLines.map { CacheableLineTrace(from: $0) }
                 if let tracesData = try? JSONEncoder().encode(cacheableTraces) {
                     try? tracesData.write(to: tracesURL)
@@ -2813,6 +2937,35 @@ class MapDataService: ObservableObject {
         return sqrt(dLonMeters * dLonMeters + dLatMeters * dLatMeters)
     }
 
+    /// Supprime les points intermédiaires quasi colinéaires (< `toleranceMeters`) pour accélérer le cache et le rendu Metal.
+    nonisolated private static func simplifyCollinearPoints(
+        _ coords: [CLLocationCoordinate2D],
+        toleranceMeters: Double = 1.5
+    ) -> [CLLocationCoordinate2D] {
+        guard coords.count > 2 else { return coords }
+        var out: [CLLocationCoordinate2D] = [coords[0]]
+        out.reserveCapacity(coords.count)
+
+        var anchor = coords[0]
+        for i in 1..<(coords.count - 1) {
+            let curr = coords[i]
+            let next = coords[i + 1]
+            let latScale = max(0.01, cos(curr.latitude * .pi / 180.0))
+            let dist = pointToSegmentDistanceMeters(
+                lat: curr.latitude, lon: curr.longitude,
+                lat1: anchor.latitude, lon1: anchor.longitude,
+                lat2: next.latitude, lon2: next.longitude,
+                latScale: latScale
+            )
+            if dist >= toleranceMeters {
+                out.append(curr)
+                anchor = curr
+            }
+        }
+        out.append(coords[coords.count - 1])
+        return out
+    }
+
     /// Applique un décalage parallèle propre et lissé aux tronçons partagés par plusieurs lignes,
     /// en orientant la normale de manière cohérente même si les tracés sont en sens opposé.
     nonisolated static func applyParallelCorridorOffsets(to lines: [LineTrace]) -> [LineTrace] {
@@ -2826,7 +2979,7 @@ class MapDataService: ObservableObject {
 
         for line in lines {
             let lineKey = "\(line.type.rawValue)_\(normalizeLineKeyName(line.name, type: line.type))"
-            let chains = line.polylines.map { subdivideLongSegments(extractCoordinates(from: $0), maxStepMeters: 32.0) }
+            let chains = line.polylines.map { subdivideLongSegments(extractCoordinates(from: $0), maxStepMeters: 75.0) }
             preparedLines.append((line: line, key: lineKey, chains: chains))
 
             for chain in chains where chain.count >= 2 {
@@ -2874,7 +3027,7 @@ class MapDataService: ObservableObject {
             var newPolylines: [MKPolyline] = []
             newPolylines.reserveCapacity(entry.chains.count)
 
-            for chain in entry.chains {
+            for (chainIdx, chain) in entry.chains.enumerated() {
                 guard chain.count >= 2 else { continue }
 
                 var dxMeters = [Double](repeating: 0.0, count: chain.count)
@@ -2988,12 +3141,16 @@ class MapDataService: ObservableObject {
                         }
                     }
 
-                    let finalCoords = smoothCoordinates(shiftedCoords, passes: 1, maxCornerOffsetMeters: 16.0)
+                    let smoothed = smoothCoordinates(shiftedCoords, passes: 2, maxCornerOffsetMeters: 22.0)
+                    let finalCoords = simplifyCollinearPoints(smoothed, toleranceMeters: 0.45)
                     if finalCoords.count >= 2 {
                         newPolylines.append(MKPolyline(coordinates: finalCoords, count: finalCoords.count))
                     }
+                } else if chainIdx < entry.line.polylines.count {
+                    newPolylines.append(entry.line.polylines[chainIdx])
                 } else {
-                    newPolylines.append(MKPolyline(coordinates: chain, count: chain.count))
+                    let simplified = simplifyCollinearPoints(chain, toleranceMeters: 0.45)
+                    newPolylines.append(MKPolyline(coordinates: simplified, count: simplified.count))
                 }
             }
 
@@ -3096,7 +3253,7 @@ class MapDataService: ObservableObject {
         }
 
         return chains.compactMap { coords -> MKPolyline? in
-            let finalCoords = smoothCoordinates(coords, passes: isDashed ? 1 : 2, maxCornerOffsetMeters: 22.0)
+            let finalCoords = smoothCoordinates(coords, passes: isDashed ? 2 : 3, maxCornerOffsetMeters: 28.0)
             guard finalCoords.count >= 2 else { return nil }
             return MKPolyline(coordinates: finalCoords, count: finalCoords.count)
         }
@@ -3105,8 +3262,8 @@ class MapDataService: ObservableObject {
     /// Lissage de Chaikin borné : arrondit les angles marqués tout en restant fidèle à la géométrie des voies.
     nonisolated static func smoothCoordinates(
         _ coordinates: [CLLocationCoordinate2D],
-        passes: Int = 2,
-        maxCornerOffsetMeters: Double = 22.0
+        passes: Int = 3,
+        maxCornerOffsetMeters: Double = 28.0
     ) -> [CLLocationCoordinate2D] {
         guard coordinates.count > 2, passes > 0 else { return coordinates }
 
@@ -3121,7 +3278,7 @@ class MapDataService: ObservableObject {
         }
         if deduped.count <= 2 { return deduped }
 
-        let cosFlatThreshold = cos(2.0 * .pi / 180.0)
+        let cosFlatThreshold = cos(1.2 * .pi / 180.0)
         var current = deduped
 
         for _ in 0..<passes {
@@ -3606,6 +3763,9 @@ class MapDataService: ObservableObject {
                 let rvb: String?
                 let res_com: String?
                 let mode: String?
+                let sous_mode: String?
+                let mes_estime: String?
+                let mes_off_tx: String?
             }
 
             struct ProjetIDFFeature: Decodable {
@@ -3620,6 +3780,11 @@ class MapDataService: ObservableObject {
             var gpePolylinesByLine: [String: [MKPolyline]] = [:]
             var gpeColorsByLine: [String: Color] = [:]
             var gpeIsDashedByLine: [String: Bool] = [:]
+            var gpeOpeningDateByLine: [String: String] = [:]
+            var gpeTypeByLine: [String: TransportType] = [:]
+
+            let tramIndices: Set<String> = ["1", "4", "7", "8", "11", "13"]
+            let metroRerIndices: Set<String> = ["15", "16", "17", "18", "E"]
 
             if let projetsUrl = Bundle.main.url(forResource: "projets_lignes_idf", withExtension: "geojson") {
                 do {
@@ -3627,18 +3792,42 @@ class MapDataService: ObservableObject {
                     let collection = try JSONDecoder().decode(ProjetIDFCollection.self, from: data)
                     
                     for feature in collection.features {
-                        guard let indice = feature.properties.indice,
-                              ["15", "16", "17", "18"].contains(indice) else { continue }
+                        guard let rawIndice = feature.properties.indice else { continue }
+                        let isTram = (feature.properties.mode?.localizedCaseInsensitiveContains("tram") == true) ||
+                                     (feature.properties.sous_mode?.localizedCaseInsensitiveContains("tram") == true)
                         
-                        // Couleur officielle depuis le GeoJSON
-                        if gpeColorsByLine[indice] == nil, let rvb = feature.properties.rvb {
-                            gpeColorsByLine[indice] = Color(rgbString: rvb)
+                        let lineKey: String
+                        let lineType: TransportType
+                        if metroRerIndices.contains(rawIndice) {
+                            lineKey = rawIndice
+                            lineType = (rawIndice == "E") ? .rer : .metro
+                        } else if isTram && tramIndices.contains(rawIndice) {
+                            lineKey = "T\(rawIndice)"
+                            lineType = .tram
+                        } else {
+                            continue
                         }
                         
-                        // Tronçons en travaux -> affichage en pointillés
+                        gpeTypeByLine[lineKey] = lineType
+                        
+                        // Couleur officielle depuis le GeoJSON
+                        if gpeColorsByLine[lineKey] == nil, let rvb = feature.properties.rvb {
+                            gpeColorsByLine[lineKey] = Color(rgbString: rvb)
+                        }
+                        
+                        // Date de mise en service estimée
+                        if gpeOpeningDateByLine[lineKey] == nil {
+                            if let mesOff = feature.properties.mes_off_tx, !mesOff.isEmpty, mesOff != "NC" {
+                                gpeOpeningDateByLine[lineKey] = mesOff
+                            } else if let mesEstime = feature.properties.mes_estime, mesEstime.count >= 4 {
+                                gpeOpeningDateByLine[lineKey] = String(mesEstime.prefix(4))
+                            }
+                        }
+                        
+                        // Tronçons en travaux/projet -> affichage en pointillés
                         let isTravaux = (feature.properties.statut?.localizedCaseInsensitiveContains("travaux") ?? true)
-                        if isTravaux {
-                            gpeIsDashedByLine[indice] = true
+                        if isTravaux || lineType == .tram {
+                            gpeIsDashedByLine[lineKey] = true
                         }
                         
                         for lineCoords in feature.geometry.lineCoordinates {
@@ -3648,13 +3837,74 @@ class MapDataService: ObservableObject {
                             }
                             if clCoords.count > 1 {
                                 let polyline = MKPolyline(coordinates: clCoords, count: clCoords.count)
-                                gpePolylinesByLine[indice, default: []].append(polyline)
+                                gpePolylinesByLine[lineKey, default: []].append(polyline)
                             }
                         }
                     }
                     print("✅ [GPE] Tracés affinés chargés depuis projets_lignes_idf.geojson: 15 (\(gpePolylinesByLine["15"]?.count ?? 0) tronçons), 16 (\(gpePolylinesByLine["16"]?.count ?? 0) tronçons), 17 (\(gpePolylinesByLine["17"]?.count ?? 0) tronçons), 18 (\(gpePolylinesByLine["18"]?.count ?? 0) tronçons)")
                 } catch {
                     print("⚠️ [GPE] Erreur lors du décodage de projets_lignes_idf.geojson: \(error)")
+                }
+            }
+
+            // Charger les arrêts des prolongements (Tramways, RER E Ouest) depuis projets_arrets_idf.geojson
+            if let arretsUrl = Bundle.main.url(forResource: "projets_arrets_idf", withExtension: "geojson") {
+                struct ProjetArretProperties: Decodable {
+                    let nom_arret: String?
+                    let indice: String?
+                    let mode: String?
+                    let sous_mode: String?
+                }
+                struct ProjetArretGeometry: Decodable {
+                    let type: String
+                    let coordinates: [Double]
+                }
+                struct ProjetArretFeature: Decodable {
+                    let properties: ProjetArretProperties
+                    let geometry: ProjetArretGeometry
+                }
+                struct ProjetArretCollection: Decodable {
+                    let features: [ProjetArretFeature]
+                }
+                if let data = try? Data(contentsOf: arretsUrl),
+                   let arretColl = try? JSONDecoder().decode(ProjetArretCollection.self, from: data) {
+                    for (idx, feat) in arretColl.features.enumerated() {
+                        guard let name = feat.properties.nom_arret, !name.isEmpty,
+                              let rawIndice = feat.properties.indice,
+                              feat.geometry.coordinates.count >= 2 else { continue }
+                        let isTram = (feat.properties.mode?.localizedCaseInsensitiveContains("tram") == true) ||
+                                     (feat.properties.sous_mode?.localizedCaseInsensitiveContains("tram") == true)
+                        let lineKey: String
+                        let lineType: TransportType
+                        if rawIndice == "E" {
+                            lineKey = "E"
+                            lineType = .rer
+                        } else if isTram && tramIndices.contains(rawIndice) {
+                            lineKey = "T\(rawIndice)"
+                            lineType = .tram
+                        } else {
+                            continue
+                        }
+                        let coord = CLLocationCoordinate2D(latitude: feat.geometry.coordinates[1], longitude: feat.geometry.coordinates[0])
+                        let sLine = StationLine(name: lineKey, type: lineType)
+                        let sp = StopPoint(
+                            id: "PROJ_\(lineKey)_\(idx)",
+                            stopAreaId: "",
+                            name: name,
+                            coordinate: coord,
+                            type: lineType,
+                            lineName: lineKey
+                        )
+                        parsedStations.append(MapStation(
+                            id: "PROJ_\(lineKey)_\(idx)",
+                            name: name,
+                            coordinate: coord,
+                            platforms: [sp],
+                            isHub: false,
+                            mainType: lineType,
+                            lines: [sLine]
+                        ))
+                    }
                 }
             }
             
@@ -3688,8 +3938,9 @@ class MapDataService: ObservableObject {
                 }
             }
             
-            for lineName in ["15", "16", "17", "18"] {
+            for lineName in ["15", "16", "17", "18", "E", "T1", "T4", "T7", "T8", "T11", "T13"] {
                 var polylines = gpePolylinesByLine[lineName] ?? []
+                let lineType: TransportType = gpeTypeByLine[lineName] ?? ((lineName == "E") ? .rer : .metro)
                 
                 if polylines.isEmpty {
                     if lineName == "15", !fallbackLine15SudPolylines.isEmpty {
@@ -3704,7 +3955,7 @@ class MapDataService: ObservableObject {
                 
                 guard !polylines.isEmpty else { continue }
                 
-                let color = gpeColorsByLine[lineName] ?? resolveLineColor(lineName, type: .metro)
+                let color = gpeColorsByLine[lineName] ?? resolveLineColor(lineName, type: lineType)
                 let isDashed = gpeIsDashedByLine[lineName] ?? true
                 
                 let line = LineTrace(
@@ -3712,8 +3963,9 @@ class MapDataService: ObservableObject {
                     name: lineName,
                     color: color,
                     polylines: Self.stitchAndSmoothPolylines(polylines, isDashed: isDashed),
-                    type: .metro,
-                    isDashed: isDashed
+                    type: lineType,
+                    isDashed: isDashed,
+                    openingDate: gpeOpeningDateByLine[lineName]
                 )
                 newLines.append(line)
             }
@@ -3786,6 +4038,54 @@ class MapDataService: ObservableObject {
                     }
                 }
                 
+                // Ajouter la ligne RER E aux gares du prolongement Nanterre-la-Folie <-> Mantes-la-Jolie
+                let eoleWestStationBaseNames: Set<String> = [
+                    "houilles carrieres sur seine",
+                    "poissy",
+                    "villennes sur seine",
+                    "vernouillet verneuil",
+                    "les mureaux",
+                    "aubergenville elisabethville",
+                    "epone mezieres",
+                    "mantes station",
+                    "mantes la jolie"
+                ]
+                let rerELine = StationLine(name: "E", type: .rer)
+                for i in updatedAll.indices {
+                    let base = self.getNormalizedBaseName(updatedAll[i].name)
+                    if eoleWestStationBaseNames.contains(base) && !updatedAll[i].lines.contains(rerELine) {
+                        let existing = updatedAll[i]
+                        let mergedLines = (existing.lines + [rerELine]).sorted(by: { $0.name < $1.name })
+                        updatedAll[i] = MapStation(
+                            id: existing.id,
+                            name: existing.name,
+                            coordinate: existing.coordinate,
+                            platforms: existing.platforms,
+                            isHub: true,
+                            mainType: existing.mainType,
+                            lines: mergedLines,
+                            city: existing.city
+                        )
+                    }
+                }
+                for i in updatedUnmerged.indices {
+                    let base = self.getNormalizedBaseName(updatedUnmerged[i].name)
+                    if eoleWestStationBaseNames.contains(base) && !updatedUnmerged[i].lines.contains(rerELine) {
+                        let existing = updatedUnmerged[i]
+                        let mergedLines = (existing.lines + [rerELine]).sorted(by: { $0.name < $1.name })
+                        updatedUnmerged[i] = MapStation(
+                            id: existing.id,
+                            name: existing.name,
+                            coordinate: existing.coordinate,
+                            platforms: existing.platforms,
+                            isHub: true,
+                            mainType: existing.mainType,
+                            lines: mergedLines,
+                            city: existing.city
+                        )
+                    }
+                }
+
                 self.allStations = updatedAll
                 self.unmergedStations = updatedUnmerged
                 self.visibleStations = updatedAll

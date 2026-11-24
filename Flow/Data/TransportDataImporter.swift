@@ -29,8 +29,9 @@ actor TransportDataImporter {
             
             let modeStr = columns[8]
             if modeStr.caseInsensitiveCompare("bus") == .orderedSame {
-                let id = columns[2]
-                let stopAreaId = columns[0]
+                let lineId = columns[0]
+                let stopId = columns[2]
+                let uniqueId = "\(stopId)__\(lineId)"
                 let rawName = columns[3]
                 let name = cleanStationName(rawName)
                 let lonStr = columns[4]
@@ -40,8 +41,8 @@ actor TransportDataImporter {
                 
                 if let lat = Double(latStr), let lon = Double(lonStr) {
                     let model = StopPointModel(
-                        id: id,
-                        stopAreaId: stopAreaId,
+                        id: uniqueId,
+                        stopAreaId: lineId,
                         city: city,
                         name: name,
                         latitude: lat,
@@ -112,7 +113,7 @@ actor TransportDataImporter {
                 let type = Self.mapTransportType(entity.type)
                 results.append(
                     StopPoint(
-                        id: entity.id,
+                        id: entity.physicalStopId,
                         stopAreaId: entity.stopAreaId,
                         name: entity.name,
                         coordinate: CLLocationCoordinate2D(latitude: entity.latitude, longitude: entity.longitude),

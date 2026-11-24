@@ -13,6 +13,17 @@ enum ItineraryFilter {
 struct ItineraryResultView: View {
     let destination: MapStation?
     let currentLocation: CLLocationCoordinate2D?
+    let initialStartStation: MapStation?
+
+    init(
+        destination: MapStation?,
+        currentLocation: CLLocationCoordinate2D?,
+        initialStartStation: MapStation? = nil
+    ) {
+        self.destination = destination
+        self.currentLocation = currentLocation
+        self.initialStartStation = initialStartStation
+    }
 
     @State private var startStation: MapStation?
     @State private var endStation: MapStation?
@@ -35,8 +46,10 @@ struct ItineraryResultView: View {
     @State private var showAvoidOptions = false
     @State private var showStationToAvoidPicker = false
     @State private var selectedStationToAvoid: MapStation? = nil
+    @State private var hasAppliedUserDefaults = false
 
     @StateObject private var viewModel = ItineraryViewModel()
+    @ObservedObject private var preferences = UserPreferencesManager.shared
     @Environment(\.colorScheme) var colorScheme
     @EnvironmentObject var coordinator: NavigationCoordinator
     @Environment(\.dismiss) private var dismiss
@@ -55,22 +68,33 @@ struct ItineraryResultView: View {
 
 
     private var customHeaderRow: some View {
-        HStack(alignment: .center) {
-            LiquidGlassCircleButton(icon: "chevron.left", size: 36, iconSize: 14, iconWeight: .bold) {
-                dismiss()
+        let backButton = LiquidGlassCircleButton(icon: "xmark", size: 36, iconSize: 14, iconWeight: .bold) {
+            preferences.triggerHapticImpact()
+            dismiss()
+        }
+
+        return HStack(alignment: .center) {
+            if preferences.handedness.isBackButtonTrailing {
+                Color.clear
+                    .frame(width: 36, height: 36)
+            } else {
+                backButton
             }
-            
+
             Spacer()
-            
+
             HStack(spacing: 6) {
                 AnimatedStationWordView(text: "Itinéraire", sequenceIndex: 0, size: 22)
             }
-            
+
             Spacer()
-            
-            // Hidden placeholder to balance the back button
-            Color.clear
-                .frame(width: 34, height: 34)
+
+            if preferences.handedness.isBackButtonTrailing {
+                backButton
+            } else {
+                Color.clear
+                    .frame(width: 36, height: 36)
+            }
         }
         .padding(.horizontal)
         .padding(.top, 16)
@@ -92,6 +116,13 @@ struct ItineraryResultView: View {
         .toolbar(.hidden, for: .navigationBar)
         .liquidGlassBackground()
         .onAppear {
+            if !hasAppliedUserDefaults {
+                let prefs = UserPreferencesManager.shared
+                isAccessible = prefs.defaultAccessibleRouting
+                avoidedModes = prefs.avoidedTransportModes
+                simulateGPE = prefs.simulateGPE
+                hasAppliedUserDefaults = true
+            }
             setupInitialStations()
         }
         .onDisappear {
@@ -721,7 +752,9 @@ struct ItineraryResultView: View {
 
     private func setupInitialStations() {
         if startStation == nil {
-            if let current = currentLocation {
+            if let customStart = initialStartStation {
+                startStation = customStart
+            } else if let current = currentLocation {
                 startStation = MapStation(
                     id: "MY_POSITION",
                     name: "Ma position",
@@ -1511,6 +1544,7 @@ struct JourneyPreviewView: View {
     let onStartNavigation: () -> Void
     
     @Environment(\.colorScheme) var colorScheme
+    @ObservedObject private var preferences = UserPreferencesManager.shared
     @State private var region: MKCoordinateRegion
     @State private var scrollOffset: CGFloat = 0
 
@@ -1722,18 +1756,20 @@ struct JourneyPreviewView: View {
                 
                 // Bouton de fermeture flottant dans la zone de sécurité (ne dépasse plus)
                 HStack {
-                    Spacer()
-                    Button(action: { dismiss() }) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(.primary)
-                            .padding(10)
+                    if preferences.handedness.isBackButtonTrailing {
+                        Spacer()
                     }
-                    .buttonStyle(.plain)
-                    .glassEffect(.regular.interactive(), in: .circle)
-                    .padding(.trailing, 16)
-                    .padding(.top, 16)
+                    LiquidGlassCircleButton(icon: "xmark", size: 36, iconSize: 14, iconWeight: .bold) {
+                        preferences.triggerHapticImpact()
+                        dismiss()
+                    }
+                    .accessibilityLabel("Fermer")
+                    if !preferences.handedness.isBackButtonTrailing {
+                        Spacer()
+                    }
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
                 .zIndex(10)
             }
         }

@@ -25,136 +25,170 @@ struct LineSchematicPlanView: View {
                 ProgressView("Chargement du plan...")
                 Spacer()
             } else if let data = lineData {
-                let sections = data.schematicSections
-                
-                if sections.leadIn.isEmpty && sections.trunk.isEmpty && sections.topBranches.isEmpty && sections.branches.isEmpty {
-                    emptyView
-                } else {
-                    let resolvedColor = resolveLineColor(line.lineId, type: line.type)
-                    let hasBranches = !sections.topBranches.isEmpty || !sections.branches.isEmpty
-                    let maxBranches = max(sections.topBranches.count, sections.branches.count)
-                    
-                    GeometryReader { geo in
-                        let branchesSpanWidth = CGFloat(maxBranches) * branchWidth
-                        // Center the central trunk track horizontally across the branches span (or viewport)
-                        let trunkAxisX: CGFloat = maxBranches > 1
-                            ? max((branchesSpanWidth - branchWidth) / 2.0 + 12.0, 25.0)
-                            : 25.0
-                        let contentWidth = max(branchesSpanWidth + 48, geo.size.width)
-                        
+                if data.hasJunctionBranches {
+                    let layout = data.schematicLayout
+                    if layout.nodes.isEmpty {
+                        emptyView
+                    } else {
+                        let resolvedColor = resolveLineColor(line.lineId, type: line.type)
+                        let focusCol = SchematicGridPlanView.recommendedFocusCol(
+                            layout: layout,
+                            affectedStations: affectedStations
+                        )
                         ScrollViewReader { scrollProxy in
-                            ScrollView(hasBranches ? [.vertical, .horizontal] : .vertical, showsIndicators: true) {
-                                VStack(alignment: .leading, spacing: 0) {
-                                    let hasLeadIn = !sections.leadIn.isEmpty
-                                    let hasTrunk = !sections.trunk.isEmpty
-                                    let hasTopBranches = !sections.topBranches.isEmpty
-                                    let hasBottomBranches = !sections.branches.isEmpty
-                                    let hasLeadOut = !sections.leadOut.isEmpty
-                                    
-                                    let centralFirstAffected = (sections.leadIn.first ?? sections.trunk.first).map { affectedStations.contains($0.nom) } ?? false
-                                    let centralLastAffected = (sections.trunk.last ?? sections.leadIn.last).map { affectedStations.contains($0.nom) } ?? false
-                                    
-                                    let anyTopLastAffected = sections.topBranches.contains { branch in
-                                        branch.stations.last.map { affectedStations.contains($0.nom) } ?? false
-                                    }
-                                    let anyBottomFirstAffected = sections.branches.contains { branch in
-                                        branch.stations.first.map { affectedStations.contains($0.nom) } ?? false
-                                    }
-                                    
-                                    // 1. Top Branches (Merging)
-                                    if hasTopBranches {
-                                        SchematicMergeView(
-                                            branches: sections.topBranches,
-                                            lineColor: resolvedColor,
-                                            branchWidth: branchWidth,
-                                            trunkCenterX: trunkAxisX,
-                                            affectedStations: affectedStations,
-                                            severityColor: severityColor,
-                                            severityIcon: severityIcon,
-                                            normalOpacity: resolvedOpacity,
-                                            trunkFirstAffected: centralFirstAffected
-                                        )
-                                    }
-                                    
-                                    // 2. Lead-In
-                                    if hasLeadIn {
-                                        SchematicTrackSegment(
-                                            stations: sections.leadIn,
-                                            lineColor: resolvedColor,
-                                            connectTop: hasTopBranches,
-                                            connectBottom: hasTrunk || hasBottomBranches || hasLeadOut,
-                                            trunkCenterX: trunkAxisX,
-                                            affectedStations: affectedStations,
-                                            severityColor: severityColor,
-                                            severityIcon: severityIcon,
-                                            normalOpacity: resolvedOpacity,
-                                            externalTopAffected: anyTopLastAffected,
-                                            externalBottomAffected: sections.trunk.first.map { affectedStations.contains($0.nom) } ?? anyBottomFirstAffected
-                                        )
-                                    }
-                                    
-                                    // 3. Main Trunk
-                                    if hasTrunk {
-                                        SchematicTrackSegment(
-                                            stations: sections.trunk,
-                                            lineColor: resolvedColor,
-                                            connectTop: hasTopBranches || hasLeadIn,
-                                            connectBottom: hasBottomBranches || hasLeadOut,
-                                            trunkCenterX: trunkAxisX,
-                                            affectedStations: affectedStations,
-                                            severityColor: severityColor,
-                                            severityIcon: severityIcon,
-                                            normalOpacity: resolvedOpacity,
-                                            externalTopAffected: hasLeadIn ? (sections.leadIn.last.map { affectedStations.contains($0.nom) } ?? false) : anyTopLastAffected,
-                                            externalBottomAffected: hasBottomBranches ? anyBottomFirstAffected : (sections.leadOut.first.map { affectedStations.contains($0.nom) } ?? false),
-                                            externalTopUnderConstruction: hasLeadIn ? (sections.leadIn.last?.isUnderConstruction ?? false) : false,
-                                            idPrefix: "central_trunk"
-                                        )
-                                        .id("central_trunk_section")
-                                    }
-                                    
-                                    // 4. Bottom Branches (Forking)
-                                    if hasBottomBranches {
-                                        SchematicForkView(
-                                            branches: sections.branches,
-                                            lineColor: resolvedColor,
-                                            branchWidth: branchWidth,
-                                            trunkCenterX: trunkAxisX,
-                                            affectedStations: affectedStations,
-                                            severityColor: severityColor,
-                                            severityIcon: severityIcon,
-                                            normalOpacity: resolvedOpacity,
-                                            trunkLastAffected: centralLastAffected
-                                        )
-                                    }
-                                    
-                                    // 5. Lead-Out
-                                    if hasLeadOut {
-                                        SchematicTrackSegment(
-                                            stations: sections.leadOut,
-                                            lineColor: resolvedColor,
-                                            connectTop: hasTrunk || hasBottomBranches || hasLeadIn || hasTopBranches,
-                                            connectBottom: false,
-                                            trunkCenterX: trunkAxisX,
-                                            affectedStations: affectedStations,
-                                            severityColor: severityColor,
-                                            severityIcon: severityIcon,
-                                            normalOpacity: resolvedOpacity,
-                                            externalTopAffected: centralLastAffected,
-                                            externalBottomAffected: false
-                                        )
-                                    }
-                                }
-                                .padding(.vertical, 32)
-                                .padding(.trailing, 48)
-                                .frame(minWidth: contentWidth, alignment: hasBranches ? .center : .leading)
+                            ScrollView([.horizontal, .vertical], showsIndicators: true) {
+                                SchematicGridPlanView(
+                                    layout: layout,
+                                    affectedStations: affectedStations,
+                                    lineColor: resolvedColor,
+                                    severityColor: severityColor,
+                                    severityIcon: severityIcon,
+                                    showTransfers: true
+                                )
+                                .padding(.vertical, 24)
+                                .padding(.horizontal, 12)
                             }
                             .onAppear {
-                                if hasBranches && !sections.trunk.isEmpty {
-                                    let midIndex = sections.trunk.count / 2
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                                        withAnimation(.easeOut(duration: 0.25)) {
-                                            scrollProxy.scrollTo("central_trunk_\(midIndex)", anchor: .center)
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                    withAnimation(.easeOut(duration: 0.25)) {
+                                        scrollProxy.scrollTo("grid_col_\(focusCol)", anchor: .center)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    let sections = data.schematicSections
+                    
+                    if sections.leadIn.isEmpty && sections.trunk.isEmpty && sections.topBranches.isEmpty && sections.branches.isEmpty {
+                        emptyView
+                    } else {
+                        let resolvedColor = resolveLineColor(line.lineId, type: line.type)
+                        let hasBranches = !sections.topBranches.isEmpty || !sections.branches.isEmpty
+                        let maxBranches = max(sections.topBranches.count, sections.branches.count)
+                        
+                        GeometryReader { geo in
+                            let branchesSpanWidth = CGFloat(maxBranches) * branchWidth
+                            // Center the central trunk track horizontally across the branches span (or viewport)
+                            let trunkAxisX: CGFloat = maxBranches > 1
+                                ? max((branchesSpanWidth - branchWidth) / 2.0 + 12.0, 25.0)
+                                : 25.0
+                            let contentWidth = max(branchesSpanWidth + 48, geo.size.width)
+                            
+                            ScrollViewReader { scrollProxy in
+                                ScrollView(hasBranches ? [.vertical, .horizontal] : .vertical, showsIndicators: true) {
+                                    VStack(alignment: .leading, spacing: 0) {
+                                        let hasLeadIn = !sections.leadIn.isEmpty
+                                        let hasTrunk = !sections.trunk.isEmpty
+                                        let hasTopBranches = !sections.topBranches.isEmpty
+                                        let hasBottomBranches = !sections.branches.isEmpty
+                                        let hasLeadOut = !sections.leadOut.isEmpty
+                                        
+                                        let centralFirstAffected = (sections.leadIn.first ?? sections.trunk.first).map { affectedStations.contains($0.nom) } ?? false
+                                        let centralLastAffected = (sections.trunk.last ?? sections.leadIn.last).map { affectedStations.contains($0.nom) } ?? false
+                                        
+                                        let anyTopLastAffected = sections.topBranches.contains { branch in
+                                            branch.stations.last.map { affectedStations.contains($0.nom) } ?? false
+                                        }
+                                        let anyBottomFirstAffected = sections.branches.contains { branch in
+                                            branch.stations.first.map { affectedStations.contains($0.nom) } ?? false
+                                        }
+                                        
+                                        // 1. Top Branches (Merging)
+                                        if hasTopBranches {
+                                            SchematicMergeView(
+                                                branches: sections.topBranches,
+                                                lineColor: resolvedColor,
+                                                branchWidth: branchWidth,
+                                                trunkCenterX: trunkAxisX,
+                                                affectedStations: affectedStations,
+                                                severityColor: severityColor,
+                                                severityIcon: severityIcon,
+                                                normalOpacity: resolvedOpacity,
+                                                trunkFirstAffected: centralFirstAffected
+                                            )
+                                        }
+                                        
+                                        // 2. Lead-In
+                                        if hasLeadIn {
+                                            SchematicTrackSegment(
+                                                stations: sections.leadIn,
+                                                lineColor: resolvedColor,
+                                                connectTop: hasTopBranches,
+                                                connectBottom: hasTrunk || hasBottomBranches || hasLeadOut,
+                                                trunkCenterX: trunkAxisX,
+                                                affectedStations: affectedStations,
+                                                severityColor: severityColor,
+                                                severityIcon: severityIcon,
+                                                normalOpacity: resolvedOpacity,
+                                                externalTopAffected: anyTopLastAffected,
+                                                externalBottomAffected: sections.trunk.first.map { affectedStations.contains($0.nom) } ?? anyBottomFirstAffected
+                                            )
+                                        }
+                                        
+                                        // 3. Main Trunk
+                                        if hasTrunk {
+                                            SchematicTrackSegment(
+                                                stations: sections.trunk,
+                                                lineColor: resolvedColor,
+                                                connectTop: hasTopBranches || hasLeadIn,
+                                                connectBottom: hasBottomBranches || hasLeadOut,
+                                                trunkCenterX: trunkAxisX,
+                                                affectedStations: affectedStations,
+                                                severityColor: severityColor,
+                                                severityIcon: severityIcon,
+                                                normalOpacity: resolvedOpacity,
+                                                externalTopAffected: hasLeadIn ? (sections.leadIn.last.map { affectedStations.contains($0.nom) } ?? false) : anyTopLastAffected,
+                                                externalBottomAffected: hasBottomBranches ? anyBottomFirstAffected : (sections.leadOut.first.map { affectedStations.contains($0.nom) } ?? false),
+                                                externalTopUnderConstruction: hasLeadIn ? (sections.leadIn.last?.isUnderConstruction ?? false) : false,
+                                                idPrefix: "central_trunk"
+                                            )
+                                            .id("central_trunk_section")
+                                        }
+                                        
+                                        // 4. Bottom Branches (Forking)
+                                        if hasBottomBranches {
+                                            SchematicForkView(
+                                                branches: sections.branches,
+                                                lineColor: resolvedColor,
+                                                branchWidth: branchWidth,
+                                                trunkCenterX: trunkAxisX,
+                                                affectedStations: affectedStations,
+                                                severityColor: severityColor,
+                                                severityIcon: severityIcon,
+                                                normalOpacity: resolvedOpacity,
+                                                trunkLastAffected: centralLastAffected
+                                            )
+                                        }
+                                        
+                                        // 5. Lead-Out
+                                        if hasLeadOut {
+                                            SchematicTrackSegment(
+                                                stations: sections.leadOut,
+                                                lineColor: resolvedColor,
+                                                connectTop: hasTrunk || hasBottomBranches || hasLeadIn || hasTopBranches,
+                                                connectBottom: false,
+                                                trunkCenterX: trunkAxisX,
+                                                affectedStations: affectedStations,
+                                                severityColor: severityColor,
+                                                severityIcon: severityIcon,
+                                                normalOpacity: resolvedOpacity,
+                                                externalTopAffected: centralLastAffected,
+                                                externalBottomAffected: false
+                                            )
+                                        }
+                                    }
+                                    .padding(.vertical, 32)
+                                    .padding(.trailing, 48)
+                                    .frame(minWidth: contentWidth, alignment: hasBranches ? .center : .leading)
+                                }
+                                .onAppear {
+                                    if hasBranches && !sections.trunk.isEmpty {
+                                        let midIndex = sections.trunk.count / 2
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                            withAnimation(.easeOut(duration: 0.25)) {
+                                                scrollProxy.scrollTo("central_trunk_\(midIndex)", anchor: .center)
+                                            }
                                         }
                                     }
                                 }

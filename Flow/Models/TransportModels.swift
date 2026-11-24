@@ -225,6 +225,25 @@ struct TrafficInfo: Identifiable {
     let impactedStops: [String]?
     let impactedSection: String?
     var summary: String? // Résumé généré par Foundation Models
+
+    /// Libellé lisible de l'heure et date de reprise estimée
+    var resumptionDescription: String? {
+        guard let endTime else { return nil }
+        let calendar = Calendar.current
+        let timeStr = DateFormat.shortTime.string(from: endTime)
+        if calendar.isDateInToday(endTime) {
+            return "Reprise estimée aujourd'hui à \(timeStr)"
+        } else if calendar.isDateInTomorrow(endTime) {
+            return "Reprise estimée demain à \(timeStr)"
+        } else {
+            let dateFormatter = DateFormatter()
+            dateFormatter.locale = Locale(identifier: "fr_FR")
+            dateFormatter.timeZone = TimeZone(identifier: "Europe/Paris")
+            dateFormatter.dateFormat = "d MMM"
+            let dateStr = dateFormatter.string(from: endTime)
+            return "Reprise estimée le \(dateStr) à \(timeStr)"
+        }
+    }
 }
 
 enum TrafficPeriod {

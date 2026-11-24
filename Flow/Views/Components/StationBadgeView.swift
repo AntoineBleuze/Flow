@@ -187,18 +187,18 @@ struct SelectedLineTileView: View {
             if AssetPresenceCache.exists(line.assetName) {
                 if line.type == .tram || line.type == .cable {
                     let barColor = exactLineColor
-                    let barHeight = size * 0.199
+                    let barHeight = size * 0.205
 
                     Color.white
+                    Image(line.assetName)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: size * 0.86, height: size * 0.86)
                     VStack(spacing: 0) {
                         barColor.frame(height: barHeight)
                         Spacer(minLength: 0)
                         barColor.frame(height: barHeight)
                     }
-                    Image(line.assetName)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: size * 0.86, height: size * 0.86)
                 } else {
                     exactLineColor
                     Image(line.assetName)
@@ -229,6 +229,7 @@ struct StationBadgeView: View {
     var showStationName: Bool = true
     var isUnifiedHub: Bool = false
     var isMajorHub: Bool = false
+    var isFocusedLineStop: Bool = false
 
     private static let balloonFrameColor = Color(
         UIColor { traits in
@@ -332,6 +333,9 @@ struct StationBadgeView: View {
 
     private var showsSideLabel: Bool {
         guard showStationName else { return false }
+        if isFocusedLineStop {
+            return true
+        }
         if isBusOnly {
             return zoomLevel == .closeUp
         }

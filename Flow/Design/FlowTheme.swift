@@ -129,26 +129,43 @@ public struct TransparentHostingView: UIViewControllerRepresentable {
             applyTransparency()
         }
 
+        private static func isSheetOrRootPresentationController(_ vc: UIViewController) -> Bool {
+            if vc.parent == nil { return true }
+            if vc.presentingViewController?.presentedViewController === vc { return true }
+            if vc.presentationController?.presentedViewController === vc { return true }
+            return false
+        }
+
         public func applyTransparency() {
             view.backgroundColor = .clear
 
-            var currentView: UIView? = view
-            while let sv = currentView?.superview {
-                sv.backgroundColor = .clear
-                currentView = sv
-            }
-
+            var highestInternalView: UIView?
             var currentVC: UIViewController? = self
             while let parent = currentVC?.parent {
+                if Self.isSheetOrRootPresentationController(parent) {
+                    break
+                }
                 parent.view.backgroundColor = .clear
+                highestInternalView = parent.view
                 if let nav = parent as? UINavigationController {
                     clearNavController(nav)
+                    break
                 }
                 currentVC = parent
             }
 
-            if let nav = navigationController {
+            if let nav = navigationController, !Self.isSheetOrRootPresentationController(nav) {
                 clearNavController(nav)
+                highestInternalView = highestInternalView ?? nav.view
+            }
+
+            if let stopView = highestInternalView, view.isDescendant(of: stopView) {
+                var currentView: UIView? = view
+                while let sv = currentView?.superview {
+                    sv.backgroundColor = .clear
+                    if sv === stopView { break }
+                    currentView = sv
+                }
             }
         }
 

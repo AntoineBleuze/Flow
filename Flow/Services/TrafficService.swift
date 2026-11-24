@@ -309,14 +309,16 @@ class TrafficService: ObservableObject {
                         impactedSection = "De \(fromName) à \(toName)"
                     }
 
+                    let (startTime, endTime) = self.extractPeriodDates(from: disruption, at: now)
+
                     let info = TrafficInfo(
                         id: disruption.id,
                         title: disruption.cause ?? "Info Trafic",
                         message: cleanMessage,
                         period: period,
                         severity: newStatus,
-                        startTime: nil,
-                        endTime: nil,
+                        startTime: startTime,
+                        endTime: endTime,
                         impactedStops: impactedStops,
                         impactedSection: impactedSection
                     )
@@ -327,6 +329,33 @@ class TrafficService: ObservableObject {
         }
 
         self.lines = updatedLines
+        Task { @MainActor in
+            TrafficWatchlistService.shared.evaluateTrafficUpdate(updatedLines)
+        }
+    }
+
+    /// Extrait les dates de début et de fin (reprise) depuis `applicationPeriods`
+    private func extractPeriodDates(from disruption: Disruption, at now: Date) -> (Date?, Date?) {
+        guard let periods = disruption.applicationPeriods, !periods.isEmpty else {
+            return (nil, nil)
+        }
+        let formatter = DateFormat.navitiaParisTimezone
+        let parsed: [(begin: Date, end: Date)] = periods.compactMap { period in
+            guard let begin = formatter.date(from: period.begin),
+                  let end = formatter.date(from: period.end)
+            else { return nil }
+            return (begin, end)
+        }
+        if let active = parsed.first(where: { now >= $0.begin && now <= $0.end }) {
+            return (active.begin, active.end)
+        }
+        if let upcoming = parsed.filter({ $0.end >= now }).sorted(by: { $0.begin < $1.begin }).first {
+            return (upcoming.begin, upcoming.end)
+        }
+        if let first = parsed.first {
+            return (first.begin, first.end)
+        }
+        return (nil, nil)
     }
 
     /// Vérifie si une perturbation est active à un moment donné

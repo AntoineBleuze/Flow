@@ -11,6 +11,8 @@ import AppIntents
 
 @main
 struct FlowApp: App {
+    @StateObject private var preferences = UserPreferencesManager.shared
+
     init() {
         FlowShortcutsProvider.updateAppShortcutParameters()
     }
@@ -19,6 +21,7 @@ struct FlowApp: App {
         WindowGroup {
             ContentView()
                 .modelContainer(SwiftDataStack.shared.container)
+                .preferredColorScheme(preferences.appearanceMode.colorScheme)
         }
     }
 }

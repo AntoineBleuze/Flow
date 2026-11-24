@@ -30,13 +30,16 @@ struct StationDetailSheet: View {
     @State private var elevatorCancellable: AnyCancellable? = nil
     @State private var selectedMode: String = "Tout"
     @State private var showItinerary = false
+    @State private var itineraryAsDeparture = false
     @ObservedObject var locationManager = LocationManager.shared
     @ObservedObject var liveActivityManager = LiveActivityManager.shared
     @ObservedObject var routeManager = RouteNavigationManager.shared
+    @ObservedObject private var preferences = UserPreferencesManager.shared
 
     // Buffer pour accumuler les pushes WebSocket avant affichage
     @State private var departureBuffer: [String: Departure] = [:]
     @State private var bufferTask: Task<Void, Never>?
+    @State private var wsTimeoutTask: Task<Void, Never>?
 
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
@@ -68,14 +71,10 @@ struct StationDetailSheet: View {
 
     @ViewBuilder
     private var sheetContent: some View {
-        let gpeLines = currentStation.lines.filter { ["15", "16", "17", "18"].contains($0.name) }
+        let gpeLines = currentStation.lines.filter { isFutureExtensionLine($0, stationName: currentStation.name) }
         let hasActiveLines = currentStation.lines.contains { !["15", "16", "17", "18"].contains($0.name) }
 
-        if isLoading && hasActiveLines {
-            ProgressView("Chargement des horaires...")
-                .tint(.primary)
-                .foregroundColor(.primary)
-        } else if let error = errorMessage, hasActiveLines {
+        if let error = errorMessage, hasActiveLines, !isLoading {
             VStack {
                 Text("Erreur: \(error)")
                     .foregroundColor(.red)
@@ -87,7 +86,7 @@ struct StationDetailSheet: View {
                         .foregroundColor(.gray)
                 }
             }
-        } else if departures.isEmpty && !hasActiveLines && gpeLines.isEmpty {
+        } else if departures.isEmpty && !hasActiveLines && gpeLines.isEmpty && !isLoading {
             Text("Aucun départ trouvé.")
                 .foregroundColor(.secondary)
         } else {
@@ -172,6 +171,7 @@ struct StationDetailSheet: View {
                         withAnimation(.easeInOut(duration: 0.35)) {
                             self.departures = batched
                             self.isLoading = false
+                            self.wsTimeoutTask?.cancel()
                             self.recomputeDepartureGroups()
                         }
                         departureBuffer.removeAll()
@@ -180,8 +180,9 @@ struct StationDetailSheet: View {
             }
             .navigationDestination(isPresented: $showItinerary) {
                 ItineraryResultView(
-                    destination: currentStation,
-                    currentLocation: locationManager.userLocation
+                    destination: itineraryAsDeparture ? nil : currentStation,
+                    currentLocation: locationManager.userLocation,
+                    initialStartStation: itineraryAsDeparture ? currentStation : nil
                 )
             }
         }
@@ -309,55 +310,36 @@ struct StationDetailSheet: View {
             }
 
             // Top Bar: Localisation + Close / Back Button
-            HStack(alignment: .center) {
+            let cityBadge = HStack(spacing: 4) {
+                Image(systemName: "mappin.circle.fill")
+                    .foregroundColor(primaryGreen)
+                    .font(.footnote)
+                Text((currentStation.city ?? "Île-de-France").uppercased())
+                    .font(.system(.caption, design: .rounded))
+                    .fontWeight(.bold)
+                    .foregroundColor(.gray)
+            }
+
+            let actionButton = LiquidGlassCircleButton(icon: "xmark", size: 36, iconSize: 14, iconWeight: .bold) {
+                preferences.triggerHapticImpact()
                 if let onDismiss = onDismiss {
-                    Button(action: { onDismiss() }) {
-                        HStack(spacing: 5) {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 13, weight: .bold))
-                            Text("Retour")
-                                .font(.system(.subheadline, design: .rounded))
-                                .fontWeight(.semibold)
-                        }
-                        .foregroundColor(.blue)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .glassEffect(.regular.interactive(), in: .capsule)
-                    }
-                    .buttonStyle(.plain)
+                    onDismiss()
                 } else {
-                    HStack(spacing: 4) {
-                        Image(systemName: "mappin.circle.fill")
-                            .foregroundColor(primaryGreen)
-                            .font(.footnote)
-                        Text((currentStation.city ?? "Île-de-France").uppercased())
-                            .font(.system(.caption, design: .rounded))
-                            .fontWeight(.bold)
-                            .foregroundColor(.gray)
-                    }
+                    NavigationCoordinator.shared.selectedStation = nil
+                    dismiss()
                 }
-                
-                Spacer()
-                
-                if onDismiss != nil {
-                    HStack(spacing: 4) {
-                        Image(systemName: "mappin.circle.fill")
-                            .foregroundColor(primaryGreen)
-                            .font(.footnote)
-                        Text((currentStation.city ?? "Île-de-France").uppercased())
-                            .font(.system(.caption, design: .rounded))
-                            .fontWeight(.bold)
-                            .foregroundColor(.gray)
-                    }
+            }
+            .accessibilityLabel("Fermer")
+
+            HStack(alignment: .center) {
+                if preferences.handedness.isBackButtonTrailing {
+                    cityBadge
+                    Spacer()
+                    actionButton
                 } else {
-                    LiquidGlassCircleButton(icon: "xmark", size: 36, iconSize: 15, iconWeight: .bold) {
-                        if let onDismiss = onDismiss {
-                            onDismiss()
-                        } else {
-                            NavigationCoordinator.shared.selectedStation = nil
-                            dismiss()
-                        }
-                    }
+                    actionButton
+                    Spacer()
+                    cityBadge
                 }
             }
             .padding(.horizontal, 20)
@@ -372,7 +354,7 @@ struct StationDetailSheet: View {
                         // Large Title (Animated station name)
                         VStack(alignment: .leading, spacing: 6) {
                             let words = currentStation.name.components(separatedBy: " ")
-                            HStack(spacing: 6) {
+                            FlowLayout(spacing: 6) {
                                 ForEach(Array(words.enumerated()), id: \.offset) { index, word in
                                     AnimatedStationWordView(text: word, sequenceIndex: index, size: 30)
                                 }
@@ -390,23 +372,45 @@ struct StationDetailSheet: View {
                         }
                         .padding(.horizontal)
                         
-                        // Action button: Calculate route
-                        Button(action: { showItinerary = true }) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "arrow.triangle.turn.up.right.circle.fill")
-                                    .font(.title3)
-                                Text("Calculer l'itinéraire")
-                                    .font(.system(.subheadline, design: .rounded))
-                                    .fontWeight(.bold)
+                        // Action buttons: En partir / Y aller
+                        HStack(spacing: 10) {
+                            Button(action: {
+                                itineraryAsDeparture = true
+                                showItinerary = true
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "arrow.up.right.circle.fill")
+                                        .font(.system(size: 16, weight: .semibold))
+                                    Text("En partir")
+                                        .font(.system(.subheadline, design: .rounded))
+                                        .fontWeight(.bold)
+                                }
+                                .foregroundColor(.primary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 13)
                             }
-                            .foregroundColor(colorScheme == .dark ? .black : .white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(primaryGreen)
-                            .clipShape(Capsule())
-                            .shadow(color: primaryGreen.opacity(0.3), radius: 6, y: 3)
+                            .buttonStyle(.liquidGlassInteractive)
+
+                            Button(action: {
+                                itineraryAsDeparture = false
+                                showItinerary = true
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "arrow.triangle.turn.up.right.circle.fill")
+                                        .font(.system(size: 16, weight: .semibold))
+                                    Text("Y aller")
+                                        .font(.system(.subheadline, design: .rounded))
+                                        .fontWeight(.bold)
+                                }
+                                .foregroundColor(colorScheme == .dark ? .black : .white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 13)
+                                .background(primaryGreen)
+                                .clipShape(Capsule())
+                                .shadow(color: primaryGreen.opacity(0.3), radius: 6, y: 3)
+                            }
+                            .buttonStyle(.liquidGlassInteractive)
                         }
-                        .buttonStyle(.liquidGlassInteractive)
                         .padding(.horizontal)
                         .padding(.top, 12)
                     }
@@ -434,7 +438,7 @@ struct StationDetailSheet: View {
                                 || (group.mode == nil && selectedMode == "Autre")
                         }
                         let gpeLines = currentStation.lines
-                            .filter { ["15", "16", "17", "18"].contains($0.name) }
+                            .filter { isFutureExtensionLine($0, stationName: currentStation.name) }
                             .sorted { a, b in
                                 let pA = isPrioritizedStationLine(a)
                                 let pB = isPrioritizedStationLine(b)
@@ -442,16 +446,21 @@ struct StationDetailSheet: View {
                                 return compareLineLabels(a.name, b.name)
                             }
                         let prioritizeGPEFirst = currentStation.prioritizedLine.map {
-                            ["15", "16", "17", "18"].contains($0.name)
+                            isFutureExtensionLine($0, stationName: currentStation.name)
                         } ?? false
 
                         if prioritizeGPEFirst && !gpeLines.isEmpty {
                             gpeLinesSection(gpeLines: gpeLines)
                         }
                         
-                        if filteredGroups.isEmpty && gpeLines.isEmpty {
+                        let hasActiveLines = currentStation.lines.contains { !isFutureExtensionLine($0, stationName: currentStation.name) }
+
+                        if isLoading && hasActiveLines && departures.isEmpty {
+                            let activeCount = currentStation.lines.filter { !isFutureExtensionLine($0, stationName: currentStation.name) }.count
+                            DeparturesSkeletonView(cardCount: min(3, max(1, activeCount)))
+                        } else if filteredGroups.isEmpty && gpeLines.isEmpty {
                             let activeLines = currentStation.lines
-                                .filter { !["15", "16", "17", "18"].contains($0.name) }
+                                .filter { !isFutureExtensionLine($0, stationName: currentStation.name) }
                                 .sorted { a, b in
                                     let pA = isPrioritizedStationLine(a)
                                     let pB = isPrioritizedStationLine(b)
@@ -573,20 +582,41 @@ struct StationDetailSheet: View {
 
                 Spacer()
 
-                Button(action: { showItinerary = true }) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrow.triangle.turn.up.right.circle.fill")
-                            .font(.system(size: 13, weight: .bold))
-                        Text("Itinéraire")
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                HStack(spacing: 6) {
+                    Button(action: {
+                        itineraryAsDeparture = true
+                        showItinerary = true
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.up.right.circle.fill")
+                                .font(.system(size: 12, weight: .bold))
+                            Text("En partir")
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                        }
+                        .foregroundColor(.primary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
                     }
-                    .foregroundColor(colorScheme == .dark ? .black : .white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(primaryGreen)
-                    .clipShape(Capsule())
+                    .buttonStyle(.liquidGlassInteractive)
+
+                    Button(action: {
+                        itineraryAsDeparture = false
+                        showItinerary = true
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.triangle.turn.up.right.circle.fill")
+                                .font(.system(size: 12, weight: .bold))
+                            Text("Y aller")
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                        }
+                        .foregroundColor(colorScheme == .dark ? .black : .white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(primaryGreen)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.liquidGlassInteractive)
                 }
-                .buttonStyle(.liquidGlassInteractive)
             }
 
             let stats = stationDistanceAndWalkTime
@@ -650,6 +680,7 @@ struct StationDetailSheet: View {
         
         // Vider le buffer WebSocket pour la nouvelle station
         bufferTask?.cancel()
+        wsTimeoutTask?.cancel()
         departureBuffer.removeAll()
         
         if isRunningForPreviews {
@@ -745,14 +776,14 @@ struct StationDetailSheet: View {
                 var existingLines = stationLines
                 
                 for entity in filteredEntities {
-                    let id = entity.id
+                    let physicalId = entity.physicalStopId
                     let name = entity.name
                     let lineName = entity.lineName
                     
-                    if !newPlatforms.contains(where: { $0.id == id }) {
+                    if !newPlatforms.contains(where: { $0.id == physicalId && $0.lineName == lineName }) {
                         newPlatforms.append(
                             StopPoint(
-                                id: id,
+                                id: physicalId,
                                 stopAreaId: entity.stopAreaId,
                                 name: name,
                                 coordinate: CLLocationCoordinate2D(latitude: entity.latitude, longitude: entity.longitude),
@@ -848,6 +879,9 @@ struct StationDetailSheet: View {
             let info = dep.displayInformations
             guard let label = info.label, !label.isEmpty else { continue }
             let type = getTransportType(from: info.commercial_mode)
+            if isFutureExtensionLine(StationLine(name: label, type: type), stationName: currentStation.name) {
+                continue
+            }
             let lineKey = "\(label)-\(type.rawValue)"
             guard let date = DateFormat.navitia.date(from: dep.stopDateTime.departureDateTime) else { continue }
 
@@ -903,6 +937,9 @@ struct StationDetailSheet: View {
         // Add local lines that have no departures at all (to show they serve the station but are out of service)
         let allLocalLines = currentStation.lines
         for localLine in allLocalLines {
+            if isFutureExtensionLine(localLine, stationName: currentStation.name) {
+                continue
+            }
             if localLine.type == .bus {
                 let isReplacement = allLocalLines.contains { other in
                     other.name == localLine.name && other.type != .bus
@@ -1016,10 +1053,30 @@ struct StationDetailSheet: View {
         return categories
     }
 
+    private func isFutureExtensionLine(_ line: StationLine, stationName: String) -> Bool {
+        if line.type == .metro && ["15", "16", "17", "18"].contains(line.name) {
+            return true
+        }
+        if line.type == .rer && line.name == "E" {
+            let lower = stationName.lowercased()
+                .folding(options: .diacriticInsensitive, locale: .current)
+            let eoleWestKeywords = [
+                "houilles", "poissy", "villennes", "vernouillet",
+                "mureaux", "aubergenville", "epone", "mantes"
+            ]
+            return eoleWestKeywords.contains(where: { lower.contains($0) })
+        }
+        if line.type == .tram && ["T1", "T4", "T7", "T8", "T11", "T13"].contains(line.name) {
+            return currentStation.platforms.contains(where: { $0.id.hasPrefix("PROJ_\(line.name)_") })
+        }
+        return false
+    }
+
     @ViewBuilder
     private func gpeLinesSection(gpeLines: [StationLine]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("GRAND PARIS EXPRESS (EN CONSTRUCTION)")
+            let hasOnlyGPE = gpeLines.allSatisfy { $0.type == .metro && ["15", "16", "17", "18"].contains($0.name) }
+            Text(hasOnlyGPE ? "GRAND PARIS EXPRESS (EN CONSTRUCTION)" : "PROLONGEMENTS & GPE (EN CONSTRUCTION)")
                 .font(.system(.caption, design: .rounded))
                 .fontWeight(.bold)
                 .foregroundColor(.secondary)
@@ -1049,11 +1106,11 @@ struct StationDetailSheet: View {
                             }
 
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Métro Ligne \(gpeLine.name)")
+                                Text(gpeLine.type == .rer ? "RER \(gpeLine.name) — Prolongement Ouest" : (gpeLine.type == .tram ? "Tramway \(gpeLine.name) — Prolongement" : "Métro Ligne \(gpeLine.name)"))
                                     .font(.subheadline)
                                     .fontWeight(.semibold)
                                     .foregroundColor(.primary)
-                                Text("Société des Grands Projets")
+                                Text(gpeLine.type == .metro ? "Société des Grands Projets" : "Île-de-France Mobilités")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
@@ -1208,6 +1265,19 @@ struct StationDetailSheet: View {
         if FlowServerService.shared.isEnabled && FlowServerService.shared.isConnected {
             print("📡 WebSocket connectée : Souscription aux horaires temps réel pour \(limitedIds.count) IDs")
             FlowServerService.shared.sendSubscribeStation(stopIds: limitedIds)
+            wsTimeoutTask?.cancel()
+            wsTimeoutTask = Task {
+                try? await Task.sleep(for: .seconds(3))
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    if self.isLoading {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            self.isLoading = false
+                            self.recomputeDepartureGroups()
+                        }
+                    }
+                }
+            }
             return
         }
         
@@ -1395,6 +1465,27 @@ struct StationDetailSheet: View {
     private static let lateStations: [String] = ["Chelles", "Noisy"]
 
     private func getGPEDeliveryDate(lineName: String, stationName: String) -> String {
+        if lineName == "E" {
+            return "Février 2027"
+        }
+        if lineName == "T1" {
+            return "Horizon 2028 – 2032"
+        }
+        if lineName == "T4" {
+            return "À confirmer (Études)"
+        }
+        if lineName == "T7" {
+            return "Fin 2031"
+        }
+        if lineName == "T8" {
+            return "Mi-2031"
+        }
+        if lineName == "T11" {
+            return "Horizon 2038"
+        }
+        if lineName == "T13" {
+            return "Fin 2028"
+        }
         switch lineName {
         case "15":
             if Self.sudStations.contains(where: { stationName.contains($0) }) {
@@ -1848,6 +1939,105 @@ private struct MetricValueView: View {
                 .font(.system(size: 20, weight: .black, design: .rounded))
                 .foregroundColor(color)
         }
+    }
+}
+
+private struct ShimmerEffect: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var phase: CGFloat = -0.6
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0.0),
+                        .init(color: Color.white.opacity(colorScheme == .dark ? 0.18 : 0.65), location: 0.5),
+                        .init(color: .clear, location: 1.0)
+                    ],
+                    startPoint: UnitPoint(x: phase - 0.45, y: 0.5),
+                    endPoint: UnitPoint(x: phase + 0.45, y: 0.5)
+                )
+                .mask(content)
+                .allowsHitTesting(false)
+            }
+            .onAppear {
+                withAnimation(.linear(duration: 1.35).repeatForever(autoreverses: false)) {
+                    phase = 1.6
+                }
+            }
+    }
+}
+
+private extension View {
+    func shimmer() -> some View {
+        modifier(ShimmerEffect())
+    }
+}
+
+private struct DeparturesSkeletonView: View {
+    let cardCount: Int
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var placeholderColor: Color {
+        Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.08)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(placeholderColor)
+                .frame(width: 72, height: 12)
+                .padding(.horizontal, 20)
+                .padding(.top, 14)
+
+            ForEach(0..<cardCount, id: \.self) { _ in
+                LiquidGlassCard(cornerRadius: 18, padding: 14) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack(spacing: 10) {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(placeholderColor)
+                                .frame(width: 36, height: 32)
+
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .fill(placeholderColor)
+                                .frame(width: 64, height: 14)
+
+                            Spacer()
+
+                            Capsule()
+                                .fill(placeholderColor)
+                                .frame(width: 96, height: 26)
+
+                            Circle()
+                                .fill(placeholderColor)
+                                .frame(width: 28, height: 28)
+                        }
+
+                        ForEach(0..<2, id: \.self) { _ in
+                            HStack(spacing: 12) {
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .fill(placeholderColor)
+                                    .frame(width: 140, height: 14)
+
+                                Spacer()
+
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(placeholderColor)
+                                    .frame(width: 46, height: 24)
+
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(placeholderColor)
+                                    .frame(width: 46, height: 24)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 4)
+            }
+        }
+        .shimmer()
     }
 }
 
