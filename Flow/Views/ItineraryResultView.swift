@@ -13,6 +13,17 @@ enum ItineraryFilter {
 struct ItineraryResultView: View {
     let destination: MapStation?
     let currentLocation: CLLocationCoordinate2D?
+    let initialStartStation: MapStation?
+
+    init(
+        destination: MapStation?,
+        currentLocation: CLLocationCoordinate2D?,
+        initialStartStation: MapStation? = nil
+    ) {
+        self.destination = destination
+        self.currentLocation = currentLocation
+        self.initialStartStation = initialStartStation
+    }
 
     @State private var startStation: MapStation?
     @State private var endStation: MapStation?
@@ -31,11 +42,14 @@ struct ItineraryResultView: View {
     @State private var avoidedLines: Set<String> = []
     @State private var avoidedModes: Set<String> = []
     @State private var isAccessible = false
+    @AppStorage("simulateGPE") private var simulateGPE = false
     @State private var showAvoidOptions = false
     @State private var showStationToAvoidPicker = false
     @State private var selectedStationToAvoid: MapStation? = nil
+    @State private var hasAppliedUserDefaults = false
 
     @StateObject private var viewModel = ItineraryViewModel()
+    @ObservedObject private var preferences = UserPreferencesManager.shared
     @Environment(\.colorScheme) var colorScheme
     @EnvironmentObject var coordinator: NavigationCoordinator
     @Environment(\.dismiss) private var dismiss
@@ -54,29 +68,33 @@ struct ItineraryResultView: View {
 
 
     private var customHeaderRow: some View {
-        HStack(alignment: .center) {
-            Button(action: {
-                dismiss()
-            }) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(.primary)
-                    .padding(10)
+        let backButton = LiquidGlassCircleButton(icon: "xmark", size: 36, iconSize: 14, iconWeight: .bold) {
+            preferences.triggerHapticImpact()
+            dismiss()
+        }
+
+        return HStack(alignment: .center) {
+            if preferences.handedness.isBackButtonTrailing {
+                Color.clear
+                    .frame(width: 36, height: 36)
+            } else {
+                backButton
             }
-            .buttonStyle(.plain)
-            .glassEffect(.regular.interactive(), in: .circle)
-            
+
             Spacer()
-            
+
             HStack(spacing: 6) {
                 AnimatedStationWordView(text: "Itinéraire", sequenceIndex: 0, size: 22)
             }
-            
+
             Spacer()
-            
-            // Hidden placeholder to balance the back button
-            Color.clear
-                .frame(width: 34, height: 34)
+
+            if preferences.handedness.isBackButtonTrailing {
+                backButton
+            } else {
+                Color.clear
+                    .frame(width: 36, height: 36)
+            }
         }
         .padding(.horizontal)
         .padding(.top, 16)
@@ -96,8 +114,15 @@ struct ItineraryResultView: View {
             mainContentView
         }
         .toolbar(.hidden, for: .navigationBar)
-        .flowAdaptiveBackground()
+        .liquidGlassBackground()
         .onAppear {
+            if !hasAppliedUserDefaults {
+                let prefs = UserPreferencesManager.shared
+                isAccessible = prefs.defaultAccessibleRouting
+                avoidedModes = prefs.avoidedTransportModes
+                simulateGPE = prefs.simulateGPE
+                hasAppliedUserDefaults = true
+            }
             setupInitialStations()
         }
         .onDisappear {
@@ -121,6 +146,7 @@ struct ItineraryResultView: View {
             avoidedLines: avoidedLines,
             avoidedModes: avoidedModes,
             isAccessible: isAccessible,
+            simulateGPE: simulateGPE,
             onSearch: { searchItinerary() }
         ))
         .modifier(ItinerarySheetsModifier(
@@ -159,6 +185,8 @@ struct ItineraryResultView: View {
             if showTimePicker {
                 timePickerView
             }
+
+            gpeSimulationToggle
 
             // Advanced options toggle button
             Button(action: {
@@ -235,51 +263,34 @@ struct ItineraryResultView: View {
                 }
                 .padding()
             }
-            .background(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.03), in: RoundedRectangle(cornerRadius: 12))
+            .background {
+                RoundedRectangle(cornerRadius: LiquidGlassTheme.standardCornerRadius, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: LiquidGlassTheme.standardCornerRadius, style: .continuous)
+                            .fill(LiquidGlassTheme.cardBackgroundTint(for: colorScheme))
+                    )
+            }
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.06), lineWidth: 1)
+                RoundedRectangle(cornerRadius: LiquidGlassTheme.standardCornerRadius, style: .continuous)
+                    .strokeBorder(LiquidGlassTheme.specularBorder(for: colorScheme), lineWidth: 1)
             )
+            .clipShape(RoundedRectangle(cornerRadius: LiquidGlassTheme.standardCornerRadius, style: .continuous))
             
             // Swap Button
-            Button(action: swapStations) {
-                Image(systemName: "arrow.up.arrow.down")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.blue)
-                    .frame(width: 44, height: 44)
+            LiquidGlassCircleButton(icon: "arrow.up.arrow.down", size: 44, iconSize: 16, iconWeight: .semibold, foregroundColor: .blue) {
+                swapStations()
             }
-            .buttonStyle(.plain)
-            .glassEffect(.regular.interactive(), in: .circle)
         }
     }
 
     private var filterPicker: some View {
-        HStack(spacing: 4) {
+        Picker("Filtre d'itinéraire", selection: $selectedFilter) {
             ForEach([ItineraryFilter.fastest, ItineraryFilter.lessWalking, ItineraryFilter.fewerTransfers], id: \.self) { filter in
-                Button(action: {
-                    withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
-                        selectedFilter = filter
-                    }
-                }) {
-                    Text(filterTitle(filter))
-                        .font(.system(.subheadline, design: .rounded))
-                        .fontWeight(.bold)
-                        .foregroundColor(selectedFilter == filter ? (colorScheme == .dark ? .white : .black) : .gray)
-                        .padding(.vertical, 8)
-                        .frame(maxWidth: .infinity)
-                        .background(
-                            selectedFilter == filter
-                                ? (colorScheme == .dark ? Color.white.opacity(0.15) : Color.white)
-                                : Color.clear,
-                            in: Capsule()
-                        )
-                        .shadow(color: (selectedFilter == filter && colorScheme == .light) ? Color.black.opacity(0.08) : Color.clear, radius: 4, x: 0, y: 1)
-                }
-                .buttonStyle(.plain)
+                Text(filterTitle(filter)).tag(filter)
             }
         }
-        .padding(4)
-        .glassEffect(.regular.interactive(), in: Capsule())
+        .pickerStyle(.segmented)
     }
 
     private func filterTitle(_ filter: ItineraryFilter) -> String {
@@ -353,7 +364,7 @@ struct ItineraryResultView: View {
             }) {
                 HStack(spacing: 4) {
                     Image(systemName: "calendar")
-                        .foregroundColor(FlowTheme.liveGreen(for: colorScheme))
+                        .foregroundColor(LiquidGlassTheme.liveGreen(for: colorScheme))
                     Text(formatDateOnly(departureDate))
                         .font(.system(.subheadline, design: .rounded))
                         .fontWeight(.bold)
@@ -478,6 +489,48 @@ struct ItineraryResultView: View {
                 .background(isAvoided ? Color.red : (colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.06)), in: Capsule())
         }
         .buttonStyle(.plain)
+    }
+
+    private var gpeSimulationToggle: some View {
+        Toggle(isOn: $simulateGPE) {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(simulateGPE ? .purple : .secondary)
+
+                Text("Simuler Grand Paris Express")
+                    .font(.system(.subheadline, design: .rounded))
+                    .fontWeight(.semibold)
+
+                HStack(spacing: 3) {
+                    ForEach(["15", "16", "17", "18"], id: \.self) { line in
+                        Text(line)
+                            .font(.system(size: 9, weight: .bold, design: .rounded))
+                            .foregroundColor(line == "17" ? .black : .white)
+                            .frame(width: 16, height: 16)
+                            .background(Circle().fill(resolveLineColor(line, type: .metro)))
+                    }
+                }
+            }
+        }
+        .toggleStyle(SwitchToggleStyle(tint: .purple))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(simulateGPE ? Color.purple.opacity(0.10) : LiquidGlassTheme.cardBackgroundTint(for: colorScheme))
+                )
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(
+                    simulateGPE ? AnyShapeStyle(Color.purple.opacity(0.45)) : AnyShapeStyle(LiquidGlassTheme.specularBorder(for: colorScheme)),
+                    lineWidth: 1
+                )
+        )
     }
 
     private var avoidOptionsView: some View {
@@ -631,11 +684,11 @@ struct ItineraryResultView: View {
                             HStack(spacing: 4) {
                                 Image(systemName: "star.fill")
                                     .font(.caption)
-                                    .foregroundColor(FlowTheme.warningMetricColor(for: colorScheme))
+                                    .foregroundColor(LiquidGlassTheme.warningMetricColor(for: colorScheme))
                                 Text("MEILLEUR ITINÉRAIRE")
                                     .font(.caption)
                                     .fontWeight(.bold)
-                                    .foregroundColor(FlowTheme.warningMetricColor(for: colorScheme))
+                                    .foregroundColor(LiquidGlassTheme.warningMetricColor(for: colorScheme))
                             }
                             .padding(.leading, 24)
                             .padding(.top, 4)
@@ -686,6 +739,7 @@ struct ItineraryResultView: View {
                 }
                 .padding(.vertical)
             }
+            .scrollContentBackground(.hidden)
         }
     }
 
@@ -698,7 +752,9 @@ struct ItineraryResultView: View {
 
     private func setupInitialStations() {
         if startStation == nil {
-            if let current = currentLocation {
+            if let customStart = initialStartStation {
+                startStation = customStart
+            } else if let current = currentLocation {
                 startStation = MapStation(
                     id: "MY_POSITION",
                     name: "Ma position",
@@ -762,12 +818,22 @@ struct ItineraryResultView: View {
             .reduce(0) { $0 + ($1.duration ?? 0) }
     }
 
+    private func isGPEOnlyStation(_ station: MapStation) -> Bool {
+        guard !station.lines.isEmpty else { return false }
+        return station.lines.allSatisfy { TransitGraphRouter.gpeLineNames.contains($0.name) }
+    }
+
     private func searchItinerary() {
         guard let start = startStation, let end = endStation else {
             return
         }
 
-        print("🚀 Recherche itinéraire de \(start.name) à \(end.name)")
+        // Activer automatiquement la simulation si une gare GPE exclusive est sélectionnée
+        if !simulateGPE && (isGPEOnlyStation(start) || isGPEOnlyStation(end)) {
+            simulateGPE = true
+        }
+
+        print("🚀 Recherche itinéraire de \(start.name) à \(end.name) (GPE: \(simulateGPE))")
         print("📍 De: \(start.coordinate.latitude),\(start.coordinate.longitude)")
         print("📍 À: \(end.coordinate.latitude),\(end.coordinate.longitude)")
         print("🕐 Date: \(departureDate) - Type: \(isArrivalTime ? "Arrivée" : "Départ")")
@@ -795,7 +861,11 @@ struct ItineraryResultView: View {
             date: departureDate,
             isArrival: isArrivalTime,
             forbiddenUris: forbiddenUris,
-            isAccessible: isAccessible
+            isAccessible: isAccessible,
+            simulateGPE: simulateGPE,
+            avoidedStations: avoidedStations,
+            avoidedLines: avoidedLines,
+            avoidedModes: avoidedModes
         )
     }
 }
@@ -814,10 +884,65 @@ class ItineraryViewModel: ObservableObject {
         date: Date,
         isArrival: Bool,
         forbiddenUris: [String] = [],
-        isAccessible: Bool = false
+        isAccessible: Bool = false,
+        simulateGPE: Bool = false,
+        avoidedStations: [MapStation] = [],
+        avoidedLines: Set<String> = [],
+        avoidedModes: Set<String> = []
     ) {
         self.isLoading = true
         self.errorMessage = nil
+
+        if simulateGPE {
+            let allStations = MapDataService.shared.allStations
+            Task.detached(priority: .userInitiated) {
+                let gpeJourneys = TransitGraphRouter.shared.findSimulatedGPERoutes(
+                    from: start,
+                    to: end,
+                    allStations: allStations,
+                    departureDate: date,
+                    isArrival: isArrival,
+                    avoidedStations: avoidedStations,
+                    avoidedLines: avoidedLines,
+                    avoidedModes: avoidedModes
+                )
+
+                await MainActor.run {
+                    if !gpeJourneys.isEmpty {
+                        self.journeys = gpeJourneys
+                        self.isLoading = false
+                    }
+                }
+
+                // Compléter avec les itinéraires IDFM temps réel si disponibles (pour comparer)
+                do {
+                    let liveJourneys = try await IDFMItineraryService.shared.searchItineraryAsync(
+                        from: start,
+                        to: end,
+                        date: date,
+                        isArrival: isArrival,
+                        forbiddenUris: forbiddenUris,
+                        isAccessible: isAccessible
+                    )
+                    await MainActor.run {
+                        let combined = gpeJourneys + liveJourneys
+                        self.journeys = combined
+                        self.isLoading = false
+                        if combined.isEmpty {
+                            self.errorMessage = "Aucun itinéraire trouvé."
+                        }
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.isLoading = false
+                        if gpeJourneys.isEmpty {
+                            self.errorMessage = error.localizedDescription
+                        }
+                    }
+                }
+            }
+            return
+        }
 
         IDFMItineraryService.shared.searchItinerary(
             from: start,
@@ -921,6 +1046,24 @@ struct JourneyRow: View {
                     }
 
                     Spacer()
+
+                    if journey.usesGrandParisExpress {
+                        HStack(spacing: 4) {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 10, weight: .bold))
+                            Text("Simulé GPE")
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                        }
+                        .foregroundColor(.purple)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.purple.opacity(0.14), in: Capsule())
+                        .overlay(Capsule().strokeBorder(Color.purple.opacity(0.35), lineWidth: 0.75))
+                    }
+
+                    if let affluence = journey.overallAffluence {
+                        AffluenceBadgeView(level: affluence)
+                    }
                 }
             }
             .buttonStyle(.plain)
@@ -995,13 +1138,8 @@ struct JourneyRow: View {
                             .font(.system(.subheadline, design: .rounded))
                             .fontWeight(.bold)
                     }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color(hex: "0A84FF"))
-                    .clipShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.glassProminent)
             }
         }
         .padding(.vertical, 12)
@@ -1075,20 +1213,24 @@ struct SectionDetailView: View {
     @State private var isStopsExpanded = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            // Timeline indicator
+        HStack(alignment: .top, spacing: 14) {
+            // Timeline indicator: fixed width 24 pt, perfectly centered
             VStack(spacing: 0) {
-                Circle()
-                    .fill(circleColor)
-                    .frame(width: 12, height: 12)
+                ZStack {
+                    Circle()
+                        .fill(circleColor)
+                        .frame(width: 12, height: 12)
+                }
+                .frame(width: 24, height: 24)
 
                 if !isLast {
                     Rectangle()
                         .fill(lineColor)
-                        .frame(width: 2)
-                        .padding(.vertical, 4)
+                        .frame(width: 3)
+                        .frame(maxHeight: .infinity)
                 }
             }
+            .frame(width: 24)
 
             // Section content
             VStack(alignment: .leading, spacing: 6) {
@@ -1166,26 +1308,50 @@ struct SectionDetailView: View {
 
                             // Intermediate stops section
                             if let stops = section.stop_date_times, !stops.isEmpty {
+                                let skippedStops = stops.filter { $0.isSkipped }
+                                let activeStopsCount = max(0, stops.count - skippedStops.count)
+
                                 Button(action: {
                                     withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                                         isStopsExpanded.toggle()
                                     }
                                 }) {
-                                    HStack(spacing: 4) {
+                                    HStack(spacing: 6) {
                                         Image(systemName: isStopsExpanded ? "chevron.down" : "chevron.right")
                                             .font(.caption2)
-                                        Text("\(stops.count) arrêt\(stops.count > 1 ? "s" : "") (\((section.duration ?? 0) / 60) min)")
-                                            .font(.system(.caption, design: .rounded))
-                                            .fontWeight(.medium)
+                                        if skippedStops.isEmpty {
+                                            Text("\(stops.count) arrêt\(stops.count > 1 ? "s" : "") (\((section.duration ?? 0) / 60) min)")
+                                                .font(.system(.caption, design: .rounded))
+                                                .fontWeight(.medium)
+                                        } else {
+                                            Text("\(activeStopsCount) arrêt\(activeStopsCount > 1 ? "s" : "") (\(skippedStops.count) non desservi) (\((section.duration ?? 0) / 60) min)")
+                                                .font(.system(.caption, design: .rounded))
+                                                .fontWeight(.medium)
+                                            Image(systemName: "exclamationmark.triangle.fill")
+                                                .font(.system(size: 10))
+                                                .foregroundColor(.orange)
+                                        }
                                     }
-                                    .foregroundColor(.blue)
+                                    .foregroundColor(skippedStops.isEmpty ? .blue : .orange)
                                     .padding(.vertical, 4)
                                     .padding(.horizontal, 8)
-                                    .background(Color.blue.opacity(0.08))
+                                    .background((skippedStops.isEmpty ? Color.blue : Color.orange).opacity(0.08))
                                     .clipShape(Capsule())
                                 }
                                 .buttonStyle(.plain)
                                 .padding(.leading, 8)
+
+                                if !skippedStops.isEmpty && !isStopsExpanded {
+                                    let names = skippedStops.compactMap { $0.stop_point.name }.joined(separator: ", ")
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "info.circle.fill")
+                                            .font(.system(size: 10))
+                                        Text("Arrêt \(names) fermé / non desservi")
+                                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                                    }
+                                    .foregroundColor(.orange)
+                                    .padding(.leading, 8)
+                                }
 
                                 if isStopsExpanded {
                                     VerticalItineraryStopsView(section: section)
@@ -1205,6 +1371,12 @@ struct SectionDetailView: View {
                             }
                         }
                         .padding(.leading, 16)
+
+                        if let affluence = section.estimated_affluence {
+                            AffluenceSectionCard(affluence: affluence)
+                                .padding(.leading, 16)
+                                .padding(.top, 2)
+                        }
 
                         if let duration = section.duration {
                             Text("\(duration / 60) min")
@@ -1372,6 +1544,7 @@ struct JourneyPreviewView: View {
     let onStartNavigation: () -> Void
     
     @Environment(\.colorScheme) var colorScheme
+    @ObservedObject private var preferences = UserPreferencesManager.shared
     @State private var region: MKCoordinateRegion
     @State private var scrollOffset: CGFloat = 0
 
@@ -1401,8 +1574,8 @@ struct JourneyPreviewView: View {
             let blurRadius = min(12.0, (scrolledDistance / 150.0) * 12.0)
             
             ZStack(alignment: .top) {
-                // Fond opaque global qui fait toute la page
-                Color(uiColor: .systemBackground)
+                // Fond transparent Liquid Glass
+                Color.clear
                     .ignoresSafeArea()
                 
                 // La carte d'itinéraire en arrière-plan
@@ -1411,8 +1584,9 @@ struct JourneyPreviewView: View {
                     .blur(radius: blurRadius)
                     .ignoresSafeArea(edges: .top)
                 
-                // Overlay opaque qui s'affiche progressivement pour rendre le fond opaque au scroll
-                Color(uiColor: .systemBackground)
+                // Overlay en verre qui s'opacifie progressivement au scroll
+                Rectangle()
+                    .fill(.ultraThinMaterial)
                     .frame(height: mapHeight)
                     .opacity(fadeProgress)
                     .ignoresSafeArea(edges: .top)
@@ -1473,7 +1647,7 @@ struct JourneyPreviewView: View {
                                         .font(.system(.caption, design: .rounded))
                                         .fontWeight(.bold)
                                         .foregroundColor(.secondary)
-                                    Text("\(walkingTime / 60) MIN")
+                                    Text("\(walkingTime / 60) min")
                                         .font(.system(size: 24, weight: .black, design: .rounded))
                                         .foregroundColor(.yellow)
                                 }
@@ -1489,26 +1663,39 @@ struct JourneyPreviewView: View {
                                         .font(.system(size: 24, weight: .black, design: .rounded))
                                         .foregroundColor(.red)
                                 }
+
+                                if let affluence = journey.overallAffluence {
+                                    Spacer()
+
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("AFFLUENCE")
+                                            .font(.system(.caption, design: .rounded))
+                                            .fontWeight(.bold)
+                                            .foregroundColor(.secondary)
+                                        Text(affluence.title)
+                                            .font(.system(size: 20, weight: .black, design: .rounded))
+                                            .foregroundColor(affluenceColor(for: affluence))
+                                    }
+                                }
                             }
                             .padding(.vertical, 8)
                         }
                         .padding(.horizontal)
                         .padding(.bottom, 20)
-                        // Gradient de lisibilité derrière le texte sur la carte
+                        // Gradient de lisibilité Liquid Glass
                         .background(
                             LinearGradient(
                                 colors: [
                                     .clear,
-                                    Color(uiColor: .systemBackground).opacity(0.40),
-                                    Color(uiColor: .systemBackground).opacity(0.85),
-                                    Color(uiColor: .systemBackground)
+                                    (colorScheme == .dark ? Color.black : Color.white).opacity(0.35),
+                                    (colorScheme == .dark ? Color.black : Color.white).opacity(0.70)
                                 ],
                                 startPoint: .top,
                                 endPoint: .bottom
                             )
                         )
                         
-                        // Fiche de détails opaque
+                        // Fiche de détails en verre
                         VStack(spacing: 20) {
                             Divider()
                                 .background(Color.secondary.opacity(0.2))
@@ -1541,47 +1728,48 @@ struct JourneyPreviewView: View {
                                 }
                             }
                             
-                            // Bouton Démarrer la navigation avec effet de verre
+                            // Bouton Démarrer la navigation avec style Liquid Glass Prominent
                             Button(action: onStartNavigation) {
                                 HStack {
                                     Image(systemName: "location.fill")
                                     Text("Démarrer la navigation")
                                         .fontWeight(.bold)
                                 }
-                                .foregroundColor(.white)
                                 .frame(maxWidth: .infinity)
-                                .padding()
+                                .padding(.vertical, 4)
                             }
-                            .buttonStyle(.plain)
-                            .glassEffect(.regular.interactive(), in: Capsule())
+                            .buttonStyle(.glassProminent)
                             .padding(.horizontal)
                             .padding(.top, 16)
                             .padding(.bottom, 24)
                         }
                         .frame(minHeight: max(0, geometry.size.height - mapHeight), alignment: .top)
-                        .background(Color(uiColor: .systemBackground))
+                        .background(.ultraThinMaterial)
                     }
                 }
                 .coordinateSpace(name: "scroll")
                 .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
                     self.scrollOffset = value
                 }
+                .scrollContentBackground(.hidden)
                 .ignoresSafeArea(edges: .bottom)
                 
                 // Bouton de fermeture flottant dans la zone de sécurité (ne dépasse plus)
                 HStack {
-                    Spacer()
-                    Button(action: { dismiss() }) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(.primary)
-                            .padding(10)
+                    if preferences.handedness.isBackButtonTrailing {
+                        Spacer()
                     }
-                    .buttonStyle(.plain)
-                    .glassEffect(.regular.interactive(), in: .circle)
-                    .padding(.trailing, 16)
-                    .padding(.top, 16)
+                    LiquidGlassCircleButton(icon: "xmark", size: 36, iconSize: 14, iconWeight: .bold) {
+                        preferences.triggerHapticImpact()
+                        dismiss()
+                    }
+                    .accessibilityLabel("Fermer")
+                    if !preferences.handedness.isBackButtonTrailing {
+                        Spacer()
+                    }
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
                 .zIndex(10)
             }
         }
@@ -1607,6 +1795,19 @@ struct JourneyPreviewView: View {
             return "\(hours)h\(String(format: "%02d", mins))"
         }
         return "\(mins) min"
+    }
+
+    private func affluenceColor(for level: CrowdLevel) -> Color {
+        switch level {
+        case .low:
+            return LiquidGlassTheme.liveGreen(for: colorScheme)
+        case .moderate:
+            return LiquidGlassTheme.statusWorksColor(for: colorScheme)
+        case .high:
+            return colorScheme == .dark ? Color(hex: "FF9F0A") : Color(hex: "D96B00")
+        case .veryHigh:
+            return colorScheme == .dark ? Color(hex: "FF453A") : Color(hex: "D70015")
+        }
     }
 }
 
@@ -1657,15 +1858,15 @@ private struct ItinerarySheetsModifier: ViewModifier {
             }
             .sheet(isPresented: $showStartPicker) {
                 SimpleStationPicker(selectedStation: $startStation, currentLocation: currentLocation)
-                    .presentationBackground(.ultraThinMaterial)
+                    .liquidGlassSheet()
             }
             .sheet(isPresented: $showEndPicker) {
                 SimpleStationPicker(selectedStation: $endStation, currentLocation: currentLocation)
-                    .presentationBackground(.ultraThinMaterial)
+                    .liquidGlassSheet()
             }
             .sheet(isPresented: $showStationToAvoidPicker) {
                 SimpleStationPicker(selectedStation: $selectedStationToAvoid, currentLocation: currentLocation)
-                    .presentationBackground(.ultraThinMaterial)
+                    .liquidGlassSheet()
             }
             .fullScreenCover(item: $selectedJourneyForPreview) { journey in
                 JourneyPreviewView(
@@ -1688,6 +1889,7 @@ private struct ItineraryChangesModifier: ViewModifier {
     let avoidedLines: Set<String>
     let avoidedModes: Set<String>
     let isAccessible: Bool
+    let simulateGPE: Bool
     let onSearch: () -> Void
 
     func body(content: Content) -> some View {
@@ -1700,5 +1902,6 @@ private struct ItineraryChangesModifier: ViewModifier {
             .onChange(of: avoidedLines) { _, _ in onSearch() }
             .onChange(of: avoidedModes) { _, _ in onSearch() }
             .onChange(of: isAccessible) { _, _ in onSearch() }
+            .onChange(of: simulateGPE) { _, _ in onSearch() }
     }
 }

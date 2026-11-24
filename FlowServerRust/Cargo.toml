@@ -1,0 +1,24 @@
+[package]
+name = "flow-server"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+axum = { version = "0.7", features = ["ws"] }
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.5", features = ["cors"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+chrono = "0.4"
+chrono-tz = "0.10"
+unicode-normalization = "0.1"
+regex = "1"
+dotenvy = "0.15"
+futures-util = "0.3"
+mimalloc = { version = "0.1", default-features = false }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true

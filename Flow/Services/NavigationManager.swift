@@ -5,6 +5,7 @@ import UserNotifications
 import Combine
 import CoreLocation
 import Foundation
+import MapKit
 import SwiftUI
 
 class NavigationManager: NSObject, ObservableObject {
@@ -44,6 +45,15 @@ class NavigationManager: NSObject, ObservableObject {
     @Published var activeRameId: String? = nil
     @Published var departuresList: [Departure] = []
     @Published var selectedDeparture: Departure? = nil
+    @Published var upcomingStationsReserve: [String: StationRealTimeReserve] = [:]
+    @Published var activeIncident: RouteIncident? = nil
+    @Published var isOfflineMode: Bool = false
+    @Published var isServerResponding: Bool = true
+
+    func dismissIncidentProposal() {
+        self.activeIncident = nil
+    }
+
     private var lastLocationUpdateTime: Date?
 
     var isLocationWorking: Bool {
@@ -130,7 +140,13 @@ class NavigationManager: NSObject, ObservableObject {
             intentIdentifiers: [],
             options: []
         )
-        UNUserNotificationCenter.current().setNotificationCategories([category])
+        let trafficCategory = UNNotificationCategory(
+            identifier: "TRAFFIC_ALERT",
+            actions: [],
+            intentIdentifiers: [],
+            options: [.customDismissAction]
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([category, trafficCategory])
         #endif
     }
 
@@ -1440,6 +1456,9 @@ class NavigationManager: NSObject, ObservableObject {
         // Stop any active real tracking in LocationManager
         LocationManager.shared.isSimulating = true
         self.isSimulating = true
+        DispatchQueue.main.async {
+            NavigationCoordinator.shared.userTrackingMode = .follow
+        }
         
         // Extract all coordinates from sections
         var points: [CLLocationCoordinate2D] = []

@@ -19,7 +19,7 @@ class FlowServerService: ObservableObject {
     // MARK: - Configuration
 
     private let primaryHost = "apiflow.hd.free.fr"
-    private let fallbackIP = "192.168.1.190"
+    private let fallbackIP = "192.168.1.197"
     private let fallbackPort = "3001"
 
     /// URL de base du serveur FlowServer (REST)
@@ -54,6 +54,9 @@ class FlowServerService: ObservableObject {
     private var isAppInBackground = false
 
     private init() {
+        if let savedEnabled = UserDefaults(suiteName: "group.AntoineBleuze.Flow")?.object(forKey: "pref_useFlowServer") as? Bool {
+            self.isEnabled = savedEnabled
+        }
         determineBestURL()
         
         #if os(iOS)
@@ -116,6 +119,22 @@ class FlowServerService: ObservableObject {
                 }
             }
         }.resume()
+    }
+
+    /// Vérifie de manière asynchrone si le serveur backend est accessible
+    func checkHealthAsync() async -> Bool {
+        guard let url = URL(string: "\(baseURL)/api/health") else { return false }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 4.0
+        do {
+            let (_, response) = try await session.data(for: request)
+            if let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) {
+                return true
+            }
+            return false
+        } catch {
+            return false
+        }
     }
 
     #if os(iOS)
@@ -480,7 +499,12 @@ class FlowServerService: ObservableObject {
         print("📡 [Server] Traffic REST: \(url.absoluteString)")
 
         return session.dataTaskPublisher(for: url)
-            .map { $0.data }
+            .tryMap { data, response -> Data in
+                if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                    throw URLError(.badServerResponse)
+                }
+                return data
+            }
             .decode(type: ServerResponse.self, decoder: JSONDecoder())
             .map { (response: ServerResponse) -> [Disruption] in
                 return response.disruptions ?? []
@@ -507,9 +531,7 @@ class FlowServerService: ObservableObject {
         let fromCoord = "\(from.longitude);\(from.latitude)"
         let toCoord = "\(to.longitude);\(to.latitude)"
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd'T'HHmmss"
-        let dateStr = formatter.string(from: date)
+        let dateStr = DateFormat.navitia.string(from: date)
 
         var components = URLComponents(string: "\(baseURL)/api/itinerary")!
         var queryItems = [

@@ -51,8 +51,8 @@ struct LoadingScreenView: View {
             // Start data loading immediately
             MapDataService.shared.loadData()
             
-            // Wait 0.3s before showing the ProgressView to avoid a flashing indicator on cache hit
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            // Wait 0.12s before showing the ProgressView to avoid a flashing indicator on cache hit
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
                 introPhase = 1
                 checkLoadingCompletion()
             }
@@ -74,16 +74,16 @@ struct LoadingScreenView: View {
         hasTriggeredWave = true
         isLoading = false
         
-        // Dissolve typography and fade in the shader animation over 1.0s
-        withAnimation(.easeInOut(duration: 1.0)) {
+        // Dissolve typography and fade in the shader animation over 0.38s
+        withAnimation(.easeInOut(duration: 0.38)) {
             shaderOpacity = 1.0
             contentScale = 1.1
             contentOpacity = 0.0
         }
         
-        // After the 1.0s animation completes, dismiss the entire loading screen to reveal the main screen over 0.4s
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            withAnimation(.easeInOut(duration: 0.4)) {
+        // After the 0.38s animation completes, dismiss the entire loading screen to reveal the main screen over 0.22s
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.38) {
+            withAnimation(.easeInOut(duration: 0.22)) {
                 isPresented = false
             }
         }

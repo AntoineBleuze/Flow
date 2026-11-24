@@ -15,7 +15,7 @@ struct ImmersiveNavigationView: View {
     @State private var isExpanded: Bool = false
     
     // Convenience init avec valeur par défaut pour les previews ou appels sans binding
-    init(journey: Journey, selectedDetent: Binding<PresentationDetent> = .constant(.fraction(0.18)), isFloating: Bool = false) {
+    init(journey: Journey, selectedDetent: Binding<PresentationDetent> = .constant(.medium), isFloating: Bool = false) {
         self.journey = journey
         self._selectedDetent = selectedDetent
         self.isFloating = isFloating
@@ -64,7 +64,14 @@ struct ImmersiveNavigationView: View {
         if isFloating {
             return !isExpanded
         }
-        return selectedDetent == .fraction(0.18)
+        return selectedDetent == NavigationCoordinator.collapsedSheetDetent
+            || selectedDetent == NavigationCoordinator.compactRouteSheetDetent
+    }
+
+    private var destinationTitle: String {
+        let lastStop = journey.sections?.last(where: { $0.to?.name != nil })?.to?.name ?? ""
+        if !lastStop.isEmpty { return lastStop }
+        return RouteNavigationManager.shared.destinationName
     }
     
     private var contentContainer: some View {
@@ -99,8 +106,9 @@ struct ImmersiveNavigationView: View {
                             }
                             .padding(.horizontal, 16)
                             .padding(.top, 12)
-                            .padding(.bottom, isFloating ? 16 : 40)
+                            .padding(.bottom, isFloating ? 16 : 96)
                         }
+                        .scrollContentBackground(.hidden)
                         .frame(maxHeight: isFloating ? 320 : nil)
                         .onAppear {
                             if let cur = currentSection {
@@ -122,38 +130,37 @@ struct ImmersiveNavigationView: View {
                 }
             }
         }
-        .background(.ultraThinMaterial)
     }
 
     var body: some View {
         if isFloating {
+            let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
             contentContainer
-                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(Color.primary.opacity(colorScheme == .dark ? 0.14 : 0.08), lineWidth: 1)
-                )
-                .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.12), radius: 14, y: 4)
+                .clipShape(shape)
+                .glassEffect(.regular, in: shape)
         } else {
             contentContainer
+                .liquidGlassBackground()
         }
     }
     
     // MARK: - Header Nav Bar
     private var headerNavBar: some View {
         VStack(spacing: 8) {
-            HStack(alignment: .center, spacing: 12) {
-                // ETA & Temps restant
-                VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .center, spacing: 10) {
+                // ETA, Temps restant & Destination
+                VStack(alignment: .leading, spacing: 3) {
+                    let durationMinutes = max(1, (journey.duration ?? 0) / 60)
                     HStack(spacing: 6) {
-                        Text("Arrivée à \(formatTime(journey.arrival_date_time ?? ""))")
-                            .font(.system(.title3, design: .rounded))
+                        Text("Arrivée \(formatTime(journey.arrival_date_time ?? ""))")
+                            .font(.system(isCompact ? .headline : .title3, design: .rounded))
                             .fontWeight(.bold)
                             .foregroundColor(.primary)
-                        
-                        Image(systemName: isCompact ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.secondary)
+
+                        Text("• \(durationMinutes) min")
+                            .font(.system(isCompact ? .subheadline : .headline, design: .rounded))
+                            .fontWeight(.bold)
+                            .foregroundColor(.blue)
                     }
                     .contentShape(Rectangle())
                     .onTapGesture {
@@ -161,41 +168,29 @@ struct ImmersiveNavigationView: View {
                             if isFloating {
                                 isExpanded.toggle()
                             } else {
-                                selectedDetent = (selectedDetent == .large) ? .fraction(0.18) : .large
+                                selectedDetent = isCompact ? .medium : NavigationCoordinator.compactRouteSheetDetent
                             }
                         }
                     }
-                    
-                    HStack(spacing: 6) {
-                        let durationMinutes = max(1, (journey.duration ?? 0) / 60)
+
+                    if !destinationTitle.isEmpty {
                         HStack(spacing: 4) {
-                            Image(systemName: "clock.fill")
-                                .font(.system(size: 10))
-                            Text("\(durationMinutes) min restantes")
+                            Image(systemName: "flag.checkered")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.secondary)
+                            Text("Vers \(destinationTitle)")
                                 .font(.system(.caption, design: .rounded))
                                 .fontWeight(.semibold)
-                        }
-                        .foregroundColor(.blue)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.blue.opacity(0.12), in: Capsule())
-                        
-                        if let current = currentSection, current.type == "public_transport", let display = current.display_informations {
-                            LineIcon(
-                                type: display.transportType,
-                                lineId: display.code ?? display.label ?? "",
-                                size: 24,
-                                customColor: Color(hex: display.color ?? "0078D7")
-                            )
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
                         }
                     }
                 }
-                
+
                 Spacer()
-                
-                // Boutons d'actions : Simulation & Quitter
+
+                // Boutons d'actions : Simulation, Réduire/Étendre & Quitter
                 HStack(spacing: 8) {
-                    // Bouton Simulation
                     Button(action: {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                             if navigationManager.isSimulating {
@@ -208,7 +203,7 @@ struct ImmersiveNavigationView: View {
                         Image(systemName: navigationManager.isSimulating ? "stop.fill" : "play.fill")
                             .font(.system(size: 13, weight: .bold))
                             .foregroundColor(navigationManager.isSimulating ? .orange : .green)
-                            .frame(width: 36, height: 36)
+                            .frame(width: 34, height: 34)
                             .background(
                                 (navigationManager.isSimulating ? Color.orange : Color.green).opacity(0.14),
                                 in: Circle()
@@ -216,8 +211,29 @@ struct ImmersiveNavigationView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(navigationManager.isSimulating ? "Arrêter la simulation" : "Lancer la simulation")
-                    
-                    // Bouton Quitter
+
+                    Button(action: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                            if isFloating {
+                                isExpanded.toggle()
+                            } else if isCompact {
+                                selectedDetent = .medium
+                            } else if selectedDetent == .large {
+                                selectedDetent = .medium
+                            } else {
+                                selectedDetent = NavigationCoordinator.compactRouteSheetDetent
+                            }
+                        }
+                    }) {
+                        Image(systemName: isCompact ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.primary)
+                            .frame(width: 34, height: 34)
+                            .background(Color.primary.opacity(0.08), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(isCompact ? "Déplier les détails" : "Affichage réduit")
+
                     Button(action: {
                         withAnimation(.easeInOut(duration: 0.25)) {
                             navigationManager.stopNavigation()
@@ -226,7 +242,7 @@ struct ImmersiveNavigationView: View {
                         Image(systemName: "xmark")
                             .font(.system(size: 13, weight: .bold))
                             .foregroundColor(.red)
-                            .frame(width: 36, height: 36)
+                            .frame(width: 34, height: 34)
                             .background(Color.red.opacity(0.14), in: Circle())
                     }
                     .buttonStyle(.plain)
@@ -234,84 +250,158 @@ struct ImmersiveNavigationView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.top, 10)
-            .padding(.bottom, 6)
-            
+            .padding(.top, 12)
+
+            // Résumé visuel des lignes du trajet (toujours visible en mode étendu)
+            if !isCompact {
+                routeLinesOverviewStrip
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 4)
+            }
+
             Divider()
-                .opacity(0.4)
+                .opacity(0.35)
         }
     }
-    
-    // MARK: - Compact Step Banner (Vue résumée au bas de l'écran)
-    private var compactStepBanner: some View {
-        Button(action: {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                if isFloating {
-                    isExpanded.toggle()
-                } else {
-                    selectedDetent = .large
-                }
-            }
-        }) {
-            HStack(spacing: 12) {
-                if let step = currentSection {
-                    if step.type == "public_transport", let display = step.display_informations {
+
+    private var routeLinesOverviewStrip: some View {
+        let transitSteps = steps.filter { $0.type == "public_transport" }
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(Array(transitSteps.enumerated()), id: \.element.id) { idx, sec in
+                    let isActive = sec.id == currentSection?.id
+                    if let display = sec.display_informations {
                         LineIcon(
                             type: display.transportType,
-                            lineId: display.code ?? display.label ?? "?",
-                            size: 38,
+                            lineId: display.code ?? display.label ?? "",
+                            size: isActive ? 24 : 20,
                             customColor: Color(hex: display.color ?? "0078D7")
                         )
-                    } else if step.mode == "walking" || step.type == "street_network" {
-                        Image(systemName: "figure.walk.circle.fill")
-                            .font(.system(size: 36))
-                            .foregroundColor(.blue)
-                    } else {
-                        Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
-                            .font(.system(size: 36))
-                            .foregroundColor(.orange)
+                        .opacity(isActive ? 1.0 : 0.72)
+                        .scaleEffect(isActive ? 1.08 : 1.0)
                     }
-                    
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(stepTitle(for: step))
-                            .font(.system(.subheadline, design: .rounded))
-                            .fontWeight(.bold)
-                            .foregroundColor(.primary)
-                            .lineLimit(1)
-                        
-                        Text(stepSubtitle(for: step))
-                            .font(.system(.caption, design: .rounded))
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                    }
-                    
-                    Spacer()
-                    
-                    // Bouton passer à l'étape suivante manuellement
-                    Button(action: {
-                        withAnimation {
-                            navigationManager.advanceToNextSection()
-                        }
-                    }) {
+                    if idx < transitSteps.count - 1 {
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(.primary)
-                            .frame(width: 32, height: 32)
-                            .background(Color.primary.opacity(0.08), in: Circle())
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.secondary.opacity(0.6))
                     }
-                    .buttonStyle(.plain)
-                } else {
-                    Text("Navigation en cours...")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Spacer()
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
+            .padding(.vertical, 2)
         }
-        .buttonStyle(.plain)
+    }
+
+    // MARK: - Compact Step Banner (Cran réduit au-dessus de la Tab Bar)
+    private var compactStepBanner: some View {
+        VStack(spacing: 8) {
+            Button(action: {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    if isFloating {
+                        isExpanded = true
+                    } else {
+                        selectedDetent = .medium
+                    }
+                }
+            }) {
+                HStack(spacing: 12) {
+                    if let step = currentSection {
+                        if step.type == "public_transport", let display = step.display_informations {
+                            LineIcon(
+                                type: display.transportType,
+                                lineId: display.code ?? display.label ?? "?",
+                                size: 36,
+                                customColor: Color(hex: display.color ?? "0078D7")
+                            )
+                        } else if step.mode == "walking" || step.type == "street_network" {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.blue.opacity(0.14))
+                                    .frame(width: 36, height: 36)
+                                Image(systemName: "figure.walk")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.blue)
+                            }
+                        } else {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.orange.opacity(0.14))
+                                    .frame(width: 36, height: 36)
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .font(.system(size: 15, weight: .bold))
+                                    .foregroundColor(.orange)
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text("ÉTAPE \(min(currentStepIndex + 1, max(1, steps.count)))/\(max(1, steps.count))")
+                                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                                    .foregroundColor(.blue)
+
+                                if let dur = step.duration, dur > 0 {
+                                    Text("• \(max(1, dur / 60)) min")
+                                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+
+                            Text(stepTitle(for: step))
+                                .font(.system(.subheadline, design: .rounded))
+                                .fontWeight(.bold)
+                                .foregroundColor(.primary)
+                                .lineLimit(1)
+
+                            Text(stepSubtitle(for: step))
+                                .font(.system(.caption, design: .rounded))
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+
+                        Spacer(minLength: 4)
+
+                        Button(action: {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                navigationManager.advanceToNextSection()
+                            }
+                        }) {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(.primary)
+                                .frame(width: 30, height: 30)
+                                .background(Color.primary.opacity(0.08), in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Étape suivante")
+                    } else {
+                        Text("Navigation en cours...")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.05))
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            HStack(spacing: 10) {
+                routeLinesOverviewStrip
+
+                Spacer(minLength: 4)
+
+                Text("\(steps.count) étape\(steps.count > 1 ? "s" : "")")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
     }
     
     // MARK: - Point de Départ

@@ -5,14 +5,41 @@ import SwiftUI
 /// Moteur intelligent de calcul de pertinence et de proximité pour les suggestions et la recherche de stations.
 struct StationSuggestionEngine {
 
+    private nonisolated final class NormalizationCache: @unchecked Sendable {
+        static let shared = NormalizationCache()
+        private let lock = NSLock()
+        private var entries: [String: (folded: String, words: [String])] = [:]
+
+        func entry(for str: String) -> (folded: String, words: [String]) {
+            lock.lock()
+            if let cached = entries[str] {
+                lock.unlock()
+                return cached
+            }
+            lock.unlock()
+
+            let folded = str.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+                .replacingOccurrences(of: "-", with: " ")
+                .replacingOccurrences(of: "'", with: " ")
+                .replacingOccurrences(of: "’", with: " ")
+                .replacingOccurrences(of: ".", with: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let words = folded.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+            let value = (folded: folded, words: words)
+
+            lock.lock()
+            if entries.count > 12_000 {
+                entries.removeAll(keepingCapacity: true)
+            }
+            entries[str] = value
+            lock.unlock()
+            return value
+        }
+    }
+
     // MARK: - Normalization
     nonisolated static func normalize(_ str: String) -> String {
-        str.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-            .replacingOccurrences(of: "-", with: " ")
-            .replacingOccurrences(of: "'", with: " ")
-            .replacingOccurrences(of: "’", with: " ")
-            .replacingOccurrences(of: ".", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        NormalizationCache.shared.entry(for: str).folded
     }
 
     /// Vérifie si une chaîne contient toutes les composantes de la recherche sans tenir compte des accents ni de la casse.
@@ -21,6 +48,56 @@ struct StationSuggestionEngine {
         return tokens.allSatisfy { token in
             let normToken = normalize(token)
             return normToken.isEmpty || normText.contains(normToken)
+        }
+    }
+
+    /// Regroupe des `StopPoint` issus de SwiftData en `MapStation` tout en filtrant sur tous les tokens.
+    nonisolated static func buildStations(
+        from stops: [StopPoint],
+        tokens: [String],
+        includePlatformsAndLines: Bool = true
+    ) -> [MapStation] {
+        let filtered = stops.filter { stop in
+            matchesQuery(text: stop.name, tokens: tokens)
+        }
+        let grouped = Dictionary(grouping: filtered) { stop in
+            stop.stopAreaId.isEmpty ? stop.name : "\(stop.name)_\(stop.stopAreaId)"
+        }
+
+        return grouped.compactMap { (_, groupStops) -> MapStation? in
+            guard let first = groupStops.first else { return nil }
+            let totalLat = groupStops.reduce(0.0) { $0 + $1.coordinate.latitude }
+            let totalLon = groupStops.reduce(0.0) { $0 + $1.coordinate.longitude }
+            let count = Double(groupStops.count)
+            let center = CLLocationCoordinate2D(latitude: totalLat / count, longitude: totalLon / count)
+
+            let mainType = groupStops.max { $0.type.priority < $1.type.priority }?.type ?? first.type
+            let stationId = first.stopAreaId.isEmpty ? first.id : first.stopAreaId
+
+            if includePlatformsAndLines {
+                let uniqueLines = Set(groupStops.map { StationLine(name: $0.lineName, type: $0.type) })
+                let sortedLines = Array(uniqueLines).sorted { $0.name < $1.name }
+                return MapStation(
+                    id: stationId,
+                    name: first.name,
+                    coordinate: center,
+                    platforms: groupStops,
+                    isHub: false,
+                    mainType: mainType,
+                    lines: sortedLines,
+                    city: "Paris"
+                )
+            } else {
+                return MapStation(
+                    id: stationId,
+                    name: first.name,
+                    coordinate: center,
+                    platforms: [],
+                    isHub: false,
+                    mainType: mainType,
+                    lines: []
+                )
+            }
         }
     }
 
@@ -67,8 +144,9 @@ struct StationSuggestionEngine {
         var score: Double = 0.0
 
         let normQuery = normalize(query)
-        let normName = normalize(station.name)
-        let nameWords = normName.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+        let nameEntry = NormalizationCache.shared.entry(for: station.name)
+        let normName = nameEntry.folded
+        let nameWords = nameEntry.words
 
         // -------------------------------------------------------------
         // 1. PERTINENCE TEXTUELLE (0 - 1500 pts)
@@ -203,29 +281,31 @@ struct StationSuggestionEngine {
         favoriteIds: Set<String>,
         recentIds: Set<String>
     ) -> [MapStation] {
-        let normQuery = normalize(query)
-        let tokens = normQuery.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+        FlowPerformanceProfiler.measure("RankStations", detail: "count=\(stations.count)") {
+            let normQuery = normalize(query)
+            let tokens = normQuery.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
 
-        let scored = stations.map { station in
-            (
-                station: station,
-                score: score(
+            let scored = stations.map { station in
+                (
                     station: station,
-                    query: normQuery,
-                    tokens: tokens,
-                    userLocation: userLocation,
-                    isFavorite: favoriteIds.contains(station.id),
-                    isRecent: recentIds.contains(station.id)
+                    score: score(
+                        station: station,
+                        query: normQuery,
+                        tokens: tokens,
+                        userLocation: userLocation,
+                        isFavorite: favoriteIds.contains(station.id),
+                        isRecent: recentIds.contains(station.id)
+                    )
                 )
-            )
-        }
-
-        return scored.sorted {
-            if $0.score != $1.score {
-                return $0.score > $1.score
             }
-            return $0.station.name.localizedStandardCompare($1.station.name) == .orderedAscending
-        }.map { $0.station }
+
+            return scored.sorted {
+                if $0.score != $1.score {
+                    return $0.score > $1.score
+                }
+                return $0.station.name.localizedStandardCompare($1.station.name) == .orderedAscending
+            }.map { $0.station }
+        }
     }
 
     // MARK: - Nearby Suggestions

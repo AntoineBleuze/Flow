@@ -2,16 +2,44 @@ import SwiftUI
 import Combine
 import MapKit
 
+struct FocusedLinePreview: Identifiable, Equatable {
+    let id: String
+    let lineName: String
+    let type: TransportType
+    let color: Color
+    let polylines: [MKPolyline]
+    let stops: [MapStation]
+    let showDirectionArrows: Bool
+
+    static func == (lhs: FocusedLinePreview, rhs: FocusedLinePreview) -> Bool {
+        lhs.id == rhs.id
+    }
+}
+
 class NavigationCoordinator: ObservableObject {
     static let shared = NavigationCoordinator()
-    
+
+    /// Palier minimal de la feuille modale couplée à la Tab Bar flottante (Style Localiser iOS 26)
+    static let collapsedSheetDetent: PresentationDetent = .height(84)
+    /// Palier intermédiaire compact dédié aux itinéraires (affiche les infos réduites au-dessus de la Tab Bar)
+    static let compactRouteSheetDetent: PresentationDetent = .height(216)
+
     @Published var selectedTab: String = "Explore"
+    @Published var exploreSheetDetent: PresentationDetent = .medium
+    @Published var isSheetMergedWithTabBar: Bool = false
+    @Published var sheetExpandProgress: CGFloat = 1.0
+    @Published var sheetHeight: CGFloat = 0
+    @Published var duoOuterSheetHeight: CGFloat = 372
+    @Published var mapHeading: CLLocationDirection = 0
     @Published var userTrackingMode: MKUserTrackingMode = .none
     @Published var selectedStation: MapStation?
     @Published var recenterTrigger: Bool = false
     @Published var previewJourney: Journey? = nil
+    @Published var focusedLinePreview: FocusedLinePreview? = nil
     @Published var isAIPreviewActive: Bool = false
     @Published var showAIAssistant: Bool = false
+    @Published var aiSheetDetent: PresentationDetent = .large
+    @Published var showAccountSheet: Bool = false
     @Published var focusedSectionId: String? = nil
     
     func recenterMap() {
@@ -32,10 +60,33 @@ class NavigationCoordinator: ObservableObject {
         selectedTab = "Explore"
     }
     
+    /// Affiche la ligne complète et tous ses arrêts sur la carte Explore
+    func showLinePreview(_ preview: FocusedLinePreview) {
+        selectedTab = "Explore"
+        selectedStation = nil
+        previewJourney = nil
+        isAIPreviewActive = false
+        exploreSheetDetent = Self.collapsedSheetDetent
+        withAnimation(.easeInOut(duration: 0.25)) {
+            focusedLinePreview = preview
+        }
+    }
+
+    /// Quitte l'aperçu de la ligne complète et restaure la carte normale
+    func clearLinePreview() {
+        withAnimation(.easeInOut(duration: 0.25)) {
+            focusedLinePreview = nil
+        }
+    }
+
     /// Affiche un aperçu exclusif d'itinéraire sur la carte Explore (masque les autres lignes)
     func showItineraryPreview(journey: Journey) {
         selectedTab = "Explore"
         selectedStation = nil
+        focusedLinePreview = nil
+        if exploreSheetDetent == Self.collapsedSheetDetent {
+            exploreSheetDetent = .medium
+        }
         previewJourney = journey
         isAIPreviewActive = true
     }
@@ -56,16 +107,19 @@ class NavigationCoordinator: ObservableObject {
     }
     
     func startNavigation(journey: Journey) {
-        // 1. Switch to Explore tab (where the map is)
+        // 1. Fermer l'assistant IA si ouvert et basculer sur l'onglet Explore
+        showAIAssistant = false
         selectedTab = "Explore"
+        exploreSheetDetent = .medium
         
-        // 2. Dismiss any active sheet/panel on the map
+        // 2. Réinitialiser les panneaux d'aperçu
         selectedStation = nil
         previewJourney = nil
+        focusedLinePreview = nil
         isAIPreviewActive = false
         
-        // 3. Trigger navigation start in NavigationManager
-        NavigationManager.shared.startNavigation(journey: journey)
+        // 3. Démarrer la navigation via RouteNavigationManager (synchronise NavigationManager + ImmersiveNavigationView)
+        RouteNavigationManager.shared.startRoute(journey: journey)
     }
     
     var userTrackingModeImageName: String {
@@ -88,5 +142,19 @@ class NavigationCoordinator: ObservableObject {
         @unknown default:
             userTrackingMode = .follow
         }
+    }
+
+    func resetMapHeading() {
+        if userTrackingMode == .followWithHeading {
+            userTrackingMode = .follow
+        }
+        #if canImport(UIKit)
+        let mapView = SharedMapView.main.mapView
+        if let camera = mapView.camera.copy() as? MKMapCamera {
+            camera.heading = 0
+            mapView.setCamera(camera, animated: true)
+        }
+        #endif
+        mapHeading = 0
     }
 }

@@ -78,7 +78,7 @@ public enum DuoLayoutHelper {
 
 /// Conteneur 2 volets intelligent conçu pour l'iPhone Duo, iPad et grands écrans.
 /// - En mode Déplié / Duo : Affiche le panneau de contrôle à gauche et la carte / vue immersive à droite,
-///   séparés par une transition en dégradé douce et progressive vers la carte.
+///   séparés par une transition en dégradé douce et progressive vers la carte (design de `main`).
 /// - En mode Plié / Compact : Affiche le contenu principal avec support fluide des sheets.
 public struct DuoSplitView<LeadingContent: View, TrailingContent: View>: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -119,13 +119,12 @@ public struct DuoSplitView<LeadingContent: View, TrailingContent: View>: View {
         
         ZStack(alignment: .leading) {
             // 1. CARTE EN ARRIÈRE-PLAN PLEINE LARGEUR
-            // S'étend sur l'ensemble des deux écrans pour faire transparaître ses couleurs sous l'ultraThinMaterial
+            // S'étend sur l'ensemble des deux écrans pour faire transparaître ses couleurs sous le dégradé
             trailingContent
                 .frame(width: size.width, height: size.height)
                 .clipped()
 
             // 2. FOND EN DÉGRADÉ (TRANSITION PROGRESSIVE VERS LA CARTE)
-            // Remplace la coupure linéaire abrupte par un dégradé doux et continu de flou et de lumière
             glassGradientBackground(paneWidth: paneWidth, size: size)
 
             // 3. CONTENU INTERACTIF DES DEUX ÉCRANS

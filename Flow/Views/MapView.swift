@@ -2,6 +2,7 @@ import MapKit
 import SwiftUI
 import Combine
 
+
 struct AppMapView: View {
     // 1. Définition de la région par défaut (Paris)
     static let defaultRegion = MKCoordinateRegion(
@@ -24,18 +25,6 @@ struct AppMapView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.duoPosture) private var duoPosture
-    @Environment(\.tabBarBottomInset) private var tabBarBottomInset
-
-    private var dynamicBottomControlsPadding: CGFloat {
-        if duoPosture == .unfoldedDualScreen {
-            return 24
-        }
-        if tabBarBottomInset > 0 {
-            // Dégagement net de +14pt au-dessus de la TabBar native
-            return tabBarBottomInset + 14
-        }
-        return 16
-    }
 
     @EnvironmentObject var coordinator: NavigationCoordinator
     @State private var visibleRegion: MKCoordinateRegion?
@@ -65,162 +54,129 @@ struct AppMapView: View {
     var showControls: Bool = true
 
     var body: some View {
-        GlassEffectContainer {
-            ZStack {
+        GeometryReader { mapGeo in
+            ZStack(alignment: .bottomTrailing) {
                 MapViewControllerBridge(
                     data: data,
                     selectedStation: selectedStationBinding,
                     userTrackingMode: $coordinator.userTrackingMode,
                     recenterTrigger: coordinator.recenterTrigger,
                     journey: navigationManager.isNavigating ? navigationManager.currentJourney : (coordinator.previewJourney ?? selectedJourney),
+                    focusedLinePreview: coordinator.focusedLinePreview,
                     focusedSectionId: coordinator.focusedSectionId,
+                    sheetHeight: coordinator.sheetHeight,
+                    sheetDetent: coordinator.exploreSheetDetent,
                     useMainMap: showControls,
                     showAnnotations: showControls
                 )
                 .ignoresSafeArea()
-                
-                if showControls && !navigationManager.isNavigating {
-                    // Bottom Stack: Controls Toolbar on right + Bottom AI Bar or AI Action Card
-                    VStack(spacing: 12) {
-                        Spacer()
 
-                        // 1. Controls Toolbar on the right
-                        HStack {
-                            Spacer()
-                            mapControlToolbar
-                        }
-                        .padding(.trailing, duoPosture == .unfoldedDualScreen ? 24 : 16)
-
-                        // 2. Either the AI Journey Action Card (if preview active) or the Bottom AI Voice/Text Input Bar
-                        // On iPhone Duo unfolded, the left screen already provides full AI and journey controls
-                        if duoPosture != .unfoldedDualScreen {
-                            if let journey = coordinator.previewJourney {
-                                aiJourneyActionCard(journey: journey)
-                                    .frame(maxWidth: horizontalSizeClass == .regular ? 480 : .infinity)
-                                    .padding(.horizontal, 16)
-                                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                            } else {
-                                HStack(alignment: .center, spacing: 12) {
-                                    if horizontalSizeClass == .regular {
-                                        Spacer()
-                                    }
-                                    bottomAIPillBar
-                                        .frame(maxWidth: horizontalSizeClass == .regular ? 480 : .infinity)
-                                }
-                                .padding(.horizontal, 16)
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                if showControls, let linePreview = coordinator.focusedLinePreview {
+                    VStack {
+                        HStack(spacing: 10) {
+                            LineBadge(
+                                line: StationLine(name: linePreview.lineName, type: linePreview.type),
+                                mini: false,
+                                customSize: 26
+                            )
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Ligne \(linePreview.lineName)")
+                                    .font(.system(.subheadline, design: .rounded).weight(.bold))
+                                    .foregroundColor(.primary)
+                                Text("\(linePreview.stops.count) arrêts")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
                             }
-                        }
-                    }
-                    .padding(.bottom, dynamicBottomControlsPadding)
-                    .zIndex(15)
-                }
-                
-                // Panneau de navigation flottant en mode fermé (ne prend pas toute la largeur et ne couvre pas la navbar)
-                if showControls && navigationManager.isNavigating && duoPosture != .unfoldedDualScreen,
-                   let journey = navigationManager.currentJourney {
-                    VStack(spacing: 8) {
-                        Spacer()
-
-                        // Bouton de recentrage au-dessus de la carte de guidage
-                        HStack {
-                            Spacer()
                             Button(action: {
-                                coordinator.recenterMap()
+                                coordinator.clearLinePreview()
                             }) {
-                                Image(systemName: coordinator.userTrackingModeImageName)
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundColor(coordinator.userTrackingMode == .none ? .primary : .blue)
-                                    .frame(width: 44, height: 44)
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 20, weight: .semibold))
+                                    .foregroundColor(.secondary)
                             }
                             .buttonStyle(.plain)
-                            .glassEffect(.regular.interactive(), in: .circle)
-                            .padding(.trailing, 16)
                         }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .glassEffect(.regular.interactive(), in: Capsule())
+                        .shadow(color: Color.black.opacity(0.22), radius: 8, y: 4)
+                        .padding(.top, 58)
 
-                        // Carte de guidage flottante élégante
-                        ImmersiveNavigationView(journey: journey, isFloating: true)
-                            .frame(maxWidth: horizontalSizeClass == .regular ? 480 : .infinity)
-                            .padding(.horizontal, 14)
-                            .padding(.bottom, dynamicBottomControlsPadding)
+                        Spacer()
                     }
-                    .zIndex(25)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .frame(maxWidth: .infinity)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(20)
+                }
+                
+                if showControls {
+                    let toolbarMetrics = mapToolbarMetrics(for: mapGeo.size)
+                    // Contrôles flottants alignés avec le haut de la sheet (et boussole au-dessus lors d'une rotation)
+                    mapControlToolbar
+                        .padding(.trailing, toolbarMetrics.trailing)
+                        .padding(.bottom, toolbarMetrics.bottom)
+                        .opacity(toolbarMetrics.isHidden ? 0 : 1)
+                        .allowsHitTesting(!toolbarMetrics.isHidden)
+                        .animation(.spring(response: 0.32, dampingFraction: 0.84), value: toolbarMetrics.bottom)
+                        .animation(.easeInOut(duration: 0.2), value: toolbarMetrics.isHidden)
+                        .zIndex(15)
                 }
 
-                // iPad: Station detail panel at bottom-left (resizable) - only when not in Duo dual-screen mode
-                if duoPosture != .unfoldedDualScreen && UIDevice.current.userInterfaceIdiom == .pad, let station = coordinator.selectedStation {
-                    GeometryReader { geometry in
-                        let maxAvailableHeight = geometry.size.height - 96
-                        VStack {
-                            Spacer()
-                            HStack(alignment: .bottom) {
-                                VStack(spacing: 0) {
-                                    // Drag handle at top for resizing
-                                    Capsule()
-                                        .fill(Color.secondary.opacity(0.5))
-                                        .frame(width: 40, height: 5)
-                                        .padding(.top, 8)
-                                        .padding(.bottom, 4)
-                                        .frame(maxWidth: .infinity)
-                                        .contentShape(Rectangle().size(width: 120, height: 40))
-                                        .gesture(
-                                            DragGesture()
-                                                .updating($iPadPanelDragOffset) { value, state, _ in
-                                                    state = value.translation.height
+            // iPad: Station detail panel at bottom-left (resizable) - only when not in Duo dual-screen mode
+            if duoPosture != .unfoldedDualScreen && UIDevice.current.userInterfaceIdiom == .pad, let station = coordinator.selectedStation {
+                GeometryReader { geometry in
+                    let maxAvailableHeight = geometry.size.height - 96
+                    VStack {
+                        Spacer()
+                        HStack(alignment: .bottom) {
+                            VStack(spacing: 0) {
+                                // Drag handle at top for resizing
+                                Capsule()
+                                    .fill(Color.secondary.opacity(0.5))
+                                    .frame(width: 40, height: 5)
+                                    .padding(.top, 8)
+                                    .padding(.bottom, 4)
+                                    .frame(maxWidth: .infinity)
+                                    .contentShape(Rectangle().size(width: 120, height: 40))
+                                    .gesture(
+                                        DragGesture()
+                                            .updating($iPadPanelDragOffset) { value, state, _ in
+                                                state = value.translation.height
+                                            }
+                                            .onEnded { value in
+                                                let newHeight = iPadPanelHeight - value.translation.height
+                                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                                    iPadPanelHeight = min(maxAvailableHeight, max(350, newHeight))
                                                 }
-                                                .onEnded { value in
-                                                    let newHeight = iPadPanelHeight - value.translation.height
-                                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                                        iPadPanelHeight = min(maxAvailableHeight, max(350, newHeight))
-                                                    }
-                                                }
-                                        )
-
-                                    StationDetailSheet(
-                                        station: station,
-                                        onDismiss: {
-                                             withAnimation(.easeInOut(duration: 0.3)) {
-                                                 coordinator.selectedStation = nil
-                                             }
-                                        }
+                                            }
                                     )
-                                }
-                                .frame(width: 380, height: min(maxAvailableHeight, max(350, iPadPanelHeight - iPadPanelDragOffset)))
-                                .background(colorScheme == .dark ? Color.black.opacity(0.05) : Color.white.opacity(0.05))
-                                .clipShape(RoundedRectangle(cornerRadius: 20))
-                                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20))
-                                .shadow(color: .black.opacity(0.2), radius: 15, x: 0, y: 5)
-                                .padding(.leading, 16)
-                                .padding(.bottom, 16)
-                                .transition(.move(edge: .leading).combined(with: .opacity))
-                                Spacer()
+
+                                StationDetailSheet(
+                                    station: station,
+                                    onDismiss: {
+                                         withAnimation(.easeInOut(duration: 0.3)) {
+                                             coordinator.selectedStation = nil
+                                         }
+                                    }
+                                )
                             }
+                            .frame(width: 380, height: min(maxAvailableHeight, max(350, iPadPanelHeight - iPadPanelDragOffset)))
+                            .background(colorScheme == .dark ? Color.black.opacity(0.05) : Color.white.opacity(0.05))
+                            .clipShape(RoundedRectangle(cornerRadius: 20))
+                            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20))
+                            .shadow(color: .black.opacity(0.2), radius: 15, x: 0, y: 5)
+                            .padding(.leading, 16)
+                            .padding(.bottom, 16)
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                            Spacer()
                         }
                     }
-                    .zIndex(10)
                 }
+                .zIndex(10)
             }
-            .ignoresSafeArea(.container, edges: .bottom)
+        }
         }
         .ignoresSafeArea(.container, edges: .bottom)
-        // iPhone folded: keep classic sheet behavior (iPad uses inline panel above, Duo unfolded uses left pane)
-        .sheet(item: Binding(
-            get: {
-                guard !navigationManager.isNavigating else { return nil }
-                guard duoPosture != .unfoldedDualScreen else { return nil }
-                guard UIDevice.current.userInterfaceIdiom != .pad else { return nil }
-                return coordinator.selectedStation
-            },
-            set: { coordinator.selectedStation = $0 }
-        )) { station in
-            StationDetailSheet(station: station, selectedDetent: $sheetDetent)
-                .presentationDetents([.fraction(0.22), .medium, .large], selection: $sheetDetent)
-                .presentationBackground(.ultraThinMaterial)
-                .presentationCornerRadius(FlowTheme.sheetCornerRadius)
-                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
-        }
-
         .onAppear {
             LocationManager.shared.requestLocation()
         }
@@ -250,22 +206,6 @@ struct AppMapView: View {
                 // Determine if we should auto-start navigation or just show route on map
             }
         }
-        .sheet(isPresented: $showAIAssistant) {
-            if #available(iOS 27.0, *) {
-                FlowAssistantView()
-                    .environmentObject(coordinator)
-                    .presentationDetents([.fraction(0.35), .medium, .large])
-                    .presentationBackground(.ultraThinMaterial)
-                    .presentationCornerRadius(FlowTheme.sheetCornerRadius)
-                    .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.35)))
-            }
-        }
-        .onChange(of: coordinator.showAIAssistant) { _, newVal in
-            if newVal {
-                showAIAssistant = true
-                coordinator.showAIAssistant = false
-            }
-        }
         .onChange(of: navigationManager.isNavigating) { _, isNavigating in
             if isNavigating {
                 navigationSheetDetent = .fraction(0.18)
@@ -278,439 +218,108 @@ struct AppMapView: View {
         }
     }
 
-    // MARK: - Native Liquid Glass Map Subviews
+    // MARK: - Liquid Glass Map Subviews
 
-    // 1. Horizontal Liquid Glass Control Toolbar
+    private func mapToolbarMetrics(for mapSize: CGSize) -> (trailing: CGFloat, bottom: CGFloat, isHidden: Bool) {
+        switch duoPosture {
+        case .unfoldedDualScreen:
+            return (trailing: 24, bottom: 24, isHidden: false)
+        case .foldedSingleScreen:
+            let fallbackHeight: CGFloat = {
+                switch coordinator.exploreSheetDetent {
+                case NavigationCoordinator.collapsedSheetDetent: return 118
+                case NavigationCoordinator.compactRouteSheetDetent: return 250
+                default: return 420
+                }
+            }()
+            let currentSheetHeight = coordinator.sheetHeight > 0 ? coordinator.sheetHeight : fallbackHeight
+            let isLarge = coordinator.exploreSheetDetent == .large || (mapSize.height > 0 && currentSheetHeight > mapSize.height * 0.65)
+            return (trailing: 16, bottom: currentSheetHeight + 20, isHidden: isLarge)
+        }
+    }
+
+    private var isMapRotated: Bool {
+        let normalized = coordinator.mapHeading.truncatingRemainder(dividingBy: 360)
+        let positive = normalized < 0 ? normalized + 360 : normalized
+        return positive > 1.5 && positive < 358.5
+    }
+
+    // 1. Boussole (au-dessus) + Contrôles flottants verticaux alignés avec la sheet
     private var mapControlToolbar: some View {
-        HStack(spacing: 4) {
-            // Recenter Button
-            Button(action: {
-                coordinator.recenterMap()
-            }) {
-                Image(systemName: coordinator.userTrackingModeImageName)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(coordinator.userTrackingMode == .none ? .primary : .blue)
-                    .frame(width: 40, height: 40)
-            }
-            .buttonStyle(.plain)
-
-            Divider()
-                .frame(height: 20)
-                .overlay(Color.primary.opacity(0.12))
-
-            // Transport Category Filter Menu
-            Menu {
-                ForEach(["Métro", "RER / Train", "Tram", "Bus"], id: \.self) { category in
+        GlassEffectContainer(spacing: 10) {
+            VStack(spacing: 10) {
+                if isMapRotated {
                     Button(action: {
-                        if data.activeCategories.contains(category) {
-                            data.activeCategories.remove(category)
-                        } else {
-                            data.activeCategories.insert(category)
-                        }
+                        #if canImport(UIKit)
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        #endif
+                        coordinator.resetMapHeading()
                     }) {
-                        HStack {
-                            Text(category)
-                            if data.activeCategories.contains(category) {
-                                Image(systemName: "checkmark")
+                        VStack(spacing: -2) {
+                            Image(systemName: "arrowtriangle.up.fill")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.red)
+                            Image(systemName: "arrowtriangle.down.fill")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.primary.opacity(0.45))
+                        }
+                        .rotationEffect(.degrees(-coordinator.mapHeading))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.interactive(), in: Circle())
+                    .accessibilityLabel("Réorienter la carte vers le nord")
+                    .transition(.scale(scale: 0.7).combined(with: .opacity))
+                }
+
+                VStack(spacing: 0) {
+                    // Transport Category Filter Menu
+                    Menu {
+                        ForEach(["Métro", "RER / Train", "Tram", "Bus"], id: \.self) { category in
+                            Button(action: {
+                                if data.activeCategories.contains(category) {
+                                    data.activeCategories.remove(category)
+                                } else {
+                                    data.activeCategories.insert(category)
+                                }
+                            }) {
+                                HStack {
+                                    Text(category)
+                                    if data.activeCategories.contains(category) {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
                             }
                         }
+                    } label: {
+                        Image(systemName: data.activeCategories.count < 4 ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(data.activeCategories.count < 4 ? Color.blue : Color.primary)
+                            .frame(width: 44, height: 46)
+                            .contentShape(Rectangle())
                     }
-                }
-            } label: {
-                Image(systemName: data.activeCategories.count < 4 ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(data.activeCategories.count < 4 ? .blue : .primary)
-                    .frame(width: 40, height: 40)
-            }
-            .buttonStyle(.plain)
+                    .buttonStyle(.plain)
 
-            Divider()
-                .frame(height: 20)
-                .overlay(Color.primary.opacity(0.12))
+                    Divider()
+                        .frame(width: 28)
 
-            // Polyline Style Selector Menu
-            Menu {
-                ForEach(MapPolylineStyle.allCases) { style in
+                    // Recenter / Location Button
                     Button(action: {
-                        data.polylineStyle = style
+                        coordinator.recenterMap()
                     }) {
-                        HStack {
-                            Text(style.rawValue)
-                            if data.polylineStyle == style {
-                                Image(systemName: "checkmark")
-                            }
-                        }
+                        Image(systemName: coordinator.userTrackingModeImageName)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(coordinator.userTrackingMode == .none ? Color.primary : Color.blue)
+                            .frame(width: 44, height: 46)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                 }
-            } label: {
-                Image(systemName: data.polylineStyle.systemImageName)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(data.polylineStyle != .classic ? .blue : .primary)
-                    .frame(width: 40, height: 40)
+                .foregroundStyle(.primary)
+                .glassEffect(.regular.interactive(), in: .capsule)
             }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
-        .glassEffect(.regular.interactive(), in: Capsule())
-        .shadow(
-            color: colorScheme == .dark ? Color.black.opacity(0.35) : Color.black.opacity(0.12),
-            radius: 10,
-            x: 0,
-            y: 4
-        )
-    }
-
-    // MARK: - 2. Bottom Native Liquid Glass AI Search & Dictation Pill Bar
-    private var bottomAIPillBar: some View {
-        HStack(spacing: 8) {
-            // Sparkle / Assistant Trigger Button
-            Button {
-                showAIAssistant = true
-            } label: {
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [.purple, .blue],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 38, height: 38)
-                        .shadow(color: Color.purple.opacity(0.35), radius: 6, x: 0, y: 2)
-
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(.white)
-                }
-            }
-            .buttonStyle(.plain)
-
-            // Direct Text Input Field
-            TextField(
-                voiceManager.isRecording ? "Écoute en cours..." : "Où allez-vous ? (ex: Concorde)",
-                text: $aiInputPrompt
-            )
-            .focused($isAIFocused)
-            .font(.system(size: 14, weight: .medium, design: .rounded))
-            .textFieldStyle(.plain)
-            .autocorrectionDisabled()
-            .onSubmit {
-                submitAIPrompt()
-            }
-            .frame(maxWidth: .infinity)
-
-            if isAIFocused {
-                Button {
-                    isAIFocused = false
-                } label: {
-                    ZStack {
-                        Circle()
-                            .fill(Color.secondary.opacity(0.12))
-                            .frame(width: 36, height: 36)
-
-                        Image(systemName: "keyboard.chevron.compact.down")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .buttonStyle(.plain)
-                .transition(.scale.combined(with: .opacity))
-            }
-
-            // Voice Dictation Button
-            Button {
-                voiceManager.toggleRecording(
-                    onUpdate: { transcript in
-                        aiInputPrompt = transcript
-                    },
-                    onFinished: { finalTranscript in
-                        aiInputPrompt = finalTranscript
-                        if !finalTranscript.isEmpty {
-                            submitAIPrompt()
-                        }
-                    }
-                )
-            } label: {
-                ZStack {
-                    Circle()
-                        .fill(
-                            voiceManager.isRecording
-                                ? Color.red.opacity(0.2)
-                                : Color.secondary.opacity(0.12)
-                        )
-                        .frame(width: 36, height: 36)
-
-                    Image(systemName: voiceManager.isRecording ? "waveform.circle.fill" : "mic.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(voiceManager.isRecording ? .red : .primary)
-                        .symbolEffect(.pulse, isActive: voiceManager.isRecording)
-                }
-            }
-            .buttonStyle(.plain)
-
-            // Send / Action Button
-            if isAISubmitting {
-                ProgressView()
-                    .progressViewStyle(.circular)
-                    .scaleEffect(0.8)
-                    .frame(width: 36, height: 36)
-            } else if !aiInputPrompt.isEmpty {
-                Button {
-                    submitAIPrompt()
-                } label: {
-                    ZStack {
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color.blue, Color(hex: "0055D4")],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 36, height: 36)
-
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(.white)
-                    }
-                }
-                .buttonStyle(.plain)
-                .transition(.scale.combined(with: .opacity))
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .glassEffect(.regular.interactive(), in: Capsule())
-        .shadow(
-            color: colorScheme == .dark ? Color.black.opacity(0.35) : Color.black.opacity(0.1),
-            radius: 12,
-            x: 0,
-            y: 4
-        )
-    }
-
-    private func submitAIPrompt() {
-        let query = aiInputPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return }
-
-        if voiceManager.isRecording {
-            voiceManager.stopRecording()
-        }
-
-        isAISubmitting = true
-
-        Task {
-            defer {
-                Task { @MainActor in
-                    isAISubmitting = false
-                    aiInputPrompt = ""
-                }
-            }
-
-            if #available(iOS 27.0, *), FlowAIAvailability.isAvailable {
-                do {
-                    _ = try await FlowAIService.shared.askAssistant(prompt: query)
-                    if coordinator.previewJourney != nil {
-                        return
-                    }
-                } catch {
-                    print("⚠️ FlowAIService error: \(error), attempting direct graph router")
-                }
-            }
-
-            await fallbackDirectSearch(query: query)
+            .animation(.spring(response: 0.3, dampingFraction: 0.78), value: isMapRotated)
         }
     }
-
-    private func fallbackDirectSearch(query: String) async {
-        let cleanQuery = query.lowercased()
-            .replacingOccurrences(of: "emmène-moi à ", with: "")
-            .replacingOccurrences(of: "emmene moi a ", with: "")
-            .replacingOccurrences(of: "aller à ", with: "")
-            .replacingOccurrences(of: "aller a ", with: "")
-            .replacingOccurrences(of: "itinéraire vers ", with: "")
-            .replacingOccurrences(of: "direction ", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let allStations = MapDataService.shared.allStations
-        let destination = allStations.first { station in
-            station.name.localizedCaseInsensitiveContains(cleanQuery)
-        }
-
-        guard let destination = destination else {
-            Task { @MainActor in
-                showAIAssistant = true
-            }
-            return
-        }
-
-        var start: MapStation? = nil
-        if let userLoc = LocationManager.shared.userLocation {
-            let uLoc = CLLocation(latitude: userLoc.latitude, longitude: userLoc.longitude)
-            start = allStations.min(by: {
-                uLoc.distance(from: CLLocation(latitude: $0.latitude, longitude: $0.longitude)) <
-                uLoc.distance(from: CLLocation(latitude: $1.latitude, longitude: $1.longitude))
-            })
-        }
-        if start == nil || start?.name == destination.name {
-            start = allStations.first(where: { $0.name.localizedCaseInsensitiveContains("Bir-Hakeim") }) ?? allStations.first
-        }
-
-        if let start = start,
-           let route = TransitGraphRouter.shared.findOptimalRoute(from: start, to: destination, allStations: allStations) {
-            let journey = TransitGraphRouter.shared.buildJourney(from: route, startCoord: start.coordinate)
-            Task { @MainActor in
-                coordinator.showItineraryPreview(journey: journey)
-            }
-        } else {
-            Task { @MainActor in
-                showAIAssistant = true
-            }
-        }
-    }
-
-    // MARK: - 3. Native Liquid Glass AI Journey Action Card
-    private func aiJourneyActionCard(journey: Journey) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            // Header: Sparkles badge + Close button
-            HStack {
-                HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [.purple, .blue],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-
-                    Text("Aperçu Itinéraire IA")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundColor(.primary)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background {
-                    Capsule()
-                        .fill(Color.purple.opacity(0.12))
-                }
-
-                Spacer()
-
-                Button {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                        coordinator.clearItineraryPreview()
-                    }
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 22))
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-
-            // Duration, Transfers & Line Badges
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                let durMin = max(1, (journey.duration ?? 1200) / 60)
-                Text("~\(durMin) min")
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .foregroundColor(.primary)
-
-                let transfers = journey.nb_transfers ?? 0
-                Text(transfers == 0 ? "Direct" : "\(transfers) corresp.")
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                    .foregroundColor(.secondary)
-
-                Spacer()
-
-                if let sections = journey.sections {
-                    HStack(spacing: 4) {
-                        ForEach(sections.filter { $0.type == "public_transport" }, id: \.id) { section in
-                            if let info = section.display_informations {
-                                let label = info.code ?? info.label ?? ""
-                                let colorHex = info.color ?? "0078D7"
-                                Text(label)
-                                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 7)
-                                    .padding(.vertical, 3)
-                                    .background(Color(hex: colorHex))
-                                    .clipShape(Capsule())
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Endpoints: From -> To
-            if let firstSection = journey.sections?.first(where: { $0.from?.name != nil }),
-               let lastSection = journey.sections?.last(where: { $0.to?.name != nil }) {
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(Color.blue)
-                        .frame(width: 8, height: 8)
-                    Text(firstSection.from?.name ?? "Départ")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.secondary.opacity(0.6))
-
-                    Circle()
-                        .fill(Color.green)
-                        .frame(width: 8, height: 8)
-                    Text(lastSection.to?.name ?? "Arrivée")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
-                }
-            }
-
-            // Start Navigation CTA
-            Button {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                    coordinator.startNavigationFromPreview()
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "location.fill")
-                        .font(.system(size: 14, weight: .bold))
-                    Text("Démarrer l'itinéraire")
-                        .font(.system(size: 15, weight: .semibold, design: .rounded))
-                }
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 13)
-                .background {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.blue, Color(hex: "0055D4")],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                }
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(16)
-        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: FlowTheme.largeCornerRadius, style: .continuous))
-        .shadow(
-            color: colorScheme == .dark ? Color.black.opacity(0.5) : Color.black.opacity(0.12),
-            radius: 16,
-            x: 0,
-            y: 6
-        )
-    }
-}
-
-#Preview("Map View") {
-    AppMapView()
-        .environmentObject(NavigationCoordinator())
 }

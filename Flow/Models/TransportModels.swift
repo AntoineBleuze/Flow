@@ -34,6 +34,17 @@ enum TransportType: String, CaseIterable, Identifiable, Codable {
         }
     }
 
+    /// Ordre d'affichage des modes : Tram -> Métro -> RER / Transilien -> Câble -> Bus
+    nonisolated var displayOrderRank: Int {
+        switch self {
+        case .tram: return 0
+        case .metro: return 1
+        case .rer, .transilien, .train: return 2
+        case .cable: return 3
+        case .bus: return 4
+        }
+    }
+
     static func getAssetName(mode: String?, label: String) -> String {
         guard let mode = mode else { return "" }
         let normalizedMode = mode.lowercased().folding(
@@ -154,10 +165,10 @@ struct TransportLine: Identifiable {
     var openingDate: String? {
         guard isUnderConstruction else { return nil }
         switch lineId {
-        case "15": return "2025 - 2031"
-        case "16": return "2026 - 2028"
-        case "17": return "2026 - 2030"
-        case "18": return "2026 - 2030"
+        case "15": return "2027 - 2031"
+        case "16": return "2028 - 2030"
+        case "17": return "2028 - 2030"
+        case "18": return "Fin 2026 - 2030"
         default: return nil
         }
     }
@@ -214,6 +225,25 @@ struct TrafficInfo: Identifiable {
     let impactedStops: [String]?
     let impactedSection: String?
     var summary: String? // Résumé généré par Foundation Models
+
+    /// Libellé lisible de l'heure et date de reprise estimée
+    var resumptionDescription: String? {
+        guard let endTime else { return nil }
+        let calendar = Calendar.current
+        let timeStr = DateFormat.shortTime.string(from: endTime)
+        if calendar.isDateInToday(endTime) {
+            return "Reprise estimée aujourd'hui à \(timeStr)"
+        } else if calendar.isDateInTomorrow(endTime) {
+            return "Reprise estimée demain à \(timeStr)"
+        } else {
+            let dateFormatter = DateFormatter()
+            dateFormatter.locale = Locale(identifier: "fr_FR")
+            dateFormatter.timeZone = TimeZone(identifier: "Europe/Paris")
+            dateFormatter.dateFormat = "d MMM"
+            let dateStr = dateFormatter.string(from: endTime)
+            return "Reprise estimée le \(dateStr) à \(timeStr)"
+        }
+    }
 }
 
 enum TrafficPeriod {

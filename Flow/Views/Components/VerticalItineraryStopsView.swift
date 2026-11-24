@@ -22,19 +22,33 @@ struct VerticalItineraryStopsView: View {
                             }
 
                             // Dot
-                            Circle()
-                                .fill(isStop(index: index, total: stops.count) ? .white : lineColor)
-                                .frame(
-                                    width: isStop(index: index, total: stops.count) ? 12 : 8,
-                                    height: isStop(index: index, total: stops.count) ? 12 : 8
-                                )
-                                .overlay(
+                            if stop.isSkipped {
+                                ZStack {
                                     Circle()
-                                        .stroke(
-                                            lineColor,
-                                            lineWidth: isStop(index: index, total: stops.count)
-                                                ? 3 : 0)
-                                )
+                                        .fill(.ultraThinMaterial)
+                                        .frame(width: 12, height: 12)
+                                    Circle()
+                                        .stroke(Color.orange, style: StrokeStyle(lineWidth: 2, dash: [2, 2]))
+                                        .frame(width: 12, height: 12)
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 6, weight: .bold))
+                                        .foregroundColor(.orange)
+                                }
+                            } else {
+                                Circle()
+                                    .fill(isStop(index: index, total: stops.count) ? .white : lineColor)
+                                    .frame(
+                                        width: isStop(index: index, total: stops.count) ? 12 : 8,
+                                        height: isStop(index: index, total: stops.count) ? 12 : 8
+                                    )
+                                    .overlay(
+                                        Circle()
+                                            .stroke(
+                                                lineColor,
+                                                lineWidth: isStop(index: index, total: stops.count)
+                                                    ? 3 : 0)
+                                    )
+                            }
 
                             // Lower line (connect to next)
                             if index < stops.count - 1 {
@@ -51,20 +65,59 @@ struct VerticalItineraryStopsView: View {
 
                         // Content
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(stop.stop_point.name ?? "Station inconnue")
-                                .font(
-                                    .system(
-                                        size: 14,
-                                        weight: isStop(index: index, total: stops.count)
-                                            ? .semibold : .regular)
-                                )
-                                .foregroundColor(.primary)
-                                .padding(.top, isStop(index: index, total: stops.count) ? -2 : -4)  // Align with dot
+                            HStack(alignment: .center, spacing: 6) {
+                                Text(stop.stop_point.name ?? "Station inconnue")
+                                    .font(
+                                        .system(
+                                            size: 14,
+                                            weight: isStop(index: index, total: stops.count)
+                                                ? .semibold : .regular)
+                                    )
+                                    .strikethrough(stop.isSkipped, color: .orange)
+                                    .foregroundColor(stop.isSkipped ? .secondary : .primary)
 
-                            if isStop(index: index, total: stops.count) {
-                                Text(formatTime(stop.departure_date_time))
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                                if let affluence = stop.estimated_affluence, !stop.isSkipped {
+                                    StopAffluenceIndicator(level: affluence.level)
+                                }
+
+                                if stop.isSkipped {
+                                    Text("NON DESSERVI")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 2)
+                                        .background(Color.orange)
+                                        .clipShape(Capsule())
+                                }
+                            }
+                            .padding(.top, isStop(index: index, total: stops.count) ? -2 : -4)  // Align with dot
+
+                            if stop.isSkipped {
+                                if let reason = stop.disruptionReason, !reason.isEmpty {
+                                    Text(reason)
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundColor(.orange)
+                                        .lineLimit(2)
+                                } else {
+                                    Text("Station fermée — les trains ne marquent pas l'arrêt")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundColor(.orange)
+                                }
+                            } else if isStop(index: index, total: stops.count) {
+                                HStack(spacing: 6) {
+                                    Text(formatTime(stop.departure_date_time))
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+
+                                    if let affluence = stop.estimated_affluence {
+                                        Text("•")
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
+                                        Text("Affluence \(affluence.level.title.lowercased())")
+                                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
                             }
                         }
                         .padding(.bottom, 24)

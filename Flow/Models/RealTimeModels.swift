@@ -63,3 +63,14 @@ struct StopPointRef: Decodable {
     let id: String
     let name: String?
 }
+
+// MARK: - Station Real-Time Reserve
+public struct StationRealTimeReserve: Sendable, Equatable {
+    public var estimatedDeparture: Date?
+    public var estimatedArrival: Date?
+
+    public init(estimatedDeparture: Date? = nil, estimatedArrival: Date? = nil) {
+        self.estimatedDeparture = estimatedDeparture
+        self.estimatedArrival = estimatedArrival
+    }
+}

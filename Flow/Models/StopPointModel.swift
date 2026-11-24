@@ -22,4 +22,8 @@ final class StopPointModel {
         self.type = type
         self.lineName = lineName
     }
+
+    var physicalStopId: String {
+        id.components(separatedBy: "__").first ?? id
+    }
 }

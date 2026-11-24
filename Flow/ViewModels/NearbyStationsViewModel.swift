@@ -132,7 +132,7 @@ class NearbyStationsViewModel: ObservableObject {
                             }()
 
                             return StopPoint(
-                                id: entity.id,
+                                id: entity.physicalStopId,
                                 stopAreaId: entity.stopAreaId,
                                 name: name,
                                 coordinate: coordinate,
@@ -147,7 +147,7 @@ class NearbyStationsViewModel: ObservableObject {
                         }
 
                         let busStation = MapStation(
-                            id: first.stopAreaId.isEmpty ? first.id : first.stopAreaId,
+                            id: first.stopAreaId.isEmpty ? first.physicalStopId : first.stopAreaId,
                             name: name,
                             coordinate: center,
                             platforms: platforms,

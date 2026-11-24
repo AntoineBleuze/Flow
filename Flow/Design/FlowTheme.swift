@@ -8,8 +8,37 @@ public enum FlowTheme {
     public static let largeCornerRadius: CGFloat = 24.0
     public static let sheetCornerRadius: CGFloat = 28.0
     
-    /// Opacité globale du volet gauche en mode double écran / pliable
+    /// Opacité globale du fond en verre de l'écran de gauche en mode double écran / pliable
     public static var duoLeftPaneOpacity: Double = 0.85
+    public static var sheetMaterialOpacity: Double = 0.15
+
+    /// Dégradé de secours pour bordure lumineuse si nécessaire
+    public static var specularRimLight: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color.white.opacity(0.65),
+                Color.white.opacity(0.10)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    public static func specularBorder(for colorScheme: ColorScheme) -> LinearGradient {
+        if colorScheme == .dark {
+            return LinearGradient(
+                colors: [Color.white.opacity(0.24), Color.white.opacity(0.08), Color.white.opacity(0.02)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        } else {
+            return LinearGradient(
+                colors: [Color.white.opacity(0.85), Color.black.opacity(0.04), Color.black.opacity(0.08)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+    }
     
     // MARK: - Couleurs Sémantiques & Accessibilité WCAG 2.1 AA
     
@@ -62,9 +91,6 @@ public enum FlowTheme {
     }
 }
 
-/// Alias de compatibilité pour les références existantes
-public typealias LiquidGlassTheme = FlowTheme
-
 // MARK: - Transparent Navigation & Container Helper
 
 #if canImport(UIKit)
@@ -103,26 +129,43 @@ public struct TransparentHostingView: UIViewControllerRepresentable {
             applyTransparency()
         }
 
+        private static func isSheetOrRootPresentationController(_ vc: UIViewController) -> Bool {
+            if vc.parent == nil { return true }
+            if vc.presentingViewController?.presentedViewController === vc { return true }
+            if vc.presentationController?.presentedViewController === vc { return true }
+            return false
+        }
+
         public func applyTransparency() {
             view.backgroundColor = .clear
 
-            var currentView: UIView? = view
-            while let sv = currentView?.superview {
-                sv.backgroundColor = .clear
-                currentView = sv
-            }
-
+            var highestInternalView: UIView?
             var currentVC: UIViewController? = self
             while let parent = currentVC?.parent {
+                if Self.isSheetOrRootPresentationController(parent) {
+                    break
+                }
                 parent.view.backgroundColor = .clear
+                highestInternalView = parent.view
                 if let nav = parent as? UINavigationController {
                     clearNavController(nav)
+                    break
                 }
                 currentVC = parent
             }
 
-            if let nav = navigationController {
+            if let nav = navigationController, !Self.isSheetOrRootPresentationController(nav) {
                 clearNavController(nav)
+                highestInternalView = highestInternalView ?? nav.view
+            }
+
+            if let stopView = highestInternalView, view.isDescendant(of: stopView) {
+                var currentView: UIView? = view
+                while let sv = currentView?.superview {
+                    sv.backgroundColor = .clear
+                    if sv === stopView { break }
+                    currentView = sv
+                }
             }
         }
 
@@ -153,38 +196,21 @@ public struct TransparentHostingView: View {
 // MARK: - Flow Adaptive Background Modifier
 
 public struct FlowAdaptiveBackgroundModifier: ViewModifier {
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.duoPosture) private var duoPosture
-    
     public func body(content: Content) -> some View {
         content
+            .scrollContentBackground(.hidden)
             .background {
-                if duoPosture == .unfoldedDualScreen {
-                    TransparentHostingView()
-                        .ignoresSafeArea()
-                } else {
-                    ZStack {
-                        if colorScheme == .dark {
-                            Color.black.ignoresSafeArea()
-                        } else {
-                            Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
-                        }
-                        
-                        Rectangle()
-                            .fill(.ultraThinMaterial)
-                            .opacity(colorScheme == .dark ? 0.35 : 0.85)
-                            .ignoresSafeArea()
-                    }
-                }
+                TransparentHostingView()
+                    .ignoresSafeArea()
             }
-            .toolbarBackground(duoPosture == .unfoldedDualScreen ? .hidden : .visible, for: .navigationBar)
+            .toolbarBackground(.hidden, for: .navigationBar)
     }
 }
 
 // MARK: - View Extensions
 
 public extension View {
-    /// Fond adaptatif pour les vues principales avec prise en charge du mode double écran
+    /// Fond adaptatif transparent permettant au matériau Liquid Glass natif de la sheet iOS 26 de s'exprimer
     func flowAdaptiveBackground() -> some View {
         modifier(FlowAdaptiveBackgroundModifier())
     }

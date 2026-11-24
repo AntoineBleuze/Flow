@@ -24,7 +24,14 @@ DerivedData
 node_modules/
 npm-debug.log
 FlowServer/node_modules/
+FlowServer/cache/
 FlowServer/.env
+
+# Rust / FlowServerRust
+FlowServerRust/target/
+FlowServerRust/cache/
+FlowServerRust/.env
+FlowServerRust/flow-server
 
 # Documentation & large binaries
 *.pdf

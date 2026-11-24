@@ -51,6 +51,11 @@ struct ItineraryMapViewRepresentable: UIViewRepresentable {
     }
     
     private func updateMapView(_ mapView: MKMapView, context: Context) {
+        if context.coordinator.lastDrawnJourneyId == journey.id.uuidString {
+            return
+        }
+        context.coordinator.lastDrawnJourneyId = journey.id.uuidString
+
         // Clear existing overlays and annotations
         mapView.removeOverlays(mapView.overlays)
         mapView.removeAnnotations(mapView.annotations)
@@ -58,6 +63,9 @@ struct ItineraryMapViewRepresentable: UIViewRepresentable {
         guard let sections = journey.sections else { return }
         
         var allCoordinates: [CLLocationCoordinate2D] = []
+        var transitCasings: [ColoredPolyline] = []
+        var transitFills: [ColoredPolyline] = []
+        var walkingOverlays: [ColoredPolyline] = []
         
         for section in sections {
             let isTransit = section.type == "public_transport"
@@ -77,12 +85,13 @@ struct ItineraryMapViewRepresentable: UIViewRepresentable {
                 }
             }
             
-            // Fallback: TransitTraceService si le trace est rectiligne/vide pour un transport en commun
-            if isTransit && routeCoordinates.count <= 2,
+            // Fallback: TransitTraceService si le trace est rectiligne/grossier/vide pour un transport en commun
+            let intermediates = section.stop_date_times?.compactMap { $0.stop_point.coordinate } ?? []
+            var usedTransitTrace = false
+            if isTransit && routeCoordinates.count <= max(2, intermediates.count + 2),
                let fromPlace = section.from, let fromCoord = fromPlace.coordinate,
                let toPlace = section.to, let toCoord = toPlace.coordinate {
                 let lineCode = section.display_informations?.code ?? section.display_informations?.label ?? ""
-                let intermediates = section.stop_date_times?.compactMap { $0.stop_point.coordinate } ?? []
                 if let precise = TransitTraceService.shared.getPreciseCoordinates(
                     forLine: lineCode,
                     commercialMode: section.display_informations?.commercial_mode,
@@ -92,6 +101,7 @@ struct ItineraryMapViewRepresentable: UIViewRepresentable {
                     intermediates: intermediates
                 ), precise.count > routeCoordinates.count {
                     routeCoordinates = precise
+                    usedTransitTrace = true
                     allCoordinates.append(contentsOf: precise)
                 } else if routeCoordinates.isEmpty {
                     routeCoordinates = [fromCoord, toCoord]
@@ -107,18 +117,40 @@ struct ItineraryMapViewRepresentable: UIViewRepresentable {
                 }
             }
             
-            // Create and add polyline
+            // Create and queue polylines (casings first, then fills)
             if !routeCoordinates.isEmpty {
-                let polyline = ColoredPolyline(coordinates: routeCoordinates, count: routeCoordinates.count)
                 if isTransit {
+                    let finalCoordinates = usedTransitTrace
+                        ? routeCoordinates
+                        : MapDataService.smoothCoordinates(routeCoordinates, passes: 1, maxCornerOffsetMeters: 18.0)
                     let hexColor = section.display_informations?.color ?? "007AFF"
-                    polyline.color = UIColor(hex: hexColor) ?? .blue
-                    polyline.isDashed = false
+                    let lineColor = UIColor(hex: hexColor) ?? .blue
+                    let cleanLineName = (section.display_informations?.code ?? section.display_informations?.label ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    let isDashedLine = ["15", "16", "17", "18"].contains(cleanLineName)
+
+                    if !isDashedLine {
+                        let casingPolyline = ColoredPolyline(coordinates: finalCoordinates, count: finalCoordinates.count)
+                        casingPolyline.color = lineColor
+                        casingPolyline.lineName = cleanLineName
+                        casingPolyline.isDashed = false
+                        casingPolyline.isCasing = true
+                        transitCasings.append(casingPolyline)
+                    }
+
+                    let polyline = ColoredPolyline(coordinates: finalCoordinates, count: finalCoordinates.count)
+                    polyline.color = lineColor
+                    polyline.lineName = cleanLineName
+                    polyline.isDashed = isDashedLine
+                    polyline.isCasing = false
+                    transitFills.append(polyline)
                 } else {
+                    let smoothedWalk = MapDataService.smoothCoordinates(routeCoordinates, passes: 1, maxCornerOffsetMeters: 6.0)
+                    let polyline = ColoredPolyline(coordinates: smoothedWalk, count: smoothedWalk.count)
                     polyline.color = .systemGray
                     polyline.isDashed = true
+                    polyline.isCasing = false
+                    walkingOverlays.append(polyline)
                 }
-                mapView.addOverlay(polyline)
             }
             
             // Add Entry/Exit markers for transit sections
@@ -199,6 +231,17 @@ struct ItineraryMapViewRepresentable: UIViewRepresentable {
             allCoordinates.append(toCoord)
         }
         
+        // Add overlays in proper layer order: casings below, then transit fills, then walking dashes
+        if !transitCasings.isEmpty {
+            mapView.addOverlays(transitCasings, level: .aboveRoads)
+        }
+        if !transitFills.isEmpty {
+            mapView.addOverlays(transitFills, level: .aboveRoads)
+        }
+        if !walkingOverlays.isEmpty {
+            mapView.addOverlays(walkingOverlays, level: .aboveRoads)
+        }
+
         // Fit map to show all coordinates (only once per journey)
         if !allCoordinates.isEmpty {
             if context.coordinator.lastZoomedJourneyId != journey.id.uuidString {
@@ -214,39 +257,28 @@ struct ItineraryMapViewRepresentable: UIViewRepresentable {
     }
     
     class Coordinator: NSObject, MKMapViewDelegate {
+        var lastDrawnJourneyId: String?
         var lastZoomedJourneyId: String?
         
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             if let coloredPolyline = overlay as? ColoredPolyline {
-                let style = MapPolylineStyle.current
-                let renderer: MKPolylineRenderer
-                
-                switch style {
-                case .classic:
-                    renderer = BorderedPolylineRenderer(polyline: coloredPolyline)
-                case .neon:
-                    renderer = NeonPolylineRenderer(polyline: coloredPolyline)
-                case .glass:
-                    renderer = GlassPolylineRenderer(polyline: coloredPolyline)
-                }
-                
-                renderer.strokeColor = coloredPolyline.color
-                
-                if style == .neon {
-                    renderer.lineWidth = coloredPolyline.isDashed ? 3.0 : 4.0
-                } else if style == .glass {
-                    renderer.lineWidth = coloredPolyline.isDashed ? 4.5 : 6.0
-                } else {
-                    renderer.lineWidth = coloredPolyline.isDashed ? 3.5 : 5.0
-                }
-                
+                let renderer = BorderedPolylineRenderer(polyline: coloredPolyline)
                 renderer.lineJoin = CGLineJoin.round
                 renderer.lineCap = CGLineCap.round
-                
-                if coloredPolyline.isDashed {
-                    renderer.lineDashPattern = [4, 6] // [dashLength, gapLength]
+                renderer.alpha = 1.0
+
+                if coloredPolyline.isCasing {
+                    renderer.strokeColor = UIColor.black.withAlphaComponent(0.22)
+                    renderer.lineWidth = 4.8
+                } else if coloredPolyline.isDashed || ["15", "16", "17", "18"].contains(coloredPolyline.lineName) {
+                    renderer.strokeColor = coloredPolyline.color
+                    renderer.lineWidth = 2.8
+                    renderer.lineDashPattern = [8, 6] // [dashLength, gapLength]
+                } else {
+                    renderer.strokeColor = coloredPolyline.color
+                    renderer.lineWidth = 3.6
                 }
-                
+
                 return renderer
             }
             return MKOverlayRenderer(overlay: overlay)

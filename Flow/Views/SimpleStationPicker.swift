@@ -9,34 +9,30 @@ struct SimpleStationPicker: View {
     @State private var searchText = ""
     @State private var searchResults: [MapStation] = []
     @State private var currentSearch: MKLocalSearch? = nil
+    @State private var searchTask: Task<Void, Never>? = nil
 
     let currentLocation: CLLocationCoordinate2D?
     @Environment(\.modelContext) private var context
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        NavigationView {
-            VStack {
-                // Search Bar
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundColor(.secondary)
-                    TextField("Rechercher une station...", text: $searchText)
-                        .textFieldStyle(PlainTextFieldStyle())
-                        .onChange(of: searchText) { _, newValue in
-                            performSearch(query: newValue)
-                        }
-                    if !searchText.isEmpty {
-                        Button(action: { searchText = "" }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.secondary)
-                        }
-                    }
+        NavigationStack {
+            VStack(spacing: 8) {
+                AccountSheetHeader(
+                    title: "Sélectionner une station",
+                    fontSize: 20,
+                    buttonIcon: "xmark",
+                    accessibilityLabel: "Fermer"
+                ) {
+                    dismiss()
                 }
-                .padding(12)
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .padding(.horizontal)
-                .padding(.vertical, 8)
+
+                // Search Bar
+                LiquidGlassSearchBar(text: $searchText, placeholder: "Rechercher une station...")
+                    .padding(.horizontal)
+                    .onChange(of: searchText) { _, newValue in
+                        performSearch(query: newValue)
+                    }
 
                 // Results
                 List {
@@ -122,16 +118,13 @@ struct SimpleStationPicker: View {
                         .listRowBackground(Color.clear)
                     }
                 }
-                .listStyle(PlainListStyle())
+                .listStyle(.plain)
                 .scrollContentBackground(.hidden)
             }
-            .navigationBarTitle("Sélectionner une station", displayMode: .inline)
-            .navigationBarItems(
-                trailing: Button("Annuler") {
-                    dismiss()
-                })
+            .liquidGlassBackground()
+            .toolbar(.hidden, for: .navigationBar)
         }
-        .presentationBackground(.ultraThinMaterial)
+        .liquidGlassSheet()
     }
 
     private func formattedDistance(for station: MapStation) -> String? {
@@ -149,6 +142,7 @@ struct SimpleStationPicker: View {
 
     func performSearch(query: String) {
         currentSearch?.cancel()
+        searchTask?.cancel()
         
         guard !query.isEmpty else {
             searchResults = []
@@ -158,87 +152,77 @@ struct SimpleStationPicker: View {
         let normQuery = query.replacingOccurrences(of: "'", with: " ")
             .replacingOccurrences(of: "’", with: " ")
         let tokens = normQuery.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-
-        let tokenVariants = tokens.first != nil ? StationSuggestionEngine.accentVariants(for: tokens[0]) : [query]
-        var busResults: [StopPointModel] = []
-        for variant in tokenVariants.prefix(6) {
-            var descriptor = FetchDescriptor<StopPointModel>(
-                predicate: #Predicate<StopPointModel> { stop in
-                    stop.name.contains(variant)
-                },
-                sortBy: [SortDescriptor(\.name, order: .forward)]
-            )
-            descriptor.fetchLimit = 80
-            if let results = try? context.fetch(descriptor) {
-                for r in results {
-                    if !busResults.contains(where: { $0.id == r.id }) {
-                        busResults.append(r)
-                    }
-                }
-            }
-        }
-
-        var stations: [MapStation] = []
-        let filteredResults = busResults.filter { stop in
-            StationSuggestionEngine.matchesQuery(text: stop.name, tokens: tokens)
-                || StationSuggestionEngine.matchesQuery(text: stop.city, tokens: tokens)
-        }
-        let grouped = Dictionary(grouping: filteredResults) { "\($0.name)_\($0.city)" }
-
-        stations = grouped.compactMap { (_, stops) in
-            guard let first = stops.first else { return nil }
-            let name = first.name
-
-            let totalLat = stops.reduce(0.0) { $0 + $1.latitude }
-            let totalLon = stops.reduce(0.0) { $0 + $1.longitude }
-            let count = Double(stops.count)
-            let center = CLLocationCoordinate2D(
-                latitude: totalLat / count, longitude: totalLon / count)
-
-            let types = stops.map { $0.type }
-            let mainTypeStr =
-                types.first(where: { $0 == "RER" }) ?? types.first(where: { $0 == "Transilien" }
-                ) ?? types.first(where: { $0 == "Metro" }) ?? types.first ?? "Bus"
-
-            let type = mapType(mainTypeStr)
-
-            return MapStation(
-                id: first.stopAreaId.isEmpty ? first.id : first.stopAreaId,
-                name: name,
-                coordinate: center,
-                platforms: [],
-                isHub: false,
-                mainType: type,
-                lines: []
-            )
+        guard !tokens.isEmpty else {
+            searchResults = []
+            return
         }
 
         let userLoc = currentLocation ?? LocationManager.shared.userLocation
-        searchResults = StationSuggestionEngine.rank(
-            stations: stations,
+        let favoriteIds = FavoritesService.shared.favoriteStationIds
+        let recentIds = Set(SearchHistoryManager.shared.recentStations.map { $0.id })
+
+        // 1. Filtrage immédiat en mémoire sur les stations principales
+        let matchingMainStations = MapDataService.shared.allStations.filter { station in
+            StationSuggestionEngine.matchesQuery(text: station.name, tokens: tokens)
+                || (station.city != nil && StationSuggestionEngine.matchesQuery(text: station.city!, tokens: tokens))
+        }
+        let immediateRanked = StationSuggestionEngine.rank(
+            stations: matchingMainStations,
             query: query,
             userLocation: userLoc,
-            favoriteIds: FavoritesService.shared.favoriteStationIds,
-            recentIds: Set(SearchHistoryManager.shared.recentStations.map { $0.id })
+            favoriteIds: favoriteIds,
+            recentIds: recentIds
         )
+        searchResults = immediateRanked
 
-        let searchRequest = MKLocalSearch.Request()
-        searchRequest.naturalLanguageQuery = query
+        let tokenVariants = StationSuggestionEngine.accentVariants(for: tokens[0])
         let parisCenter = CLLocationCoordinate2D(latitude: 48.8566, longitude: 2.3522)
-        let searchCenter = currentLocation ?? LocationManager.shared.userLocation ?? parisCenter
-        searchRequest.region = MKCoordinateRegion(
-            center: searchCenter,
-            latitudinalMeters: 30000,
-            longitudinalMeters: 30000
-        )
-        
-        let search = MKLocalSearch(request: searchRequest)
-        currentSearch = search
-        
-        search.start { response, error in
-            guard let response = response, error == nil else {
-                return
+        let searchCenter = userLoc ?? parisCenter
+        let container = SwiftDataStack.shared.container
+
+        searchTask = Task {
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+
+            let importer = TransportDataImporter(modelContainer: container)
+            let swiftDataStops = (try? await importer.searchBusStops(variants: tokenVariants, busOnly: false, fetchLimit: 80)) ?? []
+            guard !Task.isCancelled else { return }
+
+            let swiftDataStations = StationSuggestionEngine.buildStations(
+                from: swiftDataStops,
+                tokens: tokens,
+                includePlatformsAndLines: false
+            )
+            let existingKeys = Set(matchingMainStations.map { "\($0.id)_\(StationSuggestionEngine.normalize($0.name))" })
+            let existingNames = Set(matchingMainStations.map { StationSuggestionEngine.normalize($0.name) })
+            let deduplicatedSwiftData = swiftDataStations.filter { station in
+                !existingKeys.contains("\(station.id)_\(StationSuggestionEngine.normalize(station.name))")
+                    && !existingNames.contains(StationSuggestionEngine.normalize(station.name))
             }
+
+            let localRanked = StationSuggestionEngine.rank(
+                stations: matchingMainStations + deduplicatedSwiftData,
+                query: query,
+                userLocation: userLoc,
+                favoriteIds: favoriteIds,
+                recentIds: recentIds
+            )
+            self.searchResults = localRanked
+
+            try? await Task.sleep(for: .milliseconds(130))
+            guard !Task.isCancelled else { return }
+
+            let searchRequest = MKLocalSearch.Request()
+            searchRequest.naturalLanguageQuery = query
+            searchRequest.region = MKCoordinateRegion(
+                center: searchCenter,
+                latitudinalMeters: 30000,
+                longitudinalMeters: 30000
+            )
+            
+            let search = MKLocalSearch(request: searchRequest)
+            self.currentSearch = search
+            guard let response = try? await search.start(), !Task.isCancelled else { return }
             
             let addressStations: [MapStation] = response.mapItems.map { item in
                 let coordinate = item.location.coordinate
@@ -257,22 +241,20 @@ struct SimpleStationPicker: View {
                 )
             }
             
-            DispatchQueue.main.async {
-                var merged = stations
-                for addr in addressStations {
-                    if !merged.contains(where: { $0.id == addr.id }) {
-                        merged.append(addr)
-                    }
+            var merged = localRanked
+            for addr in addressStations {
+                if !merged.contains(where: { $0.id == addr.id }) {
+                    merged.append(addr)
                 }
-                let userLoc = self.currentLocation ?? LocationManager.shared.userLocation
-                self.searchResults = StationSuggestionEngine.rank(
-                    stations: merged,
-                    query: query,
-                    userLocation: userLoc,
-                    favoriteIds: FavoritesService.shared.favoriteStationIds,
-                    recentIds: Set(SearchHistoryManager.shared.recentStations.map { $0.id })
-                )
             }
+            let updatedUserLoc = self.currentLocation ?? LocationManager.shared.userLocation
+            self.searchResults = StationSuggestionEngine.rank(
+                stations: merged,
+                query: query,
+                userLocation: updatedUserLoc,
+                favoriteIds: FavoritesService.shared.favoriteStationIds,
+                recentIds: Set(SearchHistoryManager.shared.recentStations.map { $0.id })
+            )
         }
     }
 
@@ -284,4 +266,36 @@ struct SimpleStationPicker: View {
         if folded.contains("train") || folded.contains("transilien") || folded.contains("rail") { return .transilien }
         return .bus
     }
+
+    func iconName(for type: TransportType) -> String {
+        switch type {
+        case .metro: return "tram.fill"
+        case .rer: return "tram.circle.fill"
+        case .transilien: return "train.side.front.car"
+        case .tram: return "tram"
+        case .bus: return "bus"
+        case .train: return "train.side.front.car"
+        case .cable: return "tram.fill.tunnel"  // Icone temporaire ou "cablecar" si dispo en SF Symbols
+        }
+    }
+
+    func color(for type: TransportType) -> Color {
+        switch type {
+        case .metro: return .blue
+        case .rer: return .red
+        case .transilien: return .green
+        case .tram: return .purple
+        case .bus: return .orange
+        case .train: return .green
+        case .cable: return .gray
+        }
+    }
 }
+
+#Preview {
+    SimpleStationPicker(
+        selectedStation: .constant(PreviewMockData.mockStation),
+        currentLocation: CLLocationCoordinate2D(latitude: 48.8239, longitude: 2.2743)
+    )
+}
+

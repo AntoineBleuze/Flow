@@ -181,6 +181,15 @@ class FavoritesService: ObservableObject {
     private func saveFavoriteLines() {
         UserDefaults.standard.set(Array(favoriteLinesList), forKey: favoriteLinesKey)
     }
+
+    /// Supprime l'ensemble des stations et lignes favorites persistées.
+    func clearAllFavorites() {
+        favoriteLineKeys.removeAll()
+        favoriteLinesList.removeAll()
+        UserDefaults.standard.removeObject(forKey: favoritesKey)
+        UserDefaults.standard.removeObject(forKey: favoriteLinesKey)
+        UserDefaults.standard.removeObject(forKey: "favorite_stations")
+    }
 }
 
 struct FavoriteLineEntry: Identifiable, Hashable {

@@ -78,6 +78,9 @@ struct LocalLineData: Codable {
     
     /// Flat list of all stations for simple uses
     var allStations: [LocalStation] {
+        if hasJunctionBranches {
+            return schematicLayout.nodes.map(\.station)
+        }
         let sections = schematicSections
         var result = sections.leadIn
         for branch in sections.topBranches {
@@ -103,6 +106,254 @@ struct LocalLineData: Codable {
     struct SchematicBranch {
         let name: String
         let stations: [LocalStation]
+    }
+    
+    struct SchematicNode: Identifiable {
+        let id: String
+        let station: LocalStation
+        let col: Int
+        let row: Int
+        let isTerminus: Bool
+        let isJunction: Bool
+    }
+    
+    struct SchematicEdge {
+        let fromIndex: Int
+        let toIndex: Int
+        let isDashed: Bool
+    }
+    
+    struct SchematicLayout {
+        let nodes: [SchematicNode]
+        let edges: [SchematicEdge]
+        let rowCount: Int
+        let colCount: Int
+    }
+    
+    var hasJunctionBranches: Bool {
+        (branches ?? []).contains { $0.junction != nil }
+    }
+    
+    var schematicLayout: SchematicLayout {
+        struct RawNode {
+            let station: LocalStation
+            var col: Int
+            var row: Int
+        }
+        
+        var rawNodes: [RawNode] = []
+        var edges: [SchematicEdge] = []
+        
+        if hasJunctionBranches {
+            let mainStations = tronc_central ?? tronc_commun ?? stations ?? []
+            var stationPos: [String: (index: Int, col: Int, row: Int)] = [:]
+            
+            for (idx, station) in mainStations.enumerated() {
+                let nodeIdx = rawNodes.count
+                rawNodes.append(RawNode(station: station, col: idx, row: 0))
+                stationPos[station.nom] = (nodeIdx, idx, 0)
+                if idx > 0 {
+                    let prevStation = mainStations[idx - 1]
+                    edges.append(SchematicEdge(
+                        fromIndex: nodeIdx - 1,
+                        toIndex: nodeIdx,
+                        isDashed: prevStation.isUnderConstruction || station.isUnderConstruction
+                    ))
+                }
+            }
+            
+            let allBranches = branches ?? []
+            var placed = Array(repeating: false, count: allBranches.count)
+            
+            for _ in 0..<allBranches.count {
+                var madeProgress = false
+                for (bIdx, branch) in allBranches.enumerated() where !placed[bIdx] {
+                    guard let junctionName = branch.junction,
+                          let jPos = stationPos[junctionName] else {
+                        continue
+                    }
+                    
+                    placed[bIdx] = true
+                    madeProgress = true
+                    
+                    let count = branch.stations.count
+                    guard count > 0 else { continue }
+                    
+                    let targetRow = branch.row ?? (jPos.row + 1)
+                    let isMerge = (branch.direction ?? "fork") == "merge"
+                    let startCol = isMerge ? (jPos.col - count) : (jPos.col + 1)
+                    let firstNodeIdx = rawNodes.count
+                    
+                    for (sIdx, station) in branch.stations.enumerated() {
+                        let col = startCol + sIdx
+                        let nodeIdx = rawNodes.count
+                        rawNodes.append(RawNode(station: station, col: col, row: targetRow))
+                        if stationPos[station.nom] == nil {
+                            stationPos[station.nom] = (nodeIdx, col, targetRow)
+                        }
+                        if sIdx > 0 {
+                            let prevStation = branch.stations[sIdx - 1]
+                            edges.append(SchematicEdge(
+                                fromIndex: nodeIdx - 1,
+                                toIndex: nodeIdx,
+                                isDashed: prevStation.isUnderConstruction || station.isUnderConstruction
+                            ))
+                        }
+                    }
+                    
+                    let junctionStation = rawNodes[jPos.index].station
+                    if isMerge {
+                        let lastBranchIdx = firstNodeIdx + count - 1
+                        let lastStation = branch.stations[count - 1]
+                        edges.append(SchematicEdge(
+                            fromIndex: lastBranchIdx,
+                            toIndex: jPos.index,
+                            isDashed: lastStation.isUnderConstruction || junctionStation.isUnderConstruction
+                        ))
+                    } else {
+                        let firstStation = branch.stations[0]
+                        edges.append(SchematicEdge(
+                            fromIndex: jPos.index,
+                            toIndex: firstNodeIdx,
+                            isDashed: junctionStation.isUnderConstruction || firstStation.isUnderConstruction
+                        ))
+                    }
+                }
+                if !madeProgress { break }
+            }
+            
+            if let minCol = rawNodes.map(\.col).min(), minCol < 0 {
+                let shift = -minCol
+                for idx in rawNodes.indices {
+                    rawNodes[idx].col += shift
+                }
+            }
+        } else {
+            let sections = schematicSections
+            let leftOffset = sections.topBranches.map(\.stations.count).max() ?? 0
+            
+            var central: [LocalStation] = []
+            central.append(contentsOf: sections.leadIn)
+            central.append(contentsOf: sections.trunk)
+            if sections.branches.isEmpty {
+                central.append(contentsOf: sections.leadOut)
+            }
+            
+            var centralFirstIdx: Int?
+            var centralLastIdx: Int?
+            
+            for (idx, station) in central.enumerated() {
+                let nodeIdx = rawNodes.count
+                rawNodes.append(RawNode(station: station, col: leftOffset + idx, row: 0))
+                if idx == 0 { centralFirstIdx = nodeIdx }
+                centralLastIdx = nodeIdx
+                if idx > 0 {
+                    let prevStation = central[idx - 1]
+                    edges.append(SchematicEdge(
+                        fromIndex: nodeIdx - 1,
+                        toIndex: nodeIdx,
+                        isDashed: prevStation.isUnderConstruction || station.isUnderConstruction
+                    ))
+                }
+            }
+            
+            for (bIdx, branch) in sections.topBranches.enumerated() {
+                let count = branch.stations.count
+                guard count > 0 else { continue }
+                let startCol = leftOffset - count
+                let firstNodeIdx = rawNodes.count
+                
+                for (sIdx, station) in branch.stations.enumerated() {
+                    let nodeIdx = rawNodes.count
+                    rawNodes.append(RawNode(station: station, col: startCol + sIdx, row: bIdx))
+                    if sIdx > 0 {
+                        let prevStation = branch.stations[sIdx - 1]
+                        edges.append(SchematicEdge(
+                            fromIndex: nodeIdx - 1,
+                            toIndex: nodeIdx,
+                            isDashed: prevStation.isUnderConstruction || station.isUnderConstruction
+                        ))
+                    }
+                }
+                
+                if let targetIdx = centralFirstIdx {
+                    let lastIdx = firstNodeIdx + count - 1
+                    let lastStation = branch.stations[count - 1]
+                    let targetStation = rawNodes[targetIdx].station
+                    edges.append(SchematicEdge(
+                        fromIndex: lastIdx,
+                        toIndex: targetIdx,
+                        isDashed: lastStation.isUnderConstruction || targetStation.isUnderConstruction
+                    ))
+                }
+            }
+            
+            let centralEndCol = central.isEmpty ? (leftOffset - 1) : (leftOffset + central.count - 1)
+            for (bIdx, branch) in sections.branches.enumerated() {
+                let count = branch.stations.count
+                guard count > 0 else { continue }
+                let firstNodeIdx = rawNodes.count
+                
+                for (sIdx, station) in branch.stations.enumerated() {
+                    let nodeIdx = rawNodes.count
+                    rawNodes.append(RawNode(station: station, col: centralEndCol + 1 + sIdx, row: bIdx))
+                    if sIdx > 0 {
+                        let prevStation = branch.stations[sIdx - 1]
+                        edges.append(SchematicEdge(
+                            fromIndex: nodeIdx - 1,
+                            toIndex: nodeIdx,
+                            isDashed: prevStation.isUnderConstruction || station.isUnderConstruction
+                        ))
+                    }
+                }
+                
+                if let sourceIdx = centralLastIdx {
+                    let sourceStation = rawNodes[sourceIdx].station
+                    let firstStation = branch.stations[0]
+                    edges.append(SchematicEdge(
+                        fromIndex: sourceIdx,
+                        toIndex: firstNodeIdx,
+                        isDashed: sourceStation.isUnderConstruction || firstStation.isUnderConstruction
+                    ))
+                }
+            }
+        }
+        
+        var degrees = Array(repeating: 0, count: rawNodes.count)
+        var hasLeftNeighbor = Array(repeating: false, count: rawNodes.count)
+        var hasRightNeighbor = Array(repeating: false, count: rawNodes.count)
+        
+        for edge in edges {
+            degrees[edge.fromIndex] += 1
+            degrees[edge.toIndex] += 1
+            let colA = rawNodes[edge.fromIndex].col
+            let colB = rawNodes[edge.toIndex].col
+            if colA < colB {
+                hasRightNeighbor[edge.fromIndex] = true
+                hasLeftNeighbor[edge.toIndex] = true
+            } else if colB < colA {
+                hasLeftNeighbor[edge.fromIndex] = true
+                hasRightNeighbor[edge.toIndex] = true
+            }
+        }
+        
+        let nodes = rawNodes.enumerated().map { idx, raw in
+            let degree = degrees[idx]
+            let isTerminus = degree <= 1 || !hasLeftNeighbor[idx] || !hasRightNeighbor[idx]
+            let isJunction = degree >= 3
+            return SchematicNode(
+                id: "\(idx)_\(raw.station.nom)",
+                station: raw.station,
+                col: raw.col,
+                row: raw.row,
+                isTerminus: isTerminus,
+                isJunction: isJunction
+            )
+        }
+        
+        let rowCount = (nodes.map(\.row).max() ?? -1) + 1
+        let colCount = (nodes.map(\.col).max() ?? -1) + 1
+        return SchematicLayout(nodes: nodes, edges: edges, rowCount: rowCount, colCount: colCount)
     }
     
     var schematicSections: SchematicSections {
@@ -172,12 +423,35 @@ struct LocalLineData: Codable {
 struct LocalBranch: Codable {
     let id: String
     let stations: [LocalStation]
+    let junction: String?
+    let direction: String?
+    let row: Int?
 }
 
 struct LocalStation: Codable, Identifiable {
     var id: String { nom }
     let nom: String
     let correspondances: [String]
+    var isUnderConstruction: Bool = false
+
+    enum CodingKeys: String, CodingKey {
+        case nom
+        case correspondances
+        case isUnderConstruction
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        nom = try container.decode(String.self, forKey: .nom)
+        correspondances = try container.decodeIfPresent([String].self, forKey: .correspondances) ?? []
+        isUnderConstruction = try container.decodeIfPresent(Bool.self, forKey: .isUnderConstruction) ?? false
+    }
+
+    init(nom: String, correspondances: [String], isUnderConstruction: Bool = false) {
+        self.nom = nom
+        self.correspondances = correspondances
+        self.isUnderConstruction = isUnderConstruction
+    }
 }
 
 struct LocalNetworkData: Codable {

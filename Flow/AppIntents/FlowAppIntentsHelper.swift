@@ -37,14 +37,8 @@ enum FlowAppIntentsHelper {
             return MapDataService.shared.allStations
         }
 
-        // Tenter de charger les données
+        // Tenter de charger les données sans jamais injecter les données factices de preview
         MapDataService.shared.loadData()
-        if !MapDataService.shared.allStations.isEmpty {
-            return MapDataService.shared.allStations
-        }
-
-        // Fallback mock en cas de cold start sous Siri sans cache persistant
-        MapDataService.shared.loadPreviewMockData()
         return MapDataService.shared.allStations
     }
 

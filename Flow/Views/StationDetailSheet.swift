@@ -8,13 +8,20 @@ struct StationDetailSheet: View {
     let station: MapStation
     var onDismiss: (() -> Void)? = nil  // For inline iPad panel
     var selectedDetent: Binding<PresentationDetent>? = nil
+    var isPreview: Bool = false
     @State private var mergedStation: MapStation? = nil
+    
+    private var isRunningForPreviews: Bool {
+        isPreview || ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" || ProcessInfo.processInfo.environment["ENABLE_PREVIEWS"] == "1"
+    }
     
     private var currentStation: MapStation {
         mergedStation ?? station
     }
     
     @State private var departures: [Departure] = []
+    @State private var cachedLineGroups: [LineGroup] = []
+    @State private var cachedAvailableModes: [String] = []
     @ObservedObject var favoritesService = FavoritesService.shared
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -23,12 +30,16 @@ struct StationDetailSheet: View {
     @State private var elevatorCancellable: AnyCancellable? = nil
     @State private var selectedMode: String = "Tout"
     @State private var showItinerary = false
+    @State private var itineraryAsDeparture = false
     @ObservedObject var locationManager = LocationManager.shared
     @ObservedObject var liveActivityManager = LiveActivityManager.shared
+    @ObservedObject var routeManager = RouteNavigationManager.shared
+    @ObservedObject private var preferences = UserPreferencesManager.shared
 
     // Buffer pour accumuler les pushes WebSocket avant affichage
     @State private var departureBuffer: [String: Departure] = [:]
     @State private var bufferTask: Task<Void, Never>?
+    @State private var wsTimeoutTask: Task<Void, Never>?
 
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
@@ -38,13 +49,7 @@ struct StationDetailSheet: View {
         colorScheme == .dark ? Color(hex: "30D158") : Color(hex: "008543")
     }
 
-    private var cardBackground: Color {
-        colorScheme == .dark ? Color.white.opacity(0.08) : Color(uiColor: .secondarySystemBackground)
-    }
 
-    private var cardBorder: Color {
-        colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)
-    }
 
     // Structures pour le regroupement
     struct LineGroup: Identifiable {
@@ -66,14 +71,10 @@ struct StationDetailSheet: View {
 
     @ViewBuilder
     private var sheetContent: some View {
-        let gpeLines = currentStation.lines.filter { ["15", "16", "17", "18"].contains($0.name) }
+        let gpeLines = currentStation.lines.filter { isFutureExtensionLine($0, stationName: currentStation.name) }
         let hasActiveLines = currentStation.lines.contains { !["15", "16", "17", "18"].contains($0.name) }
 
-        if isLoading && hasActiveLines {
-            ProgressView("Chargement des horaires...")
-                .tint(.primary)
-                .foregroundColor(.primary)
-        } else if let error = errorMessage, hasActiveLines {
+        if let error = errorMessage, hasActiveLines, !isLoading {
             VStack {
                 Text("Erreur: \(error)")
                     .foregroundColor(.red)
@@ -85,7 +86,7 @@ struct StationDetailSheet: View {
                         .foregroundColor(.gray)
                 }
             }
-        } else if departures.isEmpty && !hasActiveLines && gpeLines.isEmpty {
+        } else if departures.isEmpty && !hasActiveLines && gpeLines.isEmpty && !isLoading {
             Text("Aucun départ trouvé.")
                 .foregroundColor(.secondary)
         } else {
@@ -100,7 +101,7 @@ struct StationDetailSheet: View {
                 sheetContent
             }
             .toolbar(.hidden, for: .navigationBar)
-            .flowAdaptiveBackground()
+            .liquidGlassBackground()
             .onAppear {
                 setupStation()
             }
@@ -110,13 +111,41 @@ struct StationDetailSheet: View {
                 }
             }
             .onChange(of: station.id) { _, _ in
+                selectedMode = "Tout"
                 setupStation()
+            }
+            .onChange(of: station.prioritizedLine) { _, newPrio in
+                selectedMode = "Tout"
+                if let currentMerged = mergedStation {
+                    var updatedLines = currentMerged.lines
+                    if let prio = newPrio {
+                        updatedLines.sort { a, b in
+                            if a.id == prio.id { return true }
+                            if b.id == prio.id { return false }
+                            return false
+                        }
+                    }
+                    mergedStation = MapStation(
+                        id: currentMerged.id,
+                        name: currentMerged.name,
+                        coordinate: station.coordinate,
+                        platforms: currentMerged.platforms,
+                        isHub: currentMerged.isHub,
+                        mainType: currentMerged.mainType,
+                        lines: updatedLines,
+                        city: currentMerged.city,
+                        prioritizedLine: newPrio
+                    )
+                } else {
+                    mergedStation = station
+                }
+                recomputeDepartureGroups()
             }
             .onReceive(NotificationCenter.default.publisher(for: .flowServerStationUpdate)) { notification in
                 if let newDepartures = notification.userInfo?["departures"] as? [Departure] {
                     guard !newDepartures.isEmpty else { return }
                     
-                    // Accumuler dans le buffer (dédoublonné par ID)
+                    // Accumuler dans le buffer (dédupliqué par ID)
                     for dep in newDepartures {
                         departureBuffer[dep.id] = dep
                     }
@@ -142,6 +171,8 @@ struct StationDetailSheet: View {
                         withAnimation(.easeInOut(duration: 0.35)) {
                             self.departures = batched
                             self.isLoading = false
+                            self.wsTimeoutTask?.cancel()
+                            self.recomputeDepartureGroups()
                         }
                         departureBuffer.removeAll()
                     }
@@ -149,13 +180,14 @@ struct StationDetailSheet: View {
             }
             .navigationDestination(isPresented: $showItinerary) {
                 ItineraryResultView(
-                    destination: currentStation,
-                    currentLocation: locationManager.userLocation
+                    destination: itineraryAsDeparture ? nil : currentStation,
+                    currentLocation: locationManager.userLocation,
+                    initialStartStation: itineraryAsDeparture ? currentStation : nil
                 )
             }
         }
-        .presentationBackground(.ultraThinMaterial)
-        .presentationCornerRadius(FlowTheme.sheetCornerRadius)
+        .liquidGlassSheet()
+        .liquidGlassBackground()
     }
 
     private var stationDistanceAndWalkTime: (distanceStr: String, walkTimeMinutes: Int) {
@@ -262,67 +294,56 @@ struct StationDetailSheet: View {
 
     var contentView: some View {
         VStack(spacing: 0) {
-            // Top Bar: Localisation + Close / Back Button
-            HStack(alignment: .center) {
-                if let onDismiss = onDismiss {
-                    Button(action: { onDismiss() }) {
-                        HStack(spacing: 5) {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 13, weight: .bold))
-                            Text("Retour")
-                                .font(.system(.subheadline, design: .rounded))
-                                .fontWeight(.semibold)
-                        }
-                        .foregroundColor(.blue)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Capsule())
-                        .overlay(
-                            Capsule()
-                                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    HStack(spacing: 4) {
-                        Image(systemName: "mappin.circle.fill")
-                            .foregroundColor(primaryGreen)
-                            .font(.footnote)
-                        Text((currentStation.city ?? "Île-de-France").uppercased())
-                            .font(.system(.caption, design: .rounded))
-                            .fontWeight(.bold)
-                            .foregroundColor(.gray)
-                    }
-                }
-                
-                Spacer()
-                
-                if onDismiss != nil {
-                    HStack(spacing: 4) {
-                        Image(systemName: "mappin.circle.fill")
-                            .foregroundColor(primaryGreen)
-                            .font(.footnote)
-                        Text((currentStation.city ?? "Île-de-France").uppercased())
-                            .font(.system(.caption, design: .rounded))
-                            .fontWeight(.bold)
-                            .foregroundColor(.gray)
-                    }
-                } else {
-                    Button(action: {
+            // Bannière de rappel si un itinéraire est actif en arrière-plan
+            if routeManager.isRouteActive {
+                StationActiveRouteBanner(routeManager: routeManager) {
+                    if let onDismiss = onDismiss {
+                        onDismiss()
+                    } else {
                         dismiss()
-                    }) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(.primary)
-                            .padding(12)
                     }
-                    .buttonStyle(.plain)
-                    .glassEffect(.regular.interactive(), in: Circle())
+                    routeManager.showRouteDetails()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 6)
+            }
+
+            // Top Bar: Localisation + Close / Back Button
+            let cityBadge = HStack(spacing: 4) {
+                Image(systemName: "mappin.circle.fill")
+                    .foregroundColor(primaryGreen)
+                    .font(.footnote)
+                Text((currentStation.city ?? "Île-de-France").uppercased())
+                    .font(.system(.caption, design: .rounded))
+                    .fontWeight(.bold)
+                    .foregroundColor(.gray)
+            }
+
+            let actionButton = LiquidGlassCircleButton(icon: "xmark", size: 36, iconSize: 14, iconWeight: .bold) {
+                preferences.triggerHapticImpact()
+                if let onDismiss = onDismiss {
+                    onDismiss()
+                } else {
+                    NavigationCoordinator.shared.selectedStation = nil
+                    dismiss()
                 }
             }
-            .padding(.horizontal)
-            .padding(.top, duoPosture == .unfoldedDualScreen ? 10 : 16)
+            .accessibilityLabel("Fermer")
+
+            HStack(alignment: .center) {
+                if preferences.handedness.isBackButtonTrailing {
+                    cityBadge
+                    Spacer()
+                    actionButton
+                } else {
+                    actionButton
+                    Spacer()
+                    cityBadge
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, duoPosture == .unfoldedDualScreen ? 14 : 20)
             .padding(.bottom, duoPosture == .unfoldedDualScreen ? 4 : 8)
 
             ScrollView {
@@ -333,7 +354,7 @@ struct StationDetailSheet: View {
                         // Large Title (Animated station name)
                         VStack(alignment: .leading, spacing: 6) {
                             let words = currentStation.name.components(separatedBy: " ")
-                            HStack(spacing: 6) {
+                            FlowLayout(spacing: 6) {
                                 ForEach(Array(words.enumerated()), id: \.offset) { index, word in
                                     AnimatedStationWordView(text: word, sequenceIndex: index, size: 30)
                                 }
@@ -351,30 +372,52 @@ struct StationDetailSheet: View {
                         }
                         .padding(.horizontal)
                         
-                        // Action button: Calculate route
-                        Button(action: { showItinerary = true }) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "arrow.triangle.turn.up.right.circle.fill")
-                                    .font(.title3)
-                                Text("Calculer l'itinéraire")
-                                    .font(.system(.subheadline, design: .rounded))
-                                    .fontWeight(.bold)
+                        // Action buttons: En partir / Y aller
+                        HStack(spacing: 10) {
+                            Button(action: {
+                                itineraryAsDeparture = true
+                                showItinerary = true
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "arrow.up.right.circle.fill")
+                                        .font(.system(size: 16, weight: .semibold))
+                                    Text("En partir")
+                                        .font(.system(.subheadline, design: .rounded))
+                                        .fontWeight(.bold)
+                                }
+                                .foregroundColor(.primary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 13)
                             }
-                            .foregroundColor(colorScheme == .dark ? .black : .white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(primaryGreen)
-                            .clipShape(Capsule())
-                            .shadow(color: primaryGreen.opacity(0.3), radius: 6, y: 3)
+                            .buttonStyle(.liquidGlassInteractive)
+
+                            Button(action: {
+                                itineraryAsDeparture = false
+                                showItinerary = true
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "arrow.triangle.turn.up.right.circle.fill")
+                                        .font(.system(size: 16, weight: .semibold))
+                                    Text("Y aller")
+                                        .font(.system(.subheadline, design: .rounded))
+                                        .fontWeight(.bold)
+                                }
+                                .foregroundColor(colorScheme == .dark ? .black : .white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 13)
+                                .background(primaryGreen)
+                                .clipShape(Capsule())
+                                .shadow(color: primaryGreen.opacity(0.3), radius: 6, y: 3)
+                            }
+                            .buttonStyle(.liquidGlassInteractive)
                         }
-                        .buttonStyle(.plain)
                         .padding(.horizontal)
                         .padding(.top, 12)
                     }
                     
                     // Mode Picker
-                    let groups = groupDepartures(departures)
-                    let availableModes = getAvailableModes(from: groups)
+                    let groups = cachedLineGroups.isEmpty && !departures.isEmpty ? groupDepartures(departures) : cachedLineGroups
+                    let availableModes = cachedAvailableModes.isEmpty && !groups.isEmpty ? getAvailableModes(from: groups) : cachedAvailableModes
                     if availableModes.count > 1 {
                         Picker("Mode", selection: $selectedMode) {
                             Text("Tout").tag("Tout")
@@ -387,51 +430,6 @@ struct StationDetailSheet: View {
                         .padding(.top, duoPosture == .unfoldedDualScreen ? 6 : 16)
                     }
                     
-                    if duoPosture != .unfoldedDualScreen {
-                        // Section Title: Details
-                        HStack {
-                            Text("Détails de la station")
-                                .font(.system(.title3, design: .rounded))
-                                .fontWeight(.bold)
-                                .foregroundColor(.primary)
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundColor(.secondary)
-                            Spacer()
-                        }
-                        .padding(.horizontal)
-                        .padding(.top, 24)
-                        
-                        // Statistics Card Grid - Encapsulated in Liquid Glass
-                        let detailsStats = stationDistanceAndWalkTime
-                        
-                        VStack(spacing: 14) {
-                            HStack(spacing: 12) {
-                                metricCell(title: "TEMPS DE MARCHE", value: "\(detailsStats.walkTimeMinutes) MIN", symbol: "figure.walk", color: FlowTheme.warningMetricColor(for: colorScheme))
-                                metricCell(title: "DISTANCE À PIED", value: detailsStats.distanceStr.uppercased(), symbol: "location.fill", color: Color(hex: "30B0C7")) // Cyan/Blue
-                            }
-                            
-                            Divider().opacity(0.4)
-                            
-                            HStack(spacing: 12) {
-                                metricCell(title: "LIGNES DE TRANSPORT", value: "\(currentStation.lines.count) LIGNES", symbol: "tram", color: Color(hex: "FF453A")) // Red
-                                if let status = elevatorStatus {
-                                    if status.hasEquipments {
-                                        equipmentCell(status: status)
-                                    } else {
-                                        Spacer()
-                                    }
-                                } else {
-                                    metricCell(title: "ÉQUIPEMENTS", value: "CHARGEMENT...", symbol: "arrow.up.and.down.square", color: .secondary)
-                                }
-                            }
-                        }
-                        .padding(16)
-                        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .padding(.horizontal)
-                        .padding(.top, 8)
-                    }
-                    
                     // Departures / Line Group rows
                     VStack(spacing: 20) {
                         let filteredGroups = groups.filter { group in
@@ -439,10 +437,36 @@ struct StationDetailSheet: View {
                             return group.mode?.lowercased().contains(selectedMode.lowercased()) ?? false
                                 || (group.mode == nil && selectedMode == "Autre")
                         }
-                        let gpeLines = currentStation.lines.filter { ["15", "16", "17", "18"].contains($0.name) }
+                        let gpeLines = currentStation.lines
+                            .filter { isFutureExtensionLine($0, stationName: currentStation.name) }
+                            .sorted { a, b in
+                                let pA = isPrioritizedStationLine(a)
+                                let pB = isPrioritizedStationLine(b)
+                                if pA != pB { return pA }
+                                return compareLineLabels(a.name, b.name)
+                            }
+                        let prioritizeGPEFirst = currentStation.prioritizedLine.map {
+                            isFutureExtensionLine($0, stationName: currentStation.name)
+                        } ?? false
+
+                        if prioritizeGPEFirst && !gpeLines.isEmpty {
+                            gpeLinesSection(gpeLines: gpeLines)
+                        }
                         
-                        if filteredGroups.isEmpty && gpeLines.isEmpty {
-                            let activeLines = currentStation.lines.filter { !["15", "16", "17", "18"].contains($0.name) }
+                        let hasActiveLines = currentStation.lines.contains { !isFutureExtensionLine($0, stationName: currentStation.name) }
+
+                        if isLoading && hasActiveLines && departures.isEmpty {
+                            let activeCount = currentStation.lines.filter { !isFutureExtensionLine($0, stationName: currentStation.name) }.count
+                            DeparturesSkeletonView(cardCount: min(3, max(1, activeCount)))
+                        } else if filteredGroups.isEmpty && gpeLines.isEmpty {
+                            let activeLines = currentStation.lines
+                                .filter { !isFutureExtensionLine($0, stationName: currentStation.name) }
+                                .sorted { a, b in
+                                    let pA = isPrioritizedStationLine(a)
+                                    let pB = isPrioritizedStationLine(b)
+                                    if pA != pB { return pA }
+                                    return StationLine.isOrderedBeforeForDisplay(a, b)
+                                }
                             let hour = Calendar.current.component(.hour, from: Date())
                             let isNight = hour >= 1 && hour < 5
                             
@@ -498,7 +522,7 @@ struct StationDetailSheet: View {
                                 .padding(.top, 20)
                             }
                         } else {
-                            let categories = ["Métro", "RER", "Tramway", "Train", "Bus", "Autre"]
+                            let categories = prioritizedCategories()
                             ForEach(categories, id: \.self) { category in
                                 let categoryGroups = filteredGroups.filter { displayModeName(for: $0.mode) == category }
                                 if !categoryGroups.isEmpty {
@@ -535,80 +559,8 @@ struct StationDetailSheet: View {
                         }
                         
                         // Grand Paris Express lines (Estimated delivery dates)
-                        if !gpeLines.isEmpty {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("GRAND PARIS EXPRESS (EN CONSTRUCTION)")
-                                    .font(.system(.caption, design: .rounded))
-                                    .fontWeight(.bold)
-                                    .foregroundColor(.secondary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 20)
-                                    .padding(.top, 14)
-                                
-                                ForEach(gpeLines) { gpeLine in
-                                    VStack(alignment: .leading, spacing: 10) {
-                                        HStack(spacing: 10) {
-                                            if UIImage(named: gpeLine.assetName) != nil {
-                                                Image(gpeLine.assetName)
-                                                    .resizable()
-                                                    .scaledToFit()
-                                                    .frame(width: 36, height: 36)
-                                            } else {
-                                                Circle()
-                                                    .fill(resolveLineColor(gpeLine.name, type: .metro))
-                                                    .frame(width: 30, height: 30)
-                                                    .overlay(
-                                                        Text(gpeLine.name)
-                                                            .font(.subheadline)
-                                                            .bold()
-                                                            .foregroundColor(.white)
-                                                    )
-                                            }
-                                            
-                                            VStack(alignment: .leading, spacing: 2) {
-                                                Text("Métro Ligne \(gpeLine.name)")
-                                                    .font(.subheadline)
-                                                    .fontWeight(.semibold)
-                                                    .foregroundColor(.primary)
-                                                Text("Société des Grands Projets")
-                                                    .font(.caption)
-                                                    .foregroundColor(.secondary)
-                                            }
-                                            Spacer()
-                                        }
-                                        
-                                        // Delivery Date Box
-                                        HStack {
-                                            VStack(alignment: .leading, spacing: 4) {
-                                                Text("Date de livraison estimée")
-                                                    .font(.caption)
-                                                    .foregroundColor(.secondary)
-                                                
-                                                Text(getGPEDeliveryDate(lineName: gpeLine.name, stationName: currentStation.name))
-                                                    .font(.subheadline)
-                                                    .bold()
-                                                    .foregroundColor(.blue)
-                                            }
-                                            Spacer()
-                                            Image(systemName: "calendar")
-                                                .font(.title3)
-                                                .foregroundColor(.blue)
-                                        }
-                                        .padding(.horizontal, 14)
-                                        .padding(.vertical, 12)
-                                        .background(cardBackground)
-                                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .stroke(cardBorder, lineWidth: 1)
-                                        )
-                                    }
-                                    .padding(14)
-                                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                                    .padding(.horizontal)
-                                    .padding(.vertical, 4)
-                                }
-                            }
+                        if !prioritizeGPEFirst && !gpeLines.isEmpty {
+                            gpeLinesSection(gpeLines: gpeLines)
                         }
                     }
                     .padding(.top, 16)
@@ -630,20 +582,41 @@ struct StationDetailSheet: View {
 
                 Spacer()
 
-                Button(action: { showItinerary = true }) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrow.triangle.turn.up.right.circle.fill")
-                            .font(.system(size: 13, weight: .bold))
-                        Text("Itinéraire")
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                HStack(spacing: 6) {
+                    Button(action: {
+                        itineraryAsDeparture = true
+                        showItinerary = true
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.up.right.circle.fill")
+                                .font(.system(size: 12, weight: .bold))
+                            Text("En partir")
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                        }
+                        .foregroundColor(.primary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
                     }
-                    .foregroundColor(colorScheme == .dark ? .black : .white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(primaryGreen)
-                    .clipShape(Capsule())
+                    .buttonStyle(.liquidGlassInteractive)
+
+                    Button(action: {
+                        itineraryAsDeparture = false
+                        showItinerary = true
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.triangle.turn.up.right.circle.fill")
+                                .font(.system(size: 12, weight: .bold))
+                            Text("Y aller")
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                        }
+                        .foregroundColor(colorScheme == .dark ? .black : .white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(primaryGreen)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.liquidGlassInteractive)
                 }
-                .buttonStyle(.plain)
             }
 
             let stats = stationDistanceAndWalkTime
@@ -663,7 +636,7 @@ struct StationDetailSheet: View {
                 HStack(spacing: 4) {
                     Image(systemName: "figure.walk")
                         .font(.caption2)
-                        .foregroundColor(FlowTheme.warningMetricColor(for: colorScheme))
+                        .foregroundColor(LiquidGlassTheme.warningMetricColor(for: colorScheme))
                     Text("\(stats.walkTimeMinutes) min")
                         .font(.system(.subheadline, design: .rounded))
                         .foregroundColor(.secondary)
@@ -703,12 +676,14 @@ struct StationDetailSheet: View {
         self.errorMessage = nil
         self.departures = []
         self.mergedStation = station
+        self.recomputeDepartureGroups()
         
         // Vider le buffer WebSocket pour la nouvelle station
         bufferTask?.cancel()
+        wsTimeoutTask?.cancel()
         departureBuffer.removeAll()
         
-        if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" {
+        if isRunningForPreviews {
             loadDepartures(for: station)
             return
         }
@@ -737,7 +712,7 @@ struct StationDetailSheet: View {
     }
 
     private func loadNearbyBusesAndMerge() {
-        if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" || station.mainType == .bus {
+        if isRunningForPreviews || station.mainType == .bus {
             self.mergedStation = station
             return
         }
@@ -801,14 +776,14 @@ struct StationDetailSheet: View {
                 var existingLines = stationLines
                 
                 for entity in filteredEntities {
-                    let id = entity.id
+                    let physicalId = entity.physicalStopId
                     let name = entity.name
                     let lineName = entity.lineName
                     
-                    if !newPlatforms.contains(where: { $0.id == id }) {
+                    if !newPlatforms.contains(where: { $0.id == physicalId && $0.lineName == lineName }) {
                         newPlatforms.append(
                             StopPoint(
-                                id: id,
+                                id: physicalId,
                                 stopAreaId: entity.stopAreaId,
                                 name: name,
                                 coordinate: CLLocationCoordinate2D(latitude: entity.latitude, longitude: entity.longitude),
@@ -823,13 +798,14 @@ struct StationDetailSheet: View {
                     }
                 }
                 
+                let stationPrioritizedLine = self.station.prioritizedLine
                 existingLines.sort { a, b in
-                    let priorityA = a.type.priority
-                    let priorityB = b.type.priority
-                    if priorityA != priorityB {
-                        return priorityA > priorityB
+                    if let prio = stationPrioritizedLine {
+                        let aIsPrio = a.id == prio.id
+                        let bIsPrio = b.id == prio.id
+                        if aIsPrio != bIsPrio { return aIsPrio }
                     }
-                    return a.name.localizedStandardCompare(b.name) == .orderedAscending
+                    return StationLine.isOrderedBeforeForDisplay(a, b)
                 }
                 
                 let merged = MapStation(
@@ -840,13 +816,15 @@ struct StationDetailSheet: View {
                     isHub: true,
                     mainType: stationMainType,
                     lines: existingLines,
-                    city: stationCity
+                    city: stationCity,
+                    prioritizedLine: stationPrioritizedLine
                 )
                 
                 await MainActor.run {
                     if self.station.id == stationId {
                         withAnimation(.easeInOut(duration: 0.25)) {
                             self.mergedStation = merged
+                            self.recomputeDepartureGroups()
                         }
                         
                         // Re-fetch departures if new bus lines were added
@@ -885,6 +863,14 @@ struct StationDetailSheet: View {
         return .bus
     }
 
+    private func recomputeDepartureGroups() {
+        FlowPerformanceProfiler.measure("GroupStationDepartures") {
+            let groups = groupDepartures(departures)
+            cachedLineGroups = groups
+            cachedAvailableModes = getAvailableModes(from: groups)
+        }
+    }
+
     private func groupDepartures(_ departures: [Departure]) -> [LineGroup] {
         var groups: [String: LineGroup] = [:]
         var firstFutureDates: [String: Date] = [:]
@@ -893,6 +879,9 @@ struct StationDetailSheet: View {
             let info = dep.displayInformations
             guard let label = info.label, !label.isEmpty else { continue }
             let type = getTransportType(from: info.commercial_mode)
+            if isFutureExtensionLine(StationLine(name: label, type: type), stationName: currentStation.name) {
+                continue
+            }
             let lineKey = "\(label)-\(type.rawValue)"
             guard let date = DateFormat.navitia.date(from: dep.stopDateTime.departureDateTime) else { continue }
 
@@ -948,6 +937,9 @@ struct StationDetailSheet: View {
         // Add local lines that have no departures at all (to show they serve the station but are out of service)
         let allLocalLines = currentStation.lines
         for localLine in allLocalLines {
+            if isFutureExtensionLine(localLine, stationName: currentStation.name) {
+                continue
+            }
             if localLine.type == .bus {
                 let isReplacement = allLocalLines.contains { other in
                     other.name == localLine.name && other.type != .bus
@@ -1007,7 +999,7 @@ struct StationDetailSheet: View {
                     id: lineKey,
                     label: localLine.name,
                     color: colorHex,
-                    text_color: FlowTheme.contrastHexColor(forHex: colorHex),
+                    text_color: LiquidGlassTheme.contrastHexColor(forHex: colorHex),
                     network: modeName,
                     mode: modeName,
                     directions: [],
@@ -1017,6 +1009,9 @@ struct StationDetailSheet: View {
         }
 
         return groups.values.sorted { a, b in
+            let prioA = isPrioritizedGroup(a)
+            let prioB = isPrioritizedGroup(b)
+            if prioA != prioB { return prioA }
             let priorityA = modePriority(a.mode)
             let priorityB = modePriority(b.mode)
             if priorityA != priorityB { return priorityA < priorityB }
@@ -1028,10 +1023,135 @@ struct StationDetailSheet: View {
         }
     }
 
+    private func isPrioritizedGroup(_ group: LineGroup) -> Bool {
+        guard let prio = currentStation.prioritizedLine else { return false }
+        let groupType = getTransportType(from: group.mode)
+        return normalizeLineName(group.label) == normalizeLineName(prio.name) && groupType == prio.type
+    }
+
+    private func isPrioritizedStationLine(_ line: StationLine) -> Bool {
+        guard let prio = currentStation.prioritizedLine else { return false }
+        return normalizeLineName(line.name) == normalizeLineName(prio.name) && line.type == prio.type
+    }
+
+    private func prioritizedCategories() -> [String] {
+        var categories = ["Métro", "RER", "Tramway", "Train", "Bus", "Autre"]
+        guard let prio = currentStation.prioritizedLine else { return categories }
+        let prioCategory: String
+        switch prio.type {
+        case .metro: prioCategory = "Métro"
+        case .rer: prioCategory = "RER"
+        case .tram: prioCategory = "Tramway"
+        case .transilien, .train: prioCategory = "Train"
+        case .bus: prioCategory = "Bus"
+        case .cable: prioCategory = "Autre"
+        }
+        if let idx = categories.firstIndex(of: prioCategory) {
+            categories.remove(at: idx)
+            categories.insert(prioCategory, at: 0)
+        }
+        return categories
+    }
+
+    private func isFutureExtensionLine(_ line: StationLine, stationName: String) -> Bool {
+        if line.type == .metro && ["15", "16", "17", "18"].contains(line.name) {
+            return true
+        }
+        if line.type == .rer && line.name == "E" {
+            let lower = stationName.lowercased()
+                .folding(options: .diacriticInsensitive, locale: .current)
+            let eoleWestKeywords = [
+                "houilles", "poissy", "villennes", "vernouillet",
+                "mureaux", "aubergenville", "epone", "mantes"
+            ]
+            return eoleWestKeywords.contains(where: { lower.contains($0) })
+        }
+        if line.type == .tram && ["T1", "T4", "T7", "T8", "T11", "T13"].contains(line.name) {
+            return currentStation.platforms.contains(where: { $0.id.hasPrefix("PROJ_\(line.name)_") })
+        }
+        return false
+    }
+
+    @ViewBuilder
+    private func gpeLinesSection(gpeLines: [StationLine]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            let hasOnlyGPE = gpeLines.allSatisfy { $0.type == .metro && ["15", "16", "17", "18"].contains($0.name) }
+            Text(hasOnlyGPE ? "GRAND PARIS EXPRESS (EN CONSTRUCTION)" : "PROLONGEMENTS & GPE (EN CONSTRUCTION)")
+                .font(.system(.caption, design: .rounded))
+                .fontWeight(.bold)
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.top, 14)
+
+            ForEach(gpeLines) { gpeLine in
+                LiquidGlassCard(cornerRadius: 18, padding: 14) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 10) {
+                            if AssetPresenceCache.exists(gpeLine.assetName) {
+                                Image(gpeLine.assetName)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 36, height: 36)
+                            } else {
+                                Circle()
+                                    .fill(resolveLineColor(gpeLine.name, type: .metro))
+                                    .frame(width: 30, height: 30)
+                                    .overlay(
+                                        Text(gpeLine.name)
+                                            .font(.subheadline)
+                                            .bold()
+                                            .foregroundColor(.white)
+                                    )
+                            }
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(gpeLine.type == .rer ? "RER \(gpeLine.name) — Prolongement Ouest" : (gpeLine.type == .tram ? "Tramway \(gpeLine.name) — Prolongement" : "Métro Ligne \(gpeLine.name)"))
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.primary)
+                                Text(gpeLine.type == .metro ? "Société des Grands Projets" : "Île-de-France Mobilités")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                        }
+
+                        // Delivery Date Box
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Date de livraison estimée")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+
+                                Text(getGPEDeliveryDate(lineName: gpeLine.name, stationName: currentStation.name))
+                                    .font(.subheadline)
+                                    .bold()
+                                    .foregroundColor(.blue)
+                            }
+                            Spacer()
+                            Image(systemName: "calendar")
+                                .font(.title3)
+                                .foregroundColor(.blue)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.05))
+                        )
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
     private func loadDepartures(for targetStation: MapStation? = nil, force: Bool = false) {
         let activeStation = targetStation ?? currentStation
         
-        if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" {
+        if isRunningForPreviews {
             let nowStr = DateFormat.navitia.string(from: Date())
             let minutesLater = DateFormat.navitia.string(from: Date().addingTimeInterval(300))
             let tenMinutesLater = DateFormat.navitia.string(from: Date().addingTimeInterval(600))
@@ -1079,6 +1199,7 @@ struct StationDetailSheet: View {
             ]
             self.departures = mockDepartures
             self.isLoading = false
+            self.recomputeDepartureGroups()
             return
         }
 
@@ -1117,7 +1238,7 @@ struct StationDetailSheet: View {
             }
         }
         
-        print("🚏 Station: \(activeStation.name)")
+        print("🏪 Station: \(activeStation.name)")
         print("📡 Constructed Query IDs: \(queryIds)")
         
         if queryIds.isEmpty {
@@ -1144,6 +1265,19 @@ struct StationDetailSheet: View {
         if FlowServerService.shared.isEnabled && FlowServerService.shared.isConnected {
             print("📡 WebSocket connectée : Souscription aux horaires temps réel pour \(limitedIds.count) IDs")
             FlowServerService.shared.sendSubscribeStation(stopIds: limitedIds)
+            wsTimeoutTask?.cancel()
+            wsTimeoutTask = Task {
+                try? await Task.sleep(for: .seconds(3))
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    if self.isLoading {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            self.isLoading = false
+                            self.recomputeDepartureGroups()
+                        }
+                    }
+                }
+            }
             return
         }
         
@@ -1175,6 +1309,7 @@ struct StationDetailSheet: View {
                 },
                 receiveValue: { allDepartures in
                     self.departures = allDepartures
+                    self.recomputeDepartureGroups()
                     print("✅ Received \(allDepartures.count) departures")
                 })
     }
@@ -1201,31 +1336,56 @@ struct StationDetailSheet: View {
 
         let departuresToUse = Array(nextDepartures.prefix(2))
 
-        // Optimisation :
-        // 1. Filtrer les quais qui correspondent à la ligne sélectionnée
-        // 2. Utiliser les stop_area_id si disponibles (1 requête au lieu de N)
-        // 3. Dédoupliquer
-        let relevantPlatforms = currentStation.platforms.filter { $0.lineName == lineName }
+        // 1. Collecter des identifiants d'arrêts robustes pour cette ligne
+        var targetStopIds = Set<String>()
         
-        let optimizedIds: Set<String> = Set(relevantPlatforms.compactMap { platform in
-            // Fallback sur stop_point si le stopAreaId contient la lettre "C" (non supportée par l'API pour les départs)
+        // a) Plateformes correspondant à la ligne
+        for platform in currentStation.platforms {
+            let lineMatches = platform.lineName.isEmpty ||
+                              platform.lineName.lowercased() == lineName.lowercased() ||
+                              lineName.lowercased().contains(platform.lineName.lowercased()) ||
+                              platform.lineName.lowercased().contains(lineName.lowercased())
+            guard lineMatches else { continue }
+
             if !platform.stopAreaId.isEmpty && !platform.stopAreaId.contains("IDFM:C") && !platform.stopAreaId.contains(":C") {
-                return "stop_area:\(platform.stopAreaId)"
-            } else {
-                let id = platform.id
-                if !id.contains("stop_point") {
-                    return "stop_point:\(id)"
-                }
-                return id
+                let id = platform.stopAreaId.contains("stop_area:") ? platform.stopAreaId : "stop_area:\(platform.stopAreaId)"
+                targetStopIds.insert(id)
+            } else if platform.id.contains("IDFM:") {
+                let id = platform.id.contains("stop_point:") ? platform.id : "stop_point:\(platform.id)"
+                targetStopIds.insert(id)
             }
-        })
+        }
+
+        // b) Points d'arrêt physiques réels issus des départs chargés
+        for dep in departures {
+            let info = dep.displayInformations
+            let label = info.label ?? info.code ?? ""
+            if label.lowercased() == lineName.lowercased() || label.replacingOccurrences(of: "T", with: "").lowercased() == lineName.replacingOccurrences(of: "T", with: "").lowercased(),
+               let spId = dep.stopDateTime.stopPoint?.id, !spId.isEmpty {
+                let cleanSpId = spId.contains("stop_point:") ? spId : "stop_point:\(spId)"
+                targetStopIds.insert(cleanSpId)
+            }
+        }
+
+        // c) Fallback : si targetStopIds est vide, utiliser les stop IDs valides de la station
+        if targetStopIds.isEmpty {
+            for platform in currentStation.platforms {
+                if !platform.stopAreaId.isEmpty && !platform.stopAreaId.contains("IDFM:C") && !platform.stopAreaId.contains(":C") {
+                    let id = platform.stopAreaId.contains("stop_area:") ? platform.stopAreaId : "stop_area:\(platform.stopAreaId)"
+                    targetStopIds.insert(id)
+                } else if platform.id.contains("IDFM:") {
+                    let id = platform.id.contains("stop_point:") ? platform.id : "stop_point:\(platform.id)"
+                    targetStopIds.insert(id)
+                }
+            }
+        }
 
         LiveActivityManager.shared.startLiveActivity(
             stationName: currentStation.name,
             lineName: lineName,
             direction: direction,
             nextDepartures: departuresToUse,
-            stopIds: Array(optimizedIds),
+            stopIds: Array(targetStopIds),
             lineColor: lineColor,
             textColor: textColor
         )
@@ -1233,10 +1393,10 @@ struct StationDetailSheet: View {
 
     private func modePriority(_ mode: String?) -> Int {
         guard let m = mode?.lowercased() else { return 99 }
-        if m.contains("metro") || m.contains("métro") { return 0 }
-        if m.contains("rer") { return 1 }
-        if m.contains("train") || m.contains("transilien") { return 2 }
-        if m.contains("tram") { return 3 }
+        if m.contains("tram") { return 0 }
+        if m.contains("metro") || m.contains("métro") { return 1 }
+        if m.contains("rer") || m.contains("train") || m.contains("transilien") { return 2 }
+        if m.contains("cable") || m.contains("câble") { return 3 }
         if m.contains("bus") { return 4 }
         return 5
     }
@@ -1252,12 +1412,15 @@ struct StationDetailSheet: View {
     }
 
     private func compareLineLabels(_ a: String, _ b: String) -> Bool {
-        if let numA = Int(a), let numB = Int(b) {
-            return numA < numB
-        }
-        if Int(a) != nil { return true }
-        if Int(b) != nil { return false }
-        return a.localizedStandardCompare(b) == .orderedAscending
+        let cleanA = a.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanB = b.trimmingCharacters(in: .whitespacesAndNewlines)
+        let keyA = (cleanA.uppercased().hasPrefix("T") && cleanA.count > 1 && cleanA.dropFirst().first?.isNumber == true)
+            ? String(cleanA.dropFirst())
+            : cleanA
+        let keyB = (cleanB.uppercased().hasPrefix("T") && cleanB.count > 1 && cleanB.dropFirst().first?.isNumber == true)
+            ? String(cleanB.dropFirst())
+            : cleanB
+        return keyA.localizedStandardCompare(keyB) == .orderedAscending
     }
 
     private func getAvailableModes(from groups: [LineGroup]) -> [String] {
@@ -1278,9 +1441,9 @@ struct StationDetailSheet: View {
             return mode.capitalized
         })
         let orderPriority: [String: Int] = [
-            "métro": 0,
-            "rer": 1,
-            "tramway": 2,
+            "tramway": 0,
+            "métro": 1,
+            "rer": 2,
             "train": 3,
             "bus": 4
         ]
@@ -1302,26 +1465,47 @@ struct StationDetailSheet: View {
     private static let lateStations: [String] = ["Chelles", "Noisy"]
 
     private func getGPEDeliveryDate(lineName: String, stationName: String) -> String {
+        if lineName == "E" {
+            return "Février 2027"
+        }
+        if lineName == "T1" {
+            return "Horizon 2028 – 2032"
+        }
+        if lineName == "T4" {
+            return "À confirmer (Études)"
+        }
+        if lineName == "T7" {
+            return "Fin 2031"
+        }
+        if lineName == "T8" {
+            return "Mi-2031"
+        }
+        if lineName == "T11" {
+            return "Horizon 2038"
+        }
+        if lineName == "T13" {
+            return "Fin 2028"
+        }
         switch lineName {
         case "15":
             if Self.sudStations.contains(where: { stationName.contains($0) }) {
-                return "Avril 2027 (Ligne 15 Sud)"
+                return "Automne 2027 (Ligne 15 Sud)"
             } else {
                 return "Horizon 2031 (Ligne 15 Est/Ouest)"
             }
         case "16":
             if Self.lateStations.contains(where: { stationName.contains($0) }) {
-                return "Horizon 2028"
+                return "Horizon 2029 - 2030"
             } else {
-                return "Horizon 2027"
+                return "Horizon 2028"
             }
         case "17":
             if stationName.contains("Mesnil") {
                 return "Horizon 2030"
             } else if stationName.contains("Expositions") || stationName.contains("Roissy") || stationName.contains("Charles de Gaulle") {
-                return "Horizon 2028"
+                return "Horizon 2029 - 2030"
             } else {
-                return "Horizon 2027"
+                return "Horizon 2028"
             }
         case "18":
             if stationName.contains("Versailles") || stationName.contains("Saint-Quentin") || stationName.contains("Guyancourt") || stationName.contains("Satory") {
@@ -1329,14 +1513,13 @@ struct StationDetailSheet: View {
             } else if stationName.contains("Orly") || stationName.contains("Antonypole") {
                 return "Horizon 2027"
             } else {
-                return "Octobre 2026"
+                return "Fin 2026 / Début 2027"
             }
         default:
             return "Mise en service prochaine"
         }
     }
 }
-
 // MARK: - Sub-view extraite pour éviter les timeouts du compilateur Swift
 private struct LineGroupRowSheet: View {
     // Types locaux miroirs de StationDetailSheet
@@ -1351,32 +1534,26 @@ private struct LineGroupRowSheet: View {
     @Environment(\.colorScheme) var colorScheme
     @ObservedObject var favoritesService = FavoritesService.shared
 
-    private var cardBackground: Color {
-        colorScheme == .dark ? Color.white.opacity(0.08) : Color(uiColor: .secondarySystemBackground)
-    }
 
-    private var cardBorder: Color {
-        colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)
-    }
 
     private var timeColor: Color {
         colorScheme == .dark ? Color(hex: "30D158") : Color(hex: "008543")
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // En-tête : badge ligne + réseau
-            lineHeader
-            
-            // Contenu
-            if let resume = group.resumeTime {
-                nightServiceView(resume: resume)
-            } else {
-                directionsView
+        LiquidGlassCard(cornerRadius: 18, padding: 14) {
+            VStack(alignment: .leading, spacing: 12) {
+                // En-tête : badge ligne + réseau
+                lineHeader
+                
+                // Contenu
+                if let resume = group.resumeTime {
+                    nightServiceView(resume: resume)
+                } else {
+                    directionsView
+                }
             }
         }
-        .padding(14)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .padding(.horizontal)
         .padding(.vertical, 4)
     }
@@ -1384,7 +1561,7 @@ private struct LineGroupRowSheet: View {
     private var lineHeader: some View {
         HStack(spacing: 10) {
             let assetName = TransportType.getAssetName(mode: group.mode, label: group.label)
-            if !assetName.isEmpty, UIImage(named: assetName) != nil {
+            if AssetPresenceCache.exists(assetName) {
                 Image(assetName)
                     .resizable()
                     .scaledToFit()
@@ -1415,28 +1592,26 @@ private struct LineGroupRowSheet: View {
             
             Spacer()
             
+            let lineType = mapModeToType(group.mode)
             HStack(spacing: 8) {
-                if group.mode?.lowercased().contains("bus") == true {
-                    Button(action: {
-                        locateBusStops()
-                    }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "mappin.and.ellipse")
-                                .font(.system(size: 13, weight: .bold))
-                            Text("Localiser")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                        }
-                        .foregroundColor(.blue)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.06))
-                        .clipShape(Capsule())
+                Button(action: {
+                    showFullLineOnMap(lineType: lineType)
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "point.topleft.down.to.point.bottomright.curvepath.fill")
+                            .font(.system(size: 12, weight: .bold))
+                        Text("Voir la ligne")
+                            .font(.caption)
+                            .fontWeight(.semibold)
                     }
-                    .buttonStyle(.plain)
+                    .foregroundColor(.blue)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.06))
+                    .clipShape(Capsule())
                 }
-                
-                let lineType = mapModeToType(group.mode)
+                .buttonStyle(.liquidGlassInteractive)
+
                 let isFav = favoritesService.isFavoriteLine(lineId: group.label, type: lineType, stationId: station.id)
                 Button(action: {
                     favoritesService.toggleFavoriteLine(
@@ -1448,13 +1623,13 @@ private struct LineGroupRowSheet: View {
                         textColor: group.text_color
                     )
                 }) {
-                    Image(systemName: isFav ? "heart.fill" : "heart")
-                        .foregroundColor(.red)
+                    Image(systemName: isFav ? "star.fill" : "star")
+                        .foregroundColor(isFav ? .yellow : .primary)
                         .font(.system(size: 14, weight: .bold))
                         .frame(width: 32, height: 32)
+                        .background(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.06), in: Circle())
                 }
-                .buttonStyle(.plain)
-                .glassEffect(.regular.interactive(), in: .circle)
+                .buttonStyle(.liquidGlassInteractive)
             }
         }
     }
@@ -1469,66 +1644,22 @@ private struct LineGroupRowSheet: View {
         return .bus
     }
 
-    private func locateBusStops() {
-        if let selectedDetent = selectedDetent {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                selectedDetent.wrappedValue = .fraction(0.22)
+    private func showFullLineOnMap(lineType: TransportType) {
+        let lineName = group.label
+        let preferredColor = group.color.isEmpty ? nil : Color(hex: group.color)
+
+        Task {
+            guard let preview = await MapDataService.shared.buildFocusedLinePreview(
+                lineName: lineName,
+                type: lineType,
+                preferredColor: preferredColor
+            ) else {
+                return
             }
-        }
-        
-        let busPlatforms = station.platforms.filter { $0.lineName == group.label && $0.type == .bus }
-        guard !busPlatforms.isEmpty else {
-            print("⚠️ No physical bus stops found for line \(group.label)")
-            return
-        }
-        
-        // Build map of stopPoint ID -> Directions from departures
-        var stopDirections: [String: Set<String>] = [:]
-        for dep in departures {
-            let info = dep.displayInformations
-            let label = info.label ?? info.code ?? ""
-            if label == group.label,
-               let stopPointId = dep.stopDateTime.stopPoint?.id,
-               let direction = info.direction {
-                let cleanId = stopPointId.replacingOccurrences(of: "stop_point:", with: "")
-                stopDirections[cleanId, default: []].insert(direction)
+
+            await MainActor.run {
+                NavigationCoordinator.shared.showLinePreview(preview)
             }
-        }
-        
-        let mapView = SharedMapView.main.mapView
-        let oldAnnotations = mapView.annotations.filter { $0 is BusStopTempAnnotation }
-        mapView.removeAnnotations(oldAnnotations)
-        
-        var annotationsToAdd: [BusStopTempAnnotation] = []
-        for platform in busPlatforms {
-            let cleanPlatformId = platform.id.replacingOccurrences(of: "stop_point:", with: "")
-            let directions = stopDirections[cleanPlatformId] ?? []
-            
-            let subtitleStr: String
-            if !directions.isEmpty {
-                subtitleStr = "Direction: " + directions.joined(separator: " / ")
-            } else {
-                subtitleStr = "Ligne \(group.label)"
-            }
-            
-            let anno = BusStopTempAnnotation(
-                coordinate: platform.coordinate,
-                title: platform.name,
-                subtitle: subtitleStr,
-                lineColor: UIColor(Color(hex: group.color)),
-                lineName: group.label
-            )
-            annotationsToAdd.append(anno)
-        }
-        
-        mapView.addAnnotations(annotationsToAdd)
-        
-        if let first = busPlatforms.first {
-            let region = MKCoordinateRegion(
-                center: first.coordinate,
-                span: MKCoordinateSpan(latitudeDelta: 0.002, longitudeDelta: 0.002)
-            )
-            mapView.setRegion(region, animated: true)
         }
     }
 
@@ -1553,11 +1684,9 @@ private struct LineGroupRowSheet: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(cardBorder, lineWidth: 1)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.05))
         )
     }
 
@@ -1578,11 +1707,9 @@ private struct LineGroupRowSheet: View {
                 }
             }
         }
-        .background(cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(cardBorder, lineWidth: 1)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.05))
         )
     }
 
@@ -1595,26 +1722,33 @@ private struct LineGroupRowSheet: View {
                         .foregroundColor(.primary)
                         .lineLimit(2)
                     HStack(spacing: 4) {
+                        let allLongWait = direction.times.allSatisfy { time in
+                            let parts = time.split(separator: " ", maxSplits: 1)
+                            let val = Int(String(parts.first ?? "0")) ?? 0
+                            return val > 59
+                        }
                         ForEach(Array(direction.times.enumerated()), id: \.offset) { tIndex, time in
                             let parts = time.split(separator: " ", maxSplits: 1)
                             let minuteValue = Int(String(parts.first ?? "0")) ?? 0
                             let suffix = parts.count > 1 ? " \(parts.last!)" : ""
+                            let isLongWait = minuteValue > 59
+                            let displayStr = isLongWait ? (minuteValue % 60 == 0 ? "dans \(minuteValue / 60)h" : "dans \(minuteValue / 60)h\(String(format: "%02d", minuteValue % 60))") : "\(minuteValue)\(suffix)"
+                            let currentColor = isLongWait ? Color.secondary : timeColor
                             
                             HStack(spacing: 0) {
-                                Text("\(minuteValue)")
+                                Text(displayStr)
                                     .contentTransition(.numericText())
                                     .animation(.spring(duration: 0.2), value: minuteValue)
-                                Text(suffix)
                                 if tIndex < direction.times.count - 1 {
                                     Text(", ")
                                 }
                             }
                             .font(.subheadline).bold()
-                            .foregroundColor(timeColor)
+                            .foregroundColor(currentColor)
                         }
                         Image(systemName: "wifi")
                             .font(.caption2)
-                            .foregroundColor(timeColor)
+                            .foregroundColor(allLongWait ? Color.secondary.opacity(0.6) : timeColor)
                             .padding(.leading, 4)
                     }
                 }
@@ -1636,7 +1770,7 @@ private struct LineGroupRowSheet: View {
                         .foregroundColor(isActive ? timeColor : .pink)
                         .frame(width: 44, height: 44)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.liquidGlassInteractive)
                 .glassEffect(.regular.interactive(), in: .circle)
             }
             .padding(.horizontal, 14)
@@ -1673,7 +1807,8 @@ private struct LineGroupRowSheet: View {
                 StationLine(name: "15", type: .metro)
             ],
             city: "Paris"
-        )
+        ),
+        isPreview: true
     )
     .preferredColorScheme(.light)
 }
@@ -1703,7 +1838,8 @@ private struct LineGroupRowSheet: View {
                 StationLine(name: "15", type: .metro)
             ],
             city: "Paris"
-        )
+        ),
+        isPreview: true
     )
     .preferredColorScheme(.dark)
 }
@@ -1805,3 +1941,104 @@ private struct MetricValueView: View {
         }
     }
 }
+
+private struct ShimmerEffect: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var phase: CGFloat = -0.6
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0.0),
+                        .init(color: Color.white.opacity(colorScheme == .dark ? 0.18 : 0.65), location: 0.5),
+                        .init(color: .clear, location: 1.0)
+                    ],
+                    startPoint: UnitPoint(x: phase - 0.45, y: 0.5),
+                    endPoint: UnitPoint(x: phase + 0.45, y: 0.5)
+                )
+                .mask(content)
+                .allowsHitTesting(false)
+            }
+            .onAppear {
+                withAnimation(.linear(duration: 1.35).repeatForever(autoreverses: false)) {
+                    phase = 1.6
+                }
+            }
+    }
+}
+
+private extension View {
+    func shimmer() -> some View {
+        modifier(ShimmerEffect())
+    }
+}
+
+private struct DeparturesSkeletonView: View {
+    let cardCount: Int
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var placeholderColor: Color {
+        Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.08)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(placeholderColor)
+                .frame(width: 72, height: 12)
+                .padding(.horizontal, 20)
+                .padding(.top, 14)
+
+            ForEach(0..<cardCount, id: \.self) { _ in
+                LiquidGlassCard(cornerRadius: 18, padding: 14) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack(spacing: 10) {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(placeholderColor)
+                                .frame(width: 36, height: 32)
+
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .fill(placeholderColor)
+                                .frame(width: 64, height: 14)
+
+                            Spacer()
+
+                            Capsule()
+                                .fill(placeholderColor)
+                                .frame(width: 96, height: 26)
+
+                            Circle()
+                                .fill(placeholderColor)
+                                .frame(width: 28, height: 28)
+                        }
+
+                        ForEach(0..<2, id: \.self) { _ in
+                            HStack(spacing: 12) {
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .fill(placeholderColor)
+                                    .frame(width: 140, height: 14)
+
+                                Spacer()
+
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(placeholderColor)
+                                    .frame(width: 46, height: 24)
+
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(placeholderColor)
+                                    .frame(width: 46, height: 24)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 4)
+            }
+        }
+        .shimmer()
+    }
+}
+
+

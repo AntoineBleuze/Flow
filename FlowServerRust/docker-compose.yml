@@ -1,0 +1,38 @@
+services:
+  flow-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: flow-server
+    restart: always
+    mem_limit: 512m
+    ports:
+      - "3001:3001"
+    expose:
+      - "3001"
+    environment:
+      - PORT=3001
+      - IDFM_API_KEY=${IDFM_API_KEY}
+    env_file:
+      - .env
+    volumes:
+      - ./cache:/app/cache
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: flow-caddy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - flow-server
+
+volumes:
+  caddy_data:
+  caddy_config:

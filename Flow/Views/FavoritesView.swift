@@ -47,12 +47,17 @@ struct FavoritesView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
+            VStack(spacing: 0) {
+                LiquidGlassSheetHeader(
+                    title: "Favoris",
+                    subtitle: favoriteEntries.isEmpty ? nil : "\(favoriteEntries.count) ligne\(favoriteEntries.count > 1 ? "s" : "") suivie\(favoriteEntries.count > 1 ? "s" : "")"
+                )
+
                 if favoriteEntries.isEmpty {
                     emptyStateView
                 } else {
                     ScrollView {
-                        LazyVStack(spacing: 14) {
+                        LazyVStack(spacing: 12) {
                             ForEach(favoriteEntries) { entry in
                                 NavigationLink(destination: TrafficDetailView(line: getTransportLine(for: entry))) {
                                     FavoriteLineRow(entry: entry)
@@ -61,42 +66,31 @@ struct FavoritesView: View {
                             }
                         }
                         .padding(.horizontal, 16)
-                        .padding(.vertical, 14)
+                        .padding(.top, 8)
+                        .padding(.bottom, 96)
                         .frame(maxWidth: horizontalSizeClass == .regular ? 700 : .infinity)
                         .frame(maxWidth: .infinity)
                     }
+                    .scrollContentBackground(.hidden)
                 }
             }
-            .flowAdaptiveBackground()
-            .navigationTitle("Favoris")
-            .navigationBarTitleDisplayMode(.large)
+            .toolbar(.hidden, for: .navigationBar)
+            .liquidGlassBackground()
         }
         .toolbarBackground(.hidden, for: .navigationBar)
     }
 
     private var emptyStateView: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "star.slash.fill")
-                .font(.system(size: 54))
-                .foregroundStyle(.secondary)
-                .symbolEffect(.pulse.byLayer, options: .repeating)
-            
-            Text("Aucun favori")
-                .font(.system(.title3, design: .rounded))
-                .fontWeight(.bold)
-                .foregroundColor(.primary)
-            
-            Text("Ajoutez des lignes à vos favoris en appuyant sur l'icône de cœur dans la fiche détaillée d'une station.")
-                .font(.subheadline)
-                .multilineTextAlignment(.center)
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 16)
+        ScrollView {
+            LiquidGlassEmptyState(
+                icon: "star.slash.fill",
+                title: "Aucun favori",
+                subtitle: "Ajoutez des lignes à vos favoris en appuyant sur l'icône d'étoile ou de cœur dans la fiche détaillée d'une station."
+            )
+            .padding(.top, 28)
+            .padding(.bottom, 100)
         }
-        .frame(maxWidth: .infinity)
-        .padding(24)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .padding(.horizontal, 16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .scrollContentBackground(.hidden)
     }
 }
 
@@ -180,9 +174,9 @@ struct FavoriteLineRow: View {
                 }) {
                     Image(systemName: "heart.fill")
                         .foregroundColor(.red)
-                        .font(.system(size: 15, weight: .bold))
-                        .frame(width: 36, height: 36)
-                        .glassEffect(.regular.interactive(), in: .circle)
+                        .font(.system(size: 14, weight: .bold))
+                        .frame(width: 34, height: 34)
+                        .glassEffect(.regular.interactive(), in: Circle())
                 }
                 .buttonStyle(.plain)
                 
@@ -230,7 +224,7 @@ struct FavoriteLineRow: View {
                                 HStack(spacing: 6) {
                                     // Live pulsing indicator
                                     Circle()
-                                        .fill(FlowTheme.liveGreen(for: colorScheme))
+                                        .fill(LiquidGlassTheme.liveGreen(for: colorScheme))
                                         .frame(width: 6, height: 6)
                                     
                                     HStack(spacing: 4) {
@@ -246,7 +240,7 @@ struct FavoriteLineRow: View {
                                             }
                                             .font(.system(.subheadline, design: .rounded))
                                             .fontWeight(.bold)
-                                            .foregroundColor(FlowTheme.liveGreen(for: colorScheme))
+                                            .foregroundColor(LiquidGlassTheme.liveGreen(for: colorScheme))
                                         }
                                     }
                                 }
@@ -256,9 +250,12 @@ struct FavoriteLineRow: View {
                 }
             }
         }
-        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.05))
+        )
         .onAppear {
             startFetching()
         }

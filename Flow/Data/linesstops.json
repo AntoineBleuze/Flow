@@ -3391,142 +3391,122 @@
     {
       "id": "RER C",
       "type": "rer",
-      "couleur": "#FFBE00",
+      "couleur": "#FFCE00",
       "structure": "complex",
-      "branches_nord": [
+      "tronc_central": [
         {
-          "id": "Pontoise",
-          "stations": [
-            {
-              "nom": "Pontoise",
-              "correspondances": [
-                "H",
-                "J"
-              ]
-            },
-            {
-              "nom": "St-Ouen-l'Aumône-Liesse",
-              "correspondances": []
-            },
-            {
-              "nom": "St-Ouen-l'Aumône",
-              "correspondances": [
-                "H"
-              ]
-            },
-            {
-              "nom": "Pierrelaye",
-              "correspondances": []
-            },
-            {
-              "nom": "Montigny-Beauchamp",
-              "correspondances": []
-            },
-            {
-              "nom": "Franconville-Le Plessis-Bouchard",
-              "correspondances": []
-            },
-            {
-              "nom": "Cernay",
-              "correspondances": []
-            },
-            {
-              "nom": "Ermont-Eaubonne",
-              "correspondances": [
-                "H",
-                "J"
-              ]
-            },
-            {
-              "nom": "St-Gratien",
-              "correspondances": []
-            },
-            {
-              "nom": "Épinay-sur-Seine",
-              "correspondances": [
-                "T8",
-                "T11"
-              ]
-            },
-            {
-              "nom": "Gennevilliers",
-              "correspondances": [
-                "T1"
-              ]
-            },
-            {
-              "nom": "Les Grésillons",
-              "correspondances": [
-                "M15"
-              ]
-            },
-            {
-              "nom": "Saint-Ouen",
-              "correspondances": [
-                "M14"
-              ]
-            },
-            {
-              "nom": "Porte de Clichy",
-              "correspondances": [
-                "M13",
-                "M14",
-                "T3b"
-              ]
-            },
-            {
-              "nom": "Pereire-Levallois",
-              "correspondances": [
-                "M3"
-              ]
-            },
-            {
-              "nom": "Neuilly-Porte Maillot",
-              "correspondances": [
-                "M1",
-                "RER E"
-              ]
-            },
-            {
-              "nom": "Avenue Foch",
-              "correspondances": [
-                "M2"
-              ]
-            },
-            {
-              "nom": "Avenue Henri Martin",
-              "correspondances": [
-                "M9"
-              ]
-            },
-            {
-              "nom": "Boulainvilliers",
-              "correspondances": []
-            }
+          "nom": "Pontoise",
+          "correspondances": [
+            "H",
+            "J"
           ]
         },
         {
-          "id": "Versailles-Rive Gauche",
-          "stations": [
-            {
-              "nom": "Versailles-Château Rive Gauche",
-              "correspondances": []
-            },
-            {
-              "nom": "Porchefontaine",
-              "correspondances": []
-            },
-            {
-              "nom": "Viroflay-Rive Gauche",
-              "correspondances": [
-                "N",
-                "T6"
-              ]
-            }
+          "nom": "St-Ouen-l'Aumône-Liesse",
+          "correspondances": []
+        },
+        {
+          "nom": "St-Ouen-l'Aumône",
+          "correspondances": [
+            "H"
           ]
-        }
-      ],
-      "tronc_central": [
+        },
+        {
+          "nom": "Pierrelaye",
+          "correspondances": []
+        },
+        {
+          "nom": "Montigny-Beauchamp",
+          "correspondances": []
+        },
+        {
+          "nom": "Franconville-Le Plessis-Bouchard",
+          "correspondances": []
+        },
+        {
+          "nom": "Cernay",
+          "correspondances": []
+        },
+        {
+          "nom": "Ermont-Eaubonne",
+          "correspondances": [
+            "H",
+            "J"
+          ]
+        },
+        {
+          "nom": "St-Gratien",
+          "correspondances": []
+        },
+        {
+          "nom": "Épinay-sur-Seine",
+          "correspondances": [
+            "T8",
+            "T11"
+          ]
+        },
+        {
+          "nom": "Gennevilliers",
+          "correspondances": [
+            "T1"
+          ]
+        },
+        {
+          "nom": "Les Grésillons",
+          "correspondances": [
+            "M15"
+          ]
+        },
+        {
+          "nom": "Saint-Ouen",
+          "correspondances": [
+            "M14"
+          ]
+        },
+        {
+          "nom": "Porte de Clichy",
+          "correspondances": [
+            "M13",
+            "M14",
+            "T3b"
+          ]
+        },
+        {
+          "nom": "Pereire-Levallois",
+          "correspondances": [
+            "M3"
+          ]
+        },
+        {
+          "nom": "Neuilly-Porte Maillot",
+          "correspondances": [
+            "M1",
+            "RER E",
+            "T3b"
+          ]
+        },
+        {
+          "nom": "Avenue Foch",
+          "correspondances": [
+            "M2"
+          ]
+        },
+        {
+          "nom": "Avenue Henri Martin",
+          "correspondances": [
+            "M9"
+          ]
+        },
+        {
+          "nom": "Boulainvilliers",
+          "correspondances": [
+            "M9"
+          ]
+        },
+        {
+          "nom": "Avenue du Pdt Kennedy",
+          "correspondances": []
+        },
         {
           "nom": "Champ de Mars-Tour Eiffel",
           "correspondances": [
@@ -3556,6 +3536,7 @@
           "nom": "Saint-Michel Notre-Dame",
           "correspondances": [
             "M4",
+            "M10",
             "RER B"
           ]
         },
@@ -3584,46 +3565,230 @@
         {
           "nom": "Les Ardoines",
           "correspondances": [
-            "M15"
+            "M15",
+            "T9"
           ]
         },
         {
           "nom": "Choisy-le-Roi",
+          "correspondances": [
+            "T9"
+          ]
+        },
+        {
+          "nom": "Villeneuve-le-Roi",
+          "correspondances": []
+        },
+        {
+          "nom": "Ablon",
+          "correspondances": []
+        },
+        {
+          "nom": "Athis-Mons",
+          "correspondances": []
+        },
+        {
+          "nom": "Juvisy",
+          "correspondances": [
+            "RER D"
+          ]
+        },
+        {
+          "nom": "Savigny-sur-Orge",
+          "correspondances": []
+        },
+        {
+          "nom": "Épinay-sur-Orge",
+          "correspondances": [
+            "T12"
+          ]
+        },
+        {
+          "nom": "Ste-Geneviève-des-Bois",
+          "correspondances": []
+        },
+        {
+          "nom": "St-Michel-sur-Orge",
+          "correspondances": []
+        },
+        {
+          "nom": "Brétigny",
+          "correspondances": []
+        },
+        {
+          "nom": "Marolles-en-Hurepoix",
+          "correspondances": []
+        },
+        {
+          "nom": "Bouray",
+          "correspondances": []
+        },
+        {
+          "nom": "Lardy",
+          "correspondances": []
+        },
+        {
+          "nom": "Chamarande",
+          "correspondances": []
+        },
+        {
+          "nom": "Étréchy",
+          "correspondances": []
+        },
+        {
+          "nom": "Étampes",
+          "correspondances": []
+        },
+        {
+          "nom": "Saint-Martin d'Étampes",
           "correspondances": []
         }
       ],
-      "branches_sud": [
+      "branches": [
         {
-          "id": "Dourdan-Étampes",
+          "id": "Versailles-Château",
+          "junction": "Champ de Mars-Tour Eiffel",
+          "direction": "merge",
+          "row": 1,
           "stations": [
             {
-              "nom": "Juvisy",
+              "nom": "Versailles-Château Rive Gauche",
+              "correspondances": []
+            },
+            {
+              "nom": "Porchefontaine",
+              "correspondances": []
+            },
+            {
+              "nom": "Viroflay-Rive Gauche",
               "correspondances": [
-                "RER D"
+                "N",
+                "T6"
               ]
             },
             {
-              "nom": "Savigny-sur-Orge",
+              "nom": "Chaville-Vélizy",
               "correspondances": []
             },
             {
-              "nom": "Épinay-sur-Orge",
+              "nom": "Meudon-Val Fleury",
               "correspondances": []
             },
             {
-              "nom": "Ste-Geneviève-des-Bois",
+              "nom": "Issy",
               "correspondances": []
             },
             {
-              "nom": "St-Michel-sur-Orge",
+              "nom": "Issy-Val de Seine",
+              "correspondances": [
+                "T2"
+              ]
+            },
+            {
+              "nom": "Pont du Garigliano",
+              "correspondances": [
+                "T3a"
+              ]
+            },
+            {
+              "nom": "Javel",
+              "correspondances": [
+                "M10"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "Saint-Quentin-en-Yvelines",
+          "junction": "Viroflay-Rive Gauche",
+          "direction": "merge",
+          "row": 2,
+          "stations": [
+            {
+              "nom": "Saint-Quentin-en-Yvelines",
+              "correspondances": [
+                "N",
+                "U"
+              ]
+            },
+            {
+              "nom": "Saint-Cyr",
+              "correspondances": [
+                "N",
+                "U",
+                "T13"
+              ]
+            },
+            {
+              "nom": "Versailles-Chantiers",
+              "correspondances": [
+                "N",
+                "U",
+                "V"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "Massy-Palaiseau",
+          "junction": "Choisy-le-Roi",
+          "direction": "fork",
+          "row": 1,
+          "stations": [
+            {
+              "nom": "Les Saules",
               "correspondances": []
             },
             {
-              "nom": "Brétigny",
+              "nom": "Orly-Ville",
               "correspondances": []
             },
             {
-              "nom": "Marolles-en-Hurepoix",
+              "nom": "Pont de Rungis",
+              "correspondances": []
+            },
+            {
+              "nom": "Rungis-La Fraternelle",
+              "correspondances": [
+                "T7"
+              ]
+            },
+            {
+              "nom": "Chemin d'Antony",
+              "correspondances": []
+            },
+            {
+              "nom": "Massy-Verrières",
+              "correspondances": [
+                "RER B"
+              ]
+            },
+            {
+              "nom": "Massy-Palaiseau",
+              "correspondances": [
+                "RER B",
+                "T12",
+                "V"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "Dourdan-la-Forêt",
+          "junction": "Brétigny",
+          "direction": "fork",
+          "row": 2,
+          "stations": [
+            {
+              "nom": "La Norville-St-Germain",
+              "correspondances": []
+            },
+            {
+              "nom": "Arpajon",
+              "correspondances": []
+            },
+            {
+              "nom": "Égly",
               "correspondances": []
             },
             {
@@ -3643,27 +3808,11 @@
               "correspondances": []
             },
             {
-              "nom": "Dourdan-la-Forêt",
-              "correspondances": []
-            },
-            {
               "nom": "Dourdan",
               "correspondances": []
             },
             {
-              "nom": "Lardy",
-              "correspondances": []
-            },
-            {
-              "nom": "Chamarande",
-              "correspondances": []
-            },
-            {
-              "nom": "Étréchy",
-              "correspondances": []
-            },
-            {
-              "nom": "Étampes",
+              "nom": "Dourdan-la-Forêt",
               "correspondances": []
             }
           ]

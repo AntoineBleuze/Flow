@@ -47,7 +47,7 @@ struct DuoExplorePanelView: View {
             .padding(.bottom, 24)
         }
         .safeAreaPadding(.top)
-        .flowAdaptiveBackground()
+        .liquidGlassBackground()
         .onAppear {
             locationManager.requestLocation()
             if mapData.allStations.isEmpty {
@@ -56,7 +56,7 @@ struct DuoExplorePanelView: View {
         }
     }
 
-    // MARK: - Header & AI
+    // MARK: - Header
     private var headerSection: some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 2) {
@@ -72,30 +72,7 @@ struct DuoExplorePanelView: View {
 
             Spacer()
 
-            // Bouton IA Flow Assistant
-            Button(action: {
-                coordinator.showAIAssistant = true
-            }) {
-                HStack(spacing: 5) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [.purple, .blue],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-
-                    Text("IA")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                        .foregroundColor(.primary)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-            }
-            .buttonStyle(.plain)
-            .glassEffect(.regular.interactive(), in: Capsule())
+            AccountAvatarButton(size: 36)
         }
     }
 
@@ -239,7 +216,7 @@ struct DuoExplorePanelView: View {
 
                                     if let stationName = entry.stationName {
                                         Text(stationName)
-                                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                                            .font(.system(size: 12, weight: .medium, design: .rounded))
                                             .foregroundColor(.primary)
                                             .lineLimit(1)
                                     }
@@ -247,8 +224,7 @@ struct DuoExplorePanelView: View {
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
                             }
-                            .buttonStyle(.plain)
-                            .glassEffect(.regular.interactive(), in: Capsule())
+                            .buttonStyle(.liquidGlassInteractive)
                         }
                     }
                 }
@@ -317,6 +293,6 @@ struct DuoStationRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
